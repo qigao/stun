@@ -5,6 +5,7 @@
 #undef group
 
 #include <backends/tui/init.h>
+#include <backends/tui/transcript_window.h>
 #include <flexUI/box.h>
 #include <flexUI/element.h>
 #include <flexUI/widgets/markdown_widget.h>
@@ -825,6 +826,178 @@ spec("FlexUI MarkdownWidget through Tango async transport and cell renderer") {
         tui_app_destroy(app);
         check(tui_transcript_destroy(transcript_state) == TUI_TRANSCRIPT_OK);
         
+    }
+
+    it("recycles bounded transcript slots while invalidating evicted UiHandles") {
+        flexUI::Box box(nullptr);
+        box.set_viewport(320.0f, 160.0f);
+        box.load_css(
+            "#root { display:flex; flex-direction:column; width:320px; "
+            "height:160px; } "
+            "#window { display:flex; flex-direction:column; width:180px; "
+            "height:54px; overflow-y:scroll; } "
+            ".transcript-message { width:180px; flex-shrink:0; } "
+            "#focus { width:80px; height:20px; }");
+        auto* root = box.create("div", "root");
+        auto* viewport = box.create("div", "window");
+        auto* focus = box.create("button", "focus");
+        check(root && viewport && focus);
+        if (!root || !viewport || !focus) return;
+        root->append(viewport);
+        root->append(focus);
+        box.set_root(root);
+        flex::tui_backend::TranscriptWindow window(box, *viewport, 2u);
+        check(window.slot_capacity() == 2u);
+        const std::size_t initial_owned = box.owned_element_count();
+        check(initial_owned <= 6u);
+
+        tui_transcript_t* transcript_state =
+            tui_transcript_create(3u, 4096u, 128u);
+        check(transcript_state != nullptr);
+        if (!transcript_state) return;
+        std::uint64_t next_sequence = 0u;
+        const auto emit = [&](std::uint64_t id, std::uint32_t type,
+                              std::uint64_t generation,
+                              std::string_view payload) {
+            std::array<unsigned char,
+                       sizeof(tui_stream_packet_header_t) + 128u> data{};
+            if (payload.size() > 128u) return TUI_TRANSCRIPT_INVALID;
+            const tui_stream_packet_header_t header{id};
+            std::memcpy(data.data(), &header, sizeof(header));
+            if (!payload.empty())
+                std::memcpy(data.data() + sizeof(header),
+                            payload.data(), payload.size());
+            const tui_async_event_t event{
+                type, generation, ++next_sequence,
+                sizeof(header) + payload.size()
+            };
+            return tui_transcript_apply(
+                transcript_state, &event, data.data(), nullptr);
+        };
+        std::string long_text;
+        for (unsigned i = 0u; i < 14u; ++i)
+            long_text += "message paragraph\n\n";
+        check(long_text.size() <= 4096u);
+
+        // Admission and UI rendering remain independent. Opening/evicting a
+        // C11 stream does not create any new Element or MarkdownWidget.
+        for (std::uint64_t id = 101u; id <= 103u; ++id) {
+            std::uint64_t evicted = 99u;
+            check(tui_transcript_open(transcript_state, id, &evicted) ==
+                  TUI_TRANSCRIPT_OK);
+            check(evicted == 0u);
+            check(emit(id, TUI_STREAM_BEGIN, 1u, {}) ==
+                  TUI_TRANSCRIPT_OK);
+            for (std::size_t offset = 0u; offset < long_text.size();
+                 offset += 64u) {
+                const std::size_t remaining =
+                    std::min<std::size_t>(64u, long_text.size() - offset);
+                check(emit(id, TUI_STREAM_CHUNK, 1u,
+                           std::string_view(long_text.data() + offset,
+                                            remaining)) ==
+                      TUI_TRANSCRIPT_OK);
+            }
+            check(emit(id, TUI_STREAM_END, 1u, {}) ==
+                  TUI_TRANSCRIPT_OK);
+        }
+        using Status = flex::tui_backend::TranscriptWindow::Status;
+        check(window.show(transcript_state, 0u) == Status::Updated);
+        check(window.show(transcript_state, 0u) == Status::Unchanged);
+        check(viewport->child_count() == 2u);
+        check(window.visible_count() == 2u);
+        auto* first_host = window.visible_host(101u);
+        auto* held_host = window.visible_host(102u);
+        check(first_host && held_host);
+        if (!first_host || !held_host) {
+            check(tui_transcript_destroy(transcript_state) ==
+                  TUI_TRANSCRIPT_OK);
+            return;
+        }
+        const auto retired_handle = box.handle_for(*first_host);
+        const auto held_handle = box.handle_for(*held_host);
+        check(box.resolve_handle(retired_handle) == first_host);
+        check(box.resolve_handle(held_handle) == held_host);
+        check(viewport->can_scroll_y());
+        if (!viewport->can_scroll_y()) {
+            check(tui_transcript_destroy(transcript_state) ==
+                  TUI_TRANSCRIPT_OK);
+            return;
+        }
+
+        check(viewport->set_scroll_offset(0.0f, 3.0f));
+        const float away = viewport->scroll_y();
+        box.set_focus(focus);
+        check(box.focused_element() == focus);
+
+        // Window shift keeps message 102 on its exact original host; only
+        // message 101 is reused. Its prior UiHandle must become invalid.
+        check(window.show(transcript_state, 1u) == Status::Updated);
+        check(viewport->child_count() == 2u);
+        check(window.visible_host(101u) == nullptr);
+        check(window.visible_host(102u) == held_host);
+        check(window.visible_host(103u) == first_host);
+        check(box.resolve_handle(retired_handle) == nullptr);
+        check(box.resolve_handle(held_handle) == held_host);
+        check(std::fabs(viewport->scroll_y() - away) < 0.01f);
+        check(box.focused_element() == focus);
+
+        // A settled C11 message may now be evicted. UI handle/slot identity
+        // stays associated with the two still-visible messages until the
+        // caller explicitly changes the presentation window.
+        std::uint64_t evicted = 99u;
+        check(tui_transcript_open(transcript_state, 104u, &evicted) ==
+              TUI_TRANSCRIPT_OK);
+        check(evicted == 101u);
+        check(emit(101u, TUI_STREAM_BEGIN, 999u, {}) ==
+              TUI_TRANSCRIPT_STALE);
+        check(emit(104u, TUI_STREAM_BEGIN, 1u, {}) ==
+              TUI_TRANSCRIPT_OK);
+        check(emit(104u, TUI_STREAM_CHUNK, 1u, "new message\n\n") ==
+              TUI_TRANSCRIPT_OK);
+        check(emit(104u, TUI_STREAM_END, 1u, {}) ==
+              TUI_TRANSCRIPT_OK);
+        check(window.show_from_id(transcript_state, 101u) ==
+              Status::Unchanged);
+        check(window.visible_host(102u) == held_host);
+        check(window.visible_host(103u) == first_host);
+
+        const auto old_102 = box.handle_for(*held_host);
+        // Tail follows the newest two retained messages (103,104), no
+        // reallocation of the fixed host slots.
+        check(window.show_tail(transcript_state) == Status::Updated);
+        check(viewport->child_count() == 2u);
+        check(window.visible_host(102u) == nullptr);
+        check(window.visible_host(103u) == first_host);
+        check(window.visible_host(104u) == held_host);
+        check(box.resolve_handle(old_102) == nullptr);
+        check(box.focused_element() == focus);
+        check(box.owned_element_count() <= initial_owned + 64u);
+
+        // Simulate a longer bounded session. Every explicit admission
+        // recycles only a settled native slot and only two UI host slots.
+        for (std::uint64_t id = 105u; id <= 136u; ++id) {
+            check(tui_transcript_open(transcript_state, id, &evicted) ==
+                  TUI_TRANSCRIPT_OK);
+            check(evicted > 0u);
+            check(emit(id, TUI_STREAM_BEGIN, 1u, {}) ==
+                  TUI_TRANSCRIPT_OK);
+            check(emit(id, TUI_STREAM_CHUNK, 1u, "cycle\n\n") ==
+                  TUI_TRANSCRIPT_OK);
+            check(emit(id, TUI_STREAM_END, 1u, {}) ==
+                  TUI_TRANSCRIPT_OK);
+            check(window.show_tail(transcript_state) == Status::Updated);
+            check(window.visible_count() == 2u);
+            check(viewport->child_count() == 2u);
+            check(tui_transcript_count(transcript_state) == 3u);
+            check(box.owned_element_count() <= initial_owned + 64u);
+        }
+        check(window.visible_host(136u) != nullptr);
+        check(window.visible_host(135u) != nullptr);
+        check(box.resolve_handle(retired_handle) == nullptr);
+        check(box.resolve_handle(held_handle) == nullptr);
+        check(box.focused_element() == focus);
+        check(tui_transcript_destroy(transcript_state) ==
+              TUI_TRANSCRIPT_OK);
     }
 
     it("retires intermediate Markdown projections during repeated owner updates") {
