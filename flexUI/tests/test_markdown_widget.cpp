@@ -1004,7 +1004,11 @@ spec("MarkdownWidget Parsing") {
         const auto* link_title = link->attribute("title");
         const auto* src = image->attribute("src");
         const auto* image_title = image->attribute("title");
-        check(href && *href == "https://example.org/caf%C3%A9");
+        // TinyTest stringifies check() expressions as printf-style
+        // diagnostic text. Keep percent-encoded URLs out of that format
+        // literal, so %C3%A9 cannot be interpreted as conversion flags.
+        const std::string expected_url = "https://example.org/caf%C3%A9";
+        check(href && *href == expected_url);
         check(link_title && *link_title == "T ©");
         check(src && *src == "/img/猫.png");
         check(image_title && *image_title == "Photo ©");
