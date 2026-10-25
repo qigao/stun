@@ -185,7 +185,14 @@ static bool write_raw(tui_terminal_t* term, const char* data, size_t len) {
     while (offset < len) {
         DWORD written = 0u;
         const DWORD chunk = (DWORD)(len - offset);
-        if (!WriteConsoleA(term->h_out, data + offset, chunk, &written, NULL) ||
+        /* The process STDOUT handle does not follow an active-buffer switch.
+         * After entering the VT alternate screen, use its owned CONOUT$
+         * handle for the same cell updates we query for dimensions. The
+         * original h_out remains responsible for initial enter/fallback
+         * and exact platform mode restoration. */
+        const HANDLE out = term->h_active_out ?
+            term->h_active_out : term->h_out;
+        if (!WriteConsoleA(out, data + offset, chunk, &written, NULL) ||
             written == 0u) return false;
         offset += (size_t)written;
     }
@@ -466,13 +473,14 @@ bool tui_terminal_init(tui_terminal_t* term) {
     }
 
 #ifdef _WIN32
-    /* After ?1049h, open the newly active console buffer for dimensions.
-     * GetStdHandle(STD_OUTPUT_HANDLE) can still reference the old buffer,
-     * whose srWindow never changes when the alternate buffer is resized. */
-    HANDLE active = CreateFileW(L"CONOUT$", GENERIC_READ,
+    /* After ?1049h open the CURRENT active buffer, not the inherited
+     * handle, for both rendering and dimension reads. Leave the original
+     * handle untouched so platform_leave restores the original screen. */
+    HANDLE active = CreateFileW(L"CONOUT$",
+                                GENERIC_READ | GENERIC_WRITE,
                                 FILE_SHARE_READ | FILE_SHARE_WRITE,
                                 NULL, OPEN_EXISTING, 0, NULL);
-    if (active != INVALID_HANDLE_VALUE) term->h_active_size = active;
+    if (active != INVALID_HANDLE_VALUE) term->h_active_out = active;
 #endif
 
     tui_buffer_destroy(term->front);
@@ -507,9 +515,9 @@ bool tui_terminal_cleanup(tui_terminal_t* term) {
         term->platform_active = false;
     }
 #ifdef _WIN32
-    if (term->h_active_size) {
-        CloseHandle(term->h_active_size);
-        term->h_active_size = NULL;
+    if (term->h_active_out) {
+        CloseHandle(term->h_active_out);
+        term->h_active_out = NULL;
     }
 #endif
 
@@ -544,8 +552,8 @@ tui_color_mode_t tui_terminal_get_color_mode(const tui_terminal_t* term) {
 void tui_terminal_query_size(tui_terminal_t* term) {
 #ifdef _WIN32
     CONSOLE_SCREEN_BUFFER_INFO csbi;
-    const HANDLE current = term->h_active_size ?
-        term->h_active_size : term->h_out;
+    const HANDLE current = term->h_active_out ?
+        term->h_active_out : term->h_out;
     if (GetConsoleScreenBufferInfo(current, &csbi) ||
         (current != term->h_out &&
          GetConsoleScreenBufferInfo(term->h_out, &csbi))) {

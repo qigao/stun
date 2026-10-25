@@ -262,6 +262,17 @@ void on_view(const void* ptr, tui_buffer_t* back) {
             d.valid = false;
             return;
         }
+#if defined(STUN_TUI_DEMO_HEADLESS_TEST) && defined(_WIN32)
+        // Installed-SDK real Console and ConPTY acceptance may never
+        // silently fall back to an inherited inactive output buffer.
+        // A synthetic headless smoke has no platform handles to inspect.
+        if (term->platform_active &&
+            (!term->h_active_out ||
+             term->h_active_out == INVALID_HANDLE_VALUE)) {
+            d.valid = false;
+            return;
+        }
+#endif
         const int w = tui_terminal_width(term);
         const int h = tui_terminal_height(term);
         if (w > 0 && h > 0)
