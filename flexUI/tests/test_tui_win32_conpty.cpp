@@ -37,26 +37,43 @@ class Screen {
     unsigned explicit_newlines_into_footer_ = 0u;
     int last_auto_wrap_row_ = -1;
     unsigned screen_erase_full_ = 0u;
+    int scroll_top_ = 0, scroll_bottom_ = 23;
+    unsigned scroll_region_commands_ = 0u;
+    unsigned scroll_region_linefeeds_ = 0u;
 
     void clear() {
         cells_.assign(static_cast<size_t>(rows_),
                       std::string(static_cast<size_t>(cols_), ' '));
         x_ = y_ = 0;
+        scroll_top_ = 0;
+        scroll_bottom_ = rows_ - 1;
     }
 
     void newline(bool implicit_wrap = false) {
         if (implicit_wrap) {
             ++all_auto_wraps_;
             last_auto_wrap_row_ = y_;
-            if (y_ == rows_ - 3) ++auto_wraps_into_footer_;
-        } else if (y_ == rows_ - 3) {
+            if (y_ == rows_ - 3 && scroll_bottom_ > y_)
+                ++auto_wraps_into_footer_;
+        } else if (y_ == rows_ - 3 && scroll_bottom_ > y_) {
             ++explicit_newlines_into_footer_;
         }
-        if (y_ + 1 < rows_) {
+        if (y_ >= scroll_top_ && y_ == scroll_bottom_) {
+            // DECSTBM: LF on the bottom margin scrolls ONLY the bounded
+            // region, never the fixed header/footer outside its borders.
+            if (scroll_top_ != 0 || scroll_bottom_ != rows_ - 1)
+                ++scroll_region_linefeeds_;
+            else if (implicit_wrap) ++bottom_auto_wraps_;
+            else ++bottom_explicit_newlines_;
+            for (int row = scroll_top_; row < scroll_bottom_; ++row)
+                cells_[static_cast<size_t>(row)] =
+                    cells_[static_cast<size_t>(row + 1)];
+            cells_[static_cast<size_t>(scroll_bottom_)].assign(
+                static_cast<size_t>(cols_), ' ');
+        } else if (y_ + 1 < rows_) {
             ++y_;
         } else {
-            // Record exactly which VT action evicted the bottom row.
-            // The UI Owner's saved cell frame remains a separate oracle.
+            // LF outside any partial scrolling margins at viewport bottom.
             if (implicit_wrap) ++bottom_auto_wraps_;
             else ++bottom_explicit_newlines_;
             cells_.erase(cells_.begin());
@@ -114,6 +131,18 @@ class Screen {
             // changes may be reflected in the ConPTY VT stream.
             wrap_enabled_ = code == 'h';
             ++wrap_mode_changes_;
+        } else if (code == 'r') {
+            // DECSTBM defaults to the whole viewport when omitted. ConPTY
+            // can scroll the body while keeping title/status rows untouched.
+            const int top = std::clamp(number(0, 1) - 1, 0, rows_ - 1);
+            const int bottom = std::clamp(
+                number(1, rows_) - 1, 0, rows_ - 1);
+            if (top < bottom) {
+                scroll_top_ = top;
+                scroll_bottom_ = bottom;
+                ++scroll_region_commands_;
+                x_ = y_ = 0;
+            }
         } else if (code == 'H' || code == 'f') {
             y_ = std::clamp(number(0) - 1, 0, rows_ - 1);
             x_ = std::clamp(number(1) - 1, 0, cols_ - 1);
@@ -196,9 +225,14 @@ public:
                 cells_[static_cast<size_t>(row)], 0,
                 static_cast<size_t>(kept_cols));
         }
+        const bool full_region = scroll_top_ == 0 &&
+                                 scroll_bottom_ == rows_ - 1;
         rows_ = rows;
         cols_ = columns;
         cells_.swap(updated);
+        scroll_top_ = std::clamp(scroll_top_, 0, rows_ - 1);
+        scroll_bottom_ = full_region ? rows_ - 1 :
+            std::clamp(scroll_bottom_, scroll_top_, rows_ - 1);
         x_ = std::clamp(x_, 0, cols_ - 1);
         y_ = std::clamp(y_, 0, rows_ - 1);
     }
@@ -288,6 +322,12 @@ public:
         return auto_wraps_into_footer_;
     }
     unsigned bottom_auto_wraps() const { return bottom_auto_wraps_; }
+    unsigned scroll_region_commands() const {
+        return scroll_region_commands_;
+    }
+    unsigned scroll_region_linefeeds() const {
+        return scroll_region_linefeeds_;
+    }
     std::string diagnostic() const {
         std::string preview;
         for (const auto& line : cells_) {
@@ -314,6 +354,10 @@ public:
                ", last-auto-wrap-row=" +
                std::to_string(last_auto_wrap_row_) +
                ", full-screen-erases=" + std::to_string(screen_erase_full_) +
+               ", margin-top=" + std::to_string(scroll_top_) +
+               ", margin-bottom=" + std::to_string(scroll_bottom_) +
+               ", margin-commands=" + std::to_string(scroll_region_commands_) +
+               ", margin-linefeeds=" + std::to_string(scroll_region_linefeeds_) +
                ", lower='" + cells_[static_cast<size_t>(rows_ - 2)] +
                "', bottom='" + cells_[static_cast<size_t>(rows_ - 1)] +
                "', entered-alt=" + std::to_string(entered_alt_ ? 1 : 0) +
@@ -664,7 +708,19 @@ int main(int argc, char** argv) {
         wrap_near_footer.feed(sequence.data(), sequence.size());
         if (wrap_near_footer.auto_wraps_into_footer() != 1u ||
             wrap_near_footer.bottom_auto_wraps() != 0u) return 34;
-        std::puts("Windows ConPTY VT ECH/autowrap/scrollback oracle passed");
+        Screen protected_footer;
+        const std::string protected_sequence =
+            "\x1b[?1049h\x1b[1;1HFlexUI + Tango"
+            "\x1b[23;1HRetained 12/12 | tail | 80x24 |"
+            "\x1b[2;22r\x1b[22;1Hbody\r\nnext body line";
+        protected_footer.feed(
+            protected_sequence.data(), protected_sequence.size());
+        if (!protected_footer.header() ||
+            !protected_footer.mode("tail", 80, 24) ||
+            protected_footer.scroll_region_commands() != 1u ||
+            protected_footer.scroll_region_linefeeds() != 1u)
+            return 35;
+        std::puts("Windows ConPTY VT ECH/autowrap/scroll-region oracle passed");
         return 0;
     }
     if (argc == 3 && std::strcmp(argv[1], "--probe-child") == 0) {
