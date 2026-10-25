@@ -11,6 +11,8 @@
 #include "tui_terminal_internal.h"
 
 #include <array>
+#include <atomic>
+#include <future>
 #include <chrono>
 #include <cmath>
 #include <cstdint>
@@ -393,7 +395,35 @@ spec("FlexUI MarkdownWidget through Tango async transport and cell renderer") {
 
         // A user who moved away from the tail must not be forced back by
         // an unrelated content append, layout invalidation or resize.
-        check(scroll->set_scroll_offset(0.0f, 30.0f));
+        // Produce a real native SGR mouse-wheel event on POSIX (the same
+        // private Tango decoder used by live terminal polling), then deliver
+        // the normalized input through FlexUI's retained event router.
+#ifndef _WIN32
+        std::unique_ptr<tui_terminal_t, decltype(&tui_terminal_destroy)> native(
+            tui_terminal_create(), &tui_terminal_destroy);
+        check(native != nullptr);
+        if (!native) return;
+        native->mouse_enabled = true;
+        const char wheel_sequence[] = "\x1b[<65;3;3M";
+        tui_event_t native_wheel{};
+        check(tui_terminal_input_push(native.get(), wheel_sequence,
+                                      sizeof(wheel_sequence) - 1u));
+        const bool decoded = tui_terminal_input_next(native.get(), &native_wheel);
+        check(decoded);
+        check(native_wheel.type == TUI_EVENT_MOUSE_PRESS);
+        check(native_wheel.key == TUI_KEY_MOUSE_WHEEL_DOWN);
+        if (!decoded || native_wheel.key != TUI_KEY_MOUSE_WHEEL_DOWN) return;
+        const float mx = (static_cast<float>(native_wheel.x) + 0.5f) * 8.0f;
+        const float my = (static_cast<float>(native_wheel.y) + 0.5f) * 16.0f;
+#else
+        // The Windows console RECORD decoder is exercised in Tango Native;
+        // here the cross-platform FlexUI test uses its equivalent event.
+        const float mx = 20.0f, my = 40.0f;
+#endif
+        auto wheel = flexUI::Event::mouse_wheel(mx, my, 0.0f, -1.0f);
+        box.dispatch_event(wheel);
+        check(scroll->scroll_y() > 0.0f);
+        if (scroll->scroll_y() <= 0.0f) return;
         box.set_focus(focus);
         check(box.focused_element() == focus);
         const float before = scroll->scroll_y();
@@ -408,6 +438,98 @@ spec("FlexUI MarkdownWidget through Tango async transport and cell renderer") {
         box.update();
         check(std::fabs(scroll->scroll_y() - before) < 0.01f);
         check(box.focused_element() == focus);
+    }
+
+    it("closes admission during a live producer and drains every accepted Markdown chunk") {
+        flexUI::Box box(nullptr);
+        auto* root = box.create("div", "shutdown-root");
+        auto* host = box.create_widget<flexUI::MarkdownWidget>(
+            "div", "shutdown-message", "");
+        check(root && host && host->widget);
+        if (!root || !host || !host->widget) return;
+        root->append(host);
+        box.set_root(root);
+        auto* widget = static_cast<flexUI::MarkdownWidget*>(host->widget);
+        auto* stream = tui_stream_create(kMessageId, 512u, 32u);
+        check(stream != nullptr);
+        if (!stream) return;
+        FlexUIOwner owner{stream, widget};
+        auto* app = tui_app_create(
+            &owner, keyboard_noop, view_noop, input_noop);
+        check(app != nullptr);
+        if (!app) {
+            check(tui_stream_destroy(stream) == TUI_STREAM_OK);
+            return;
+        }
+        check(tui_app_set_async_update(app, owner_async_update));
+        auto* queue = tui_app_async_queue(app);
+        check(queue != nullptr);
+        if (!queue) {
+            tui_app_destroy(app);
+            check(tui_stream_destroy(stream) == TUI_STREAM_OK);
+            return;
+        }
+        check(submit(queue, TUI_STREAM_BEGIN, 9u, {}));
+
+        std::promise<void> first_post;
+        auto first_ready = first_post.get_future();
+        std::atomic<std::size_t> accepted{0u};
+        std::atomic<bool> shutdown_signaled{false};
+        std::atomic<tui_async_status_t> late_status{
+            TUI_ASYNC_INVALID_ARGUMENT};
+        std::thread producer([&] {
+            // Only copied queue payloads leave this worker. No Box/Element,
+            // MarkdownWidget, or stream state is borrowed across threads.
+            if (submit(queue, TUI_STREAM_CHUNK, 9u, "x"))
+                accepted.fetch_add(1u, std::memory_order_relaxed);
+            first_post.set_value();
+            for (unsigned i = 0u; i < 80u; ++i) {
+                if (!submit(queue, TUI_STREAM_CHUNK, 9u, "x")) break;
+                accepted.fetch_add(1u, std::memory_order_relaxed);
+            }
+            while (!shutdown_signaled.load(std::memory_order_acquire))
+                std::this_thread::yield();
+            // Post-close admission must be explicit CLOSED, not silently
+            // dropped or allowed to race owner destruction.
+            std::array<unsigned char, sizeof(tui_stream_packet_header_t) + 1u>
+                packet{};
+            const tui_stream_packet_header_t header{kMessageId};
+            std::memcpy(packet.data(), &header, sizeof(header));
+            packet[sizeof(header)] = static_cast<unsigned char>('z');
+            late_status.store(tui_async_queue_post(
+                queue, TUI_STREAM_CHUNK, 9u, packet.data(), packet.size(),
+                nullptr), std::memory_order_release);
+        });
+        const bool first_seen =
+            first_ready.wait_for(std::chrono::seconds(2)) ==
+            std::future_status::ready;
+        check(first_seen);
+        check(tui_async_queue_close(queue) == TUI_ASYNC_OK);
+        shutdown_signaled.store(true, std::memory_order_release);
+        producer.join();
+        check(accepted.load() >= 1u);
+        check(late_status.load(std::memory_order_acquire) == TUI_ASYNC_CLOSED);
+
+        const auto expected = accepted.load(std::memory_order_relaxed);
+        tui_async_queue_stats_t stats{};
+        check(tui_async_queue_get_stats(queue, &stats) == TUI_ASYNC_OK);
+        check(stats.closed && stats.queued == expected + 1u);
+        check(stats.rejected_closed >= 1u);
+        // The app owner must consume precisely the records admitted before
+        // shutdown, then retire the queue only after worker join/quiescence.
+        check(tui_app_pump_messages(app, 128u) == expected + 1u);
+        check(owner.ok && owner.chunks == expected);
+        check(widget->markdown() == std::string(expected, 'x'));
+        widget->update(0.0f, *host);
+        box.update();
+        check(host->child_count() == 1u);
+        if (host->child_count() == 1u)
+            check(host->child_at(0u)->text() == std::string(expected, 'x'));
+        check(tui_app_pump_messages(app, 128u) == 0u);
+        check(tui_async_queue_get_stats(queue, &stats) == TUI_ASYNC_OK);
+        check(stats.queued == 0u);
+        tui_app_destroy(app);
+        check(tui_stream_destroy(stream) == TUI_STREAM_OK);
     }
 
     it("retires intermediate Markdown projections during repeated owner updates") {
