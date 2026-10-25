@@ -8,6 +8,7 @@
 #include <flexUI/box.h>
 #include <flexUI/element.h>
 #include <flexUI/widgets/markdown_widget.h>
+#include <flexUI/stream_scroll_follow.h>
 #include <tui.h>
 #include "tui_async_wait_internal.h"
 #include "tui_app_internal.h"
@@ -32,18 +33,24 @@ constexpr intptr_t kNoInputHandle = 0;
 constexpr intptr_t kNoInputHandle = -1;
 #endif
 
-bool submit(tui_async_queue_t* queue, uint32_t type, uint64_t generation,
-            std::string_view chunk) {
+bool submit_message(tui_async_queue_t* queue, uint64_t message_id,
+                    uint32_t type, uint64_t generation,
+                    std::string_view chunk) {
     constexpr std::size_t kMaxChunk = 32u;
     if (chunk.size() > kMaxChunk) return false;
     std::array<unsigned char, sizeof(tui_stream_packet_header_t) + kMaxChunk>
         packet{};
-    const tui_stream_packet_header_t header{kMessageId};
+    const tui_stream_packet_header_t header{message_id};
     std::memcpy(packet.data(), &header, sizeof(header));
     if (!chunk.empty())
         std::memcpy(packet.data() + sizeof(header), chunk.data(), chunk.size());
     return tui_async_queue_post(queue, type, generation, packet.data(),
              sizeof(header) + chunk.size(), nullptr) == TUI_ASYNC_OK;
+}
+
+bool submit(tui_async_queue_t* queue, uint32_t type, uint64_t generation,
+            std::string_view chunk) {
+    return submit_message(queue, kMessageId, type, generation, chunk);
 }
 
 bool contains_visible_cells(const tui_buffer_t* buffer,
@@ -125,6 +132,87 @@ bool owner_async_update(const tui_async_event_t* event,
         owner->ended = true;
     }
     return true;
+}
+
+struct MultiStreamSlot {
+    uint64_t message_id = 0u;
+    tui_stream_t* stream = nullptr;        // UI-owner lifetime
+    flexUI::Element* host = nullptr;       // borrowed from Box, stable ID
+    flexUI::MarkdownWidget* markdown = nullptr;
+    bool dirty = false;
+};
+
+struct MultiStreamOwner {
+    std::array<MultiStreamSlot, 2u> slots{};
+    flexUI::Box* box = nullptr;
+    flexUI::Element* viewport = nullptr;
+    std::size_t views = 0u;
+    std::size_t accepted = 0u;
+    std::size_t stale = 0u;
+    std::size_t unknown = 0u;
+    bool ok = true;
+};
+
+bool multi_stream_update(const tui_async_event_t* event,
+                         const void* payload, void* context) {
+    auto* owner = static_cast<MultiStreamOwner*>(context);
+    if (!owner || !event || !payload ||
+        event->payload_size < sizeof(tui_stream_packet_header_t)) {
+        if (owner) owner->ok = false;
+        return false;
+    }
+    tui_stream_packet_header_t header{};
+    std::memcpy(&header, payload, sizeof(header));
+    for (auto& slot : owner->slots) {
+        if (slot.message_id != header.message_id) continue;
+        const auto status = tui_stream_apply(slot.stream, event, payload);
+        if (status == TUI_STREAM_STALE) {
+            ++owner->stale;
+            return true;
+        }
+        if (status != TUI_STREAM_OK) {
+            owner->ok = false;
+            return false;
+        }
+        ++owner->accepted;
+        if (event->type == TUI_STREAM_BEGIN) {
+            slot.markdown->set_markdown("");
+            slot.dirty = true;
+        } else if (event->type == TUI_STREAM_CHUNK) {
+            const auto prefix = sizeof(tui_stream_packet_header_t);
+            const auto delta = std::string_view(
+                static_cast<const char*>(payload) + prefix,
+                event->payload_size - prefix);
+            if (slot.markdown->append_markdown(delta) !=
+                flexUI::MarkdownAppendStatus::Appended) {
+                owner->ok = false;
+                return false;
+            }
+            slot.dirty = true;
+        }
+        return true;
+    }
+    // Bounded owner registry: an unknown message never creates a widget or
+    // stream implicitly and must not modify any known message.
+    ++owner->unknown;
+    return true;
+}
+
+void multi_stream_view(const void* context, tui_buffer_t*) {
+    auto* owner = const_cast<MultiStreamOwner*>(
+        static_cast<const MultiStreamOwner*>(context));
+    if (!owner || !owner->box || !owner->viewport) return;
+    const auto follow = flexUI::StreamScrollFollow::capture(
+        *owner->viewport);
+    for (auto& slot : owner->slots) {
+        if (!slot.dirty) continue;
+        slot.markdown->update(0.0f, *slot.host);
+        slot.dirty = false;
+    }
+    owner->box->invalidate();
+    owner->box->update();
+    (void)follow.apply(*owner->viewport);
+    ++owner->views;
 }
 
 } // namespace
@@ -531,6 +619,191 @@ spec("FlexUI MarkdownWidget through Tango async transport and cell renderer") {
         check(stats.queued == 0u);
         tui_app_destroy(app);
         check(tui_stream_destroy(stream) == TUI_STREAM_OK);
+    }
+
+    it("keeps two interleaved message identities and user-tail intent isolated") {
+        // One bounded Tango queue, exactly two application-owned streams and
+        // two independent MarkdownWidget projections. No second parser/queue.
+        flexUI::Box box(nullptr);
+        box.set_viewport(320.0f, 176.0f);
+        box.load_css(
+            "#root { display:flex; flex-direction:column; width:320px; "
+            "height:176px; } "
+            "#transcript { width:180px; height:72px; overflow-y:scroll; "
+            "display:flex; flex-direction:column; } "
+            "#message41, #message42 { width:180px; display:flex; "
+            "flex-direction:column; } "
+            "#other-focus { width:70px; height:20px; }");
+        auto* root = box.create("div", "root");
+        auto* transcript = box.create("div", "transcript");
+        auto* msg41 = box.create_widget<flexUI::MarkdownWidget>(
+            "div", "message41", "");
+        auto* msg42 = box.create_widget<flexUI::MarkdownWidget>(
+            "div", "message42", "");
+        auto* focus = box.create("button", "other-focus");
+        check(root && transcript && msg41 && msg41->widget &&
+              msg42 && msg42->widget && focus);
+        if (!root || !transcript || !msg41 || !msg41->widget ||
+            !msg42 || !msg42->widget || !focus) return;
+        root->append(transcript);
+        transcript->append(msg41);
+        transcript->append(msg42);
+        root->append(focus);
+        box.set_root(root);
+        box.update();
+        const auto handle41 = box.handle_for(*msg41);
+        const auto handle42 = box.handle_for(*msg42);
+
+        tui_stream_t* stream41 = tui_stream_create(41u, 4096u, 32u);
+        tui_stream_t* stream42 = tui_stream_create(42u, 4096u, 32u);
+        check(stream41 && stream42);
+        if (!stream41 || !stream42) {
+            if (stream41) check(tui_stream_destroy(stream41) == TUI_STREAM_OK);
+            if (stream42) check(tui_stream_destroy(stream42) == TUI_STREAM_OK);
+            return;
+        }
+        MultiStreamOwner owner{};
+        owner.box = &box;
+        owner.viewport = transcript;
+        owner.slots[0] = {
+            41u, stream41, msg41,
+            static_cast<flexUI::MarkdownWidget*>(msg41->widget), false};
+        owner.slots[1] = {
+            42u, stream42, msg42,
+            static_cast<flexUI::MarkdownWidget*>(msg42->widget), false};
+        auto* app = tui_app_create(&owner, keyboard_noop,
+                                   multi_stream_view, input_noop);
+        check(app != nullptr);
+        if (!app) {
+            check(tui_stream_destroy(stream41) == TUI_STREAM_OK);
+            check(tui_stream_destroy(stream42) == TUI_STREAM_OK);
+            return;
+        }
+        auto* term = tui_app_terminal(app);
+        term->width = 8;
+        term->height = 2;
+        term->front = tui_buffer_create(8, 2);
+        term->back = tui_buffer_create(8, 2);
+        check(term->front && term->back);
+        if (!term->front || !term->back) {
+            tui_app_destroy(app);
+            check(tui_stream_destroy(stream41) == TUI_STREAM_OK);
+            check(tui_stream_destroy(stream42) == TUI_STREAM_OK);
+            return;
+        }
+        term->initialized = true;
+        term->color_mode = TUI_COLOR_TRUECOLOR;
+        term->write_output = mock_terminal_write;
+        check(tui_app_set_async_update(app, multi_stream_update));
+        auto* queue = tui_app_async_queue(app);
+        check(queue != nullptr);
+        if (!queue) {
+            term->initialized = false;
+            tui_app_destroy(app);
+            check(tui_stream_destroy(stream41) == TUI_STREAM_OK);
+            check(tui_stream_destroy(stream42) == TUI_STREAM_OK);
+            return;
+        }
+        app->needs_redraw = false;
+
+        check(submit_message(queue, 41u, TUI_STREAM_BEGIN, 1u, {}));
+        check(submit_message(queue, 42u, TUI_STREAM_BEGIN, 1u, {}));
+        std::string alpha, beta;
+        for (unsigned i = 0u; i < 12u; ++i) {
+            check(submit_message(queue, 41u, TUI_STREAM_CHUNK,
+                                 1u, "alpha paragraph\n\n"));
+            check(submit_message(queue, 42u, TUI_STREAM_CHUNK,
+                                 1u, "beta paragraph\n\n"));
+            alpha += "alpha paragraph\n\n";
+            beta += "beta paragraph\n\n";
+        }
+        check(submit_message(queue, 41u, TUI_STREAM_END, 1u, {}));
+        check(tui_app_dispatch_once(app));
+        check(owner.ok && owner.views == 1u);
+        check(owner.accepted == 27u);
+        check(owner.slots[0].markdown->markdown() == alpha);
+        check(owner.slots[1].markdown->markdown() == beta);
+        check(transcript->can_scroll_y());
+        check(transcript->max_scroll_y() > 20.0f);
+        check(std::fabs(transcript->scroll_y() -
+                        transcript->max_scroll_y()) <= 2.0f);
+        check(box.resolve_handle(handle41) == msg41);
+        check(box.resolve_handle(handle42) == msg42);
+        if (!transcript->can_scroll_y() ||
+            transcript->max_scroll_y() <= 20.0f) {
+            term->initialized = false;
+            tui_app_destroy(app);
+            check(tui_stream_destroy(stream41) == TUI_STREAM_OK);
+            check(tui_stream_destroy(stream42) == TUI_STREAM_OK);
+            return;
+        }
+
+        // A manual scroll-away and focus are durable application state, not
+        // an instruction for the next message to force a tail-follow.
+        check(transcript->set_scroll_offset(0.0f, 3.0f));
+        const float away = transcript->scroll_y();
+        box.set_focus(focus);
+        check(box.focused_element() == focus);
+        check(submit_message(queue, 41u, TUI_STREAM_CHUNK, 1u, "stale"));
+        check(submit_message(queue, 42u, TUI_STREAM_CHUNK,
+                             1u, "still active\n\n"));
+        beta += "still active\n\n";
+        check(submit_message(queue, 41u, TUI_STREAM_BEGIN, 2u, {}));
+        check(submit_message(queue, 41u, TUI_STREAM_CHUNK,
+                             2u, "fresh gen two\n\n"));
+        check(submit_message(queue, 42u, TUI_STREAM_CANCEL, 1u, {}));
+        check(submit_message(queue, 42u, TUI_STREAM_CHUNK, 1u, "late"));
+        check(submit_message(queue, 41u, TUI_STREAM_END, 2u, {}));
+        // Unknown IDs consume bounded queue admission, but no slots.
+        check(submit_message(queue, 404u, TUI_STREAM_BEGIN, 1u, {}));
+        check(tui_app_dispatch_once(app));
+        check(owner.ok && owner.views == 2u);
+        check(owner.stale == 2u && owner.unknown == 1u);
+        check(owner.slots[0].markdown->markdown() == "fresh gen two\n\n");
+        check(owner.slots[1].markdown->markdown() == beta);
+        check(std::fabs(transcript->scroll_y() - away) <= 0.01f);
+        check(box.focused_element() == focus);
+        check(box.resolve_handle(handle41) == msg41);
+        check(box.resolve_handle(handle42) == msg42);
+
+        // The user explicitly returns to End. Only then may the next owner
+        // publication follow new content at the bottom of the transcript.
+        check(transcript->set_scroll_offset(
+            transcript->scroll_x(), transcript->max_scroll_y()));
+        const float previous_max = transcript->max_scroll_y();
+        check(submit_message(queue, 42u, TUI_STREAM_BEGIN, 2u, {}));
+        std::string gamma;
+        for (unsigned i = 0u; i < 24u; ++i) {
+            check(submit_message(queue, 42u, TUI_STREAM_CHUNK,
+                                 2u, "gamma paragraph\n\n"));
+            gamma += "gamma paragraph\n\n";
+        }
+        check(submit_message(queue, 42u, TUI_STREAM_END, 2u, {}));
+        check(tui_app_dispatch_once(app));
+        check(owner.ok && owner.views == 3u);
+        check(owner.slots[1].markdown->markdown() == gamma);
+        check(transcript->max_scroll_y() > previous_max);
+        check(std::fabs(transcript->scroll_y() -
+                        transcript->max_scroll_y()) <= 2.0f);
+        check(box.focused_element() == focus);
+        check(transcript->child_count() == 2u);
+        check(box.resolve_handle(handle41) == msg41);
+        check(box.resolve_handle(handle42) == msg42);
+
+        // Both native stream snapshots are independently settled despite
+        // sharing one global mailbox with interleaved sequence numbers.
+        tui_stream_snapshot_t snap41{}, snap42{};
+        check(tui_stream_get_snapshot(stream41, &snap41) == TUI_STREAM_OK);
+        check(tui_stream_get_snapshot(stream42, &snap42) == TUI_STREAM_OK);
+        check(snap41.message_id == 41u && snap41.generation == 2u &&
+              snap41.state == TUI_STREAM_DONE);
+        check(snap42.message_id == 42u && snap42.generation == 2u &&
+              snap42.state == TUI_STREAM_DONE);
+        check(tui_async_queue_close(queue) == TUI_ASYNC_OK);
+        term->initialized = false; // synthetic sink has no terminal mode
+        tui_app_destroy(app);
+        check(tui_stream_destroy(stream41) == TUI_STREAM_OK);
+        check(tui_stream_destroy(stream42) == TUI_STREAM_OK);
     }
 
     it("retires intermediate Markdown projections during repeated owner updates") {
