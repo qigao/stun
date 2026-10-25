@@ -9,6 +9,9 @@ Bounded capture, absolute deadlines, and process-group cleanup prevent a
 hanging UI from blocking CI indefinitely.
 """
 import argparse
+import codecs
+import re
+import unicodedata
 import errno
 import fcntl
 import os
@@ -22,7 +25,149 @@ import termios
 import time
 
 MAX_CAPTURE = 12 * 1024 * 1024
-TIMEOUT = 32.0
+TIMEOUT = 45.0
+
+
+
+class VisibleTerminal:
+    """Minimal terminal-cell oracle for Tango ANSI diffs; never grep input bytes."""
+
+    def __init__(self, rows, cols):
+        self.rows, self.cols = rows, cols
+        self.cells = [[" "] * cols for _ in range(rows)]
+        self.y = self.x = 0
+        self.saved = (0, 0)
+        self.state = "text"
+        self.csi = bytearray()
+        self.utf8 = codecs.getincrementaldecoder("utf-8")("replace")
+
+    def resize(self, rows, cols):
+        cropped = [[" "] * cols for _ in range(rows)]
+        for y in range(min(self.rows, rows)):
+            cropped[y][:min(self.cols, cols)] = self.cells[y][:min(self.cols, cols)]
+        self.rows, self.cols, self.cells = rows, cols, cropped
+        self.y = min(self.y, rows - 1)
+        self.x = min(self.x, cols - 1)
+
+    def _put(self, ch):
+        width = 0 if unicodedata.combining(ch) else (
+            2 if unicodedata.east_asian_width(ch) in "WF" else 1)
+        if not width:
+            return
+        if self.x >= self.cols:
+            self.x, self.y = 0, min(self.rows - 1, self.y + 1)
+        if self.x < self.cols:
+            self.cells[self.y][self.x] = ch
+            if width == 2 and self.x + 1 < self.cols:
+                self.cells[self.y][self.x + 1] = " "
+        self.x += width
+
+    def _escape(self, final):
+        raw = self.csi.decode("ascii", "replace")
+        if raw.startswith("?"):
+            if raw == "?1049" and final == "h":
+                self.cells = [[" "] * self.cols for _ in range(self.rows)]
+                self.x = self.y = 0
+            return
+        values = raw.split(";")
+
+        def arg(index, default=1):
+            if index < len(values) and values[index].isdigit():
+                return int(values[index]) or default
+            return default
+
+        if final in "Hf":
+            self.y = max(0, min(self.rows - 1, arg(0) - 1))
+            self.x = max(0, min(self.cols - 1, arg(1) - 1))
+        elif final == "G":
+            self.x = max(0, min(self.cols - 1, arg(0) - 1))
+        elif final == "A":
+            self.y = max(0, self.y - arg(0))
+        elif final == "B":
+            self.y = min(self.rows - 1, self.y + arg(0))
+        elif final == "C":
+            self.x = min(self.cols - 1, self.x + arg(0))
+        elif final == "D":
+            self.x = max(0, self.x - arg(0))
+        elif final == "J" and arg(0, 0) == 2:
+            self.cells = [[" "] * self.cols for _ in range(self.rows)]
+        elif final == "K":
+            mode = arg(0, 0)
+            start, end = (0, self.cols) if mode == 2 else (
+                (0, self.x + 1) if mode == 1 else (self.x, self.cols))
+            self.cells[self.y][start:end] = [" "] * (end - start)
+
+    def feed(self, data):
+        for byte in data:
+            if self.state == "esc":
+                if byte == ord("["):
+                    self.csi.clear()
+                    self.state = "csi"
+                elif byte == ord("]"):
+                    self.state = "osc"
+                else:
+                    if byte == ord("7"):
+                        self.saved = (self.y, self.x)
+                    elif byte == ord("8"):
+                        self.y, self.x = self.saved
+                    self.state = "text"
+                continue
+            if self.state == "csi":
+                if 0x40 <= byte <= 0x7e:
+                    self._escape(chr(byte))
+                    self.state = "text"
+                elif len(self.csi) < 128:
+                    self.csi.append(byte)
+                else:
+                    self.state = "text"
+                continue
+            if self.state == "osc":
+                if byte == 7:
+                    self.state = "text"
+                elif byte == 27:
+                    self.state = "osc_esc"
+                continue
+            if self.state == "osc_esc":
+                self.state = "text" if byte == ord("\\") else "osc"
+                continue
+            if byte == 27:
+                self.state = "esc"
+            elif byte == 13:
+                self.x = 0
+            elif byte == 10:
+                self.y = min(self.rows - 1, self.y + 1)
+            elif byte == 8:
+                self.x = max(0, self.x - 1)
+            elif byte >= 32:
+                for ch in self.utf8.decode(bytes((byte,))):
+                    self._put(ch)
+
+    def status(self):
+        for row in reversed(self.cells):
+            line = "".join(row)
+            if "Retained " in line:
+                return line.strip()
+        return ""
+
+    def retained(self):
+        match = re.search(r"Retained (\d+)/12", self.status())
+        return int(match.group(1)) if match else 0
+
+    def mode(self):
+        status = self.status()
+        if " | scrollback | " in status:
+            return "scrollback"
+        if " | tail | " in status:
+            return "tail"
+        return None
+
+    def geometry(self):
+        match = re.search(r"\| (\d+)x(\d+)(?: \||$)", self.status())
+        return (int(match.group(1)), int(match.group(2))) if match else None
+
+    def has_header(self):
+        return any("FlexUI" in "".join(row) and
+                   "Streaming" in "".join(row) for row in self.cells)
 
 
 def require(ok, detail):
@@ -44,6 +189,8 @@ def run_test(executable):
     master, slave = started_as_tty()
     original_termios = termios.tcgetattr(slave)
     output = bytearray()
+    screen = VisibleTerminal(24, 80)
+    overall_deadline = time.monotonic() + TIMEOUT
     child = None
 
     def pump(wait=0.1):
@@ -60,9 +207,10 @@ def run_test(executable):
             require(len(output) + len(chunk) <= MAX_CAPTURE,
                     "terminal output exceeded bounded capture")
             output.extend(chunk)
+            screen.feed(chunk)
 
     def until(label, predicate, seconds):
-        deadline = time.monotonic() + seconds
+        deadline = min(time.monotonic() + seconds, overall_deadline)
         while time.monotonic() < deadline:
             if predicate():
                 return
@@ -110,48 +258,46 @@ def run_test(executable):
         # A real display frame must render user-visible text, not just
         # emit the terminal-control enter sequence.
         until("native rendered header",
-              lambda: b"FlexUI" in output and b"Streaming" in output, 6.0)
+              lambda: screen.has_header(), 6.0)
 
         # The worker is publishing concurrently. Browse with a POSIX
         # terminal HOME sequence and verify the ordinary owner event map
         # caused a visible status transition.
-        before = len(output)
+        require(screen.mode() == "tail", "not following before Home")
         send(b"\x1b[H")
-        until("Home changes actual UI to scrollback",
-              lambda: b"scrollback" in output[before:], 5.0)
+        until("Home changes visible terminal state to scrollback",
+              lambda: screen.mode() == "scrollback", 5.0)
 
         # With the user looking at history, new worker messages must not
         # hide the ability to return to the newest window via END.
-        before = len(output)
         send(b"\x1b[F")
-        until("End changes actual UI to tail mode",
-              lambda: b"tail" in output[before:], 5.0)
+        until("End changes visible terminal state to tail mode",
+              lambda: screen.mode() == "tail", 5.0)
 
-        # Let enough independent messages arrive to exceed the five
-        # visible slots before testing older-message navigation. Otherwise
-        # wheel-up at the beginning of a one-message transcript is a
-        # legitimate no-op, not an input-decoder regression. Continue to
-        # drain PTY output while the scripted worker advances.
-        older_window_ready = time.monotonic() + 3.0
-        while time.monotonic() < older_window_ready:
-            pump(0.04)
-            require(child.poll() is None,
-                    "interactive child exited before wheel navigation")
+        # Observe at least six admitted messages *on the rendered screen*.
+        # A fixed sleep falsely assumes the CI host can render five windows
+        # at a particular speed; wheel-up with <= 5 is a legal no-op.
+        until("six rendered message admissions before wheel",
+              lambda: screen.retained() >= 6 and screen.mode() == "tail"
+              and screen.geometry() == (80, 24), 18.0)
 
         # Drive one native mouse wheel event. The SGR parser is invoked from
         # tui_terminal_poll(), not from a test-only decoder entry point.
-        before = len(output)
+        prior_status = screen.status()
         send(b"\x1b[<64;3;3M")  # wheel-up at column 3, row 3
-        until("SGR wheel-up redraw",
-              lambda: b"scrollback" in output[before:], 5.0)
+        until("SGR wheel-up changes visible scroll state",
+              lambda: screen.mode() == "scrollback"
+              and screen.status() != prior_status, 8.0)
 
         # Resize an actual PTY, deliver SIGWINCH to the child with a genuine
         # tty controlling process group, and require another terminal frame.
-        before = len(output)
+        screen.resize(16, 52)
         winsize(slave, 16, 52)
         os.kill(child.pid, signal.SIGWINCH)
-        until("PTY SIGWINCH reflow",
-              lambda: len(output) - before >= 80, 5.0)
+        until("PTY SIGWINCH applies 52x16 UI geometry",
+              lambda: screen.geometry() == (52, 16)
+              and screen.mode() == "scrollback"
+              and screen.has_header(), 6.0)
         require(child.poll() is None, "application exited during resize")
 
         # Graceful input exit is needed to assert actual terminal restoration;
@@ -174,10 +320,15 @@ def run_test(executable):
                 "alternate screen left before it was entered")
         require(mode_matches(original_termios, termios.tcgetattr(slave)),
                 "termios flags were not fully restored after normal exit")
-        print("native POSIX PTY chat passed: keyboard, SGR mouse, SIGWINCH, "
-              "termios restoration and terminal controls; captured=%d bytes" %
+        print("native POSIX PTY chat passed: keyboard, SGR mouse, "
+              "SIGWINCH 52x16 UI, termios restoration and terminal controls; "
+              "captured=%d bytes" %
               len(output))
     except Exception:
+        print("PTY visible status: %r; retained=%d; mode=%r; "
+              "geometry=%r; parser_state=%s" %
+              (screen.status(), screen.retained(), screen.mode(),
+               screen.geometry(), screen.state), file=sys.stderr)
         print("PTY output diagnostic (tail): %r" % bytes(output[-1400:]),
               file=sys.stderr)
         raise

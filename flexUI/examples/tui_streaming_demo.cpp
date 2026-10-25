@@ -191,6 +191,7 @@ void on_view(const void* ptr, tui_buffer_t*) {
             d.status->set_text("Retained " +
                 std::to_string(tui_transcript_count(d.transcript)) +
                 "/12 | " + (d.following ? "tail" : "scrollback") +
+                " | " + std::to_string(w) + "x" + std::to_string(h) +
                 " | q quit, c cancel, arrows/wheel browse, End follow");
         }
         d.box->update();
