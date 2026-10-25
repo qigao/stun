@@ -17,9 +17,13 @@ public:
     explicit TuiRenderer(tui_buffer_t* buffer)
         : buf_(buffer) {}
     explicit TuiRenderer(tui_terminal_t* term)
-        : TuiRenderer(tui_terminal_buffer(term)) {}
+        : term_(term) {}
 
     void begin_frame(float w, float h, float) override {
+        // A terminal may not be initialized when the Renderer is created.
+        // The front/back targets may also be replaced on resize. Borrow the
+        // current owner frame buffer, never an old buffer from construction.
+        if (term_) buf_ = tui_terminal_buffer(term_);
         frame_w_ = w;
         frame_h_ = h;
         tx_ = ty_ = 0.0f;
@@ -314,7 +318,8 @@ private:
             TUI_BLACK);
     }
 
-    tui_buffer_t* buf_ = nullptr;
+    tui_terminal_t* term_ = nullptr;  // borrowed, outlives renderer
+    tui_buffer_t* buf_ = nullptr;    // current-frame borrow
     float frame_w_ = 0.0f;
     float frame_h_ = 0.0f;
     float tx_ = 0.0f;

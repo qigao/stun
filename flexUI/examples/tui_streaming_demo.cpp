@@ -346,7 +346,19 @@ int headless_smoke() {
     worker.join();
     const bool at_tail = d.window && d.window->visible_count() == kVisible &&
         d.window->visible_host(22u) != nullptr;
-    const bool bounded = d.valid &&
+    bool drew_text = false;
+    if (term->front && term->front->cells) {
+        const std::size_t n = static_cast<std::size_t>(term->front->width) *
+                              static_cast<std::size_t>(term->front->height);
+        for (std::size_t i = 0u; i < n; ++i) {
+            if (term->front->cells[i].ch != 0u &&
+                term->front->cells[i].ch != static_cast<std::uint32_t>(' ')) {
+                drew_text = true;
+                break;
+            }
+        }
+    }
+    const bool bounded = d.valid && drew_text &&
         tui_transcript_count(d.transcript) == kRetained &&
         d.accepted > 40u && d.rejected == 0u;
     (void)on_key(Oldest, &d);
