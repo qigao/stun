@@ -40,6 +40,7 @@ class Screen {
     int scroll_top_ = 0, scroll_bottom_ = 23;
     unsigned scroll_region_commands_ = 0u;
     unsigned scroll_region_linefeeds_ = 0u;
+    unsigned vt_resize_commands_ = 0u;
 
     void clear() {
         cells_.assign(static_cast<size_t>(rows_),
@@ -131,6 +132,13 @@ class Screen {
             // changes may be reflected in the ConPTY VT stream.
             wrap_enabled_ = code == 'h';
             ++wrap_mode_changes_;
+        } else if (code == 't' && csi_ == "8;16;52") {
+            // ConPTY sends XTWINOPS 8;rows;cols t in its *output pipe*
+            // following a real host-owned ResizePseudoConsole. Apply it
+            // exactly at the byte-stream position, not eagerly after the
+            // host API returns: unread old-size VT may still be buffered.
+            resize(52, 16);
+            ++vt_resize_commands_;
         } else if (code == 'r') {
             // DECSTBM defaults to the whole viewport when omitted. ConPTY
             // can scroll the body while keeping title/status rows untouched.
@@ -330,6 +338,7 @@ public:
     unsigned scroll_region_linefeeds() const {
         return scroll_region_linefeeds_;
     }
+    unsigned vt_resize_commands() const { return vt_resize_commands_; }
     std::string diagnostic() const {
         std::string preview;
         for (const auto& line : cells_) {
@@ -360,6 +369,7 @@ public:
                ", margin-bottom=" + std::to_string(scroll_bottom_) +
                ", margin-commands=" + std::to_string(scroll_region_commands_) +
                ", margin-linefeeds=" + std::to_string(scroll_region_linefeeds_) +
+               ", vt-resize-commands=" + std::to_string(vt_resize_commands_) +
                ", lower='" + cells_[static_cast<size_t>(rows_ - 2)] +
                "', bottom='" + cells_[static_cast<size_t>(rows_ - 1)] +
                "', entered-alt=" + std::to_string(entered_alt_ ? 1 : 0) +
@@ -676,6 +686,7 @@ public:
         if (!setup(executable, false, frame_diagnostic)) return false;
         if (!await("real 80x24 ConPTY terminal frame", 12000,
             [](const Screen &s) {return s.entered_alt() && s.header() &&
+                                        s.vt_resize_commands() == 0u &&
                                         s.mode("tail", 80, 24);})) return false;
         if (!await("at least six real ConPTY message admissions", 18000,
             [](const Screen &s) {return s.mode("tail", 80, 24) &&
@@ -683,12 +694,12 @@ public:
         phase_ = "ResizePseudoConsole host-owned 52x16";
         const HRESULT resized = ResizePseudoConsole(pseudo_, COORD{52, 16});
         if (FAILED(resized)) return false;
-        {
-            std::lock_guard<std::mutex> guard(mutex_);
-            display_.resize(52, 16);
-        }
+        // The VT stream is authoritative for screen-parser ordering. The
+        // host API success alone does not mean all 80x24 bytes were drained;
+        // require ConPTY's own resize marker and the updated visible frame.
         if (!await("visible child-owned 52x16 reflow", 10000,
             [](const Screen &s) {return s.header() &&
+                                        s.vt_resize_commands() >= 1u &&
                                         s.mode("tail", 52, 16);})) return false;
         // Do not classify the ConPTY integration as stable after only the
         // first six streamed messages. The same unmodified demo must finish
@@ -727,9 +738,10 @@ int main(int argc, char** argv) {
         feed("\x1b[24;1HRetained 6/12 | tail | 80x24 |");
         if (!screen.header() || !screen.mode("tail", 80, 24) ||
             screen.count() != 6u) return 31;
-        screen.resize(52, 16);
+        feed("\x1b[8;16;52t");
         feed("\x1b[16;1H\x1b[52X\x1b[16;1HRetained 6/12 | tail | 52x16 |");
         if (!screen.header() || !screen.mode("tail", 52, 16) ||
+            screen.vt_resize_commands() != 1u ||
             screen.count() != 6u) return 32;
         // Autowrap-off at bottom-right and scrollback erasure are separate
         // from viewport erasure. Neither may evict the fixed header/footer.
