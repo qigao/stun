@@ -318,6 +318,8 @@ public:
     }
     bool entered_alt() const { return entered_alt_; }
     bool left_alt() const { return left_alt_; }
+    bool auto_wrap_enabled() const { return wrap_enabled_; }
+    unsigned wrap_mode_changes() const { return wrap_mode_changes_; }
     unsigned auto_wraps_into_footer() const {
         return auto_wraps_into_footer_;
     }
@@ -720,6 +722,32 @@ int main(int argc, char** argv) {
             protected_footer.scroll_region_commands() != 1u ||
             protected_footer.scroll_region_linefeeds() != 1u)
             return 35;
+        // DECAWM is independent of ENABLE_WRAP_AT_EOL_OUTPUT. At the
+        // penultimate row's final cell, ordinary VT autowrap can overwrite
+        // a fixed footer even without reaching the final screen row.
+        // The real Win32 alternate-screen path must explicitly send ?7l,
+        // then ?7h before leaving. Do not weaken the live ConPTY test.
+        Screen protected_no_wrap;
+        const std::string no_wrap_sequence =
+            "\x1b[?1049h\x1b[?7l\x1b[1;1HFlexUI + Tango"
+            "\x1b[23;1HRetained 12/12 | tail | 80x24 | settled=48 |"
+            "\x1b[22;80Hxy";
+        protected_no_wrap.feed(no_wrap_sequence.data(),
+                               no_wrap_sequence.size());
+        if (protected_no_wrap.auto_wrap_enabled() ||
+            protected_no_wrap.wrap_mode_changes() != 1u ||
+            protected_no_wrap.auto_wraps_into_footer() != 0u ||
+            !protected_no_wrap.header() ||
+            !protected_no_wrap.mode("tail", 80, 24) ||
+            protected_no_wrap.count() != 12u)
+            return 36;
+        const std::string restore_sequence = "\x1b[?7h\x1b[?1049l";
+        protected_no_wrap.feed(restore_sequence.data(),
+                               restore_sequence.size());
+        if (!protected_no_wrap.left_alt() ||
+            !protected_no_wrap.auto_wrap_enabled() ||
+            protected_no_wrap.wrap_mode_changes() != 2u)
+            return 37;
         std::puts("Windows ConPTY VT ECH/autowrap/scroll-region oracle passed");
         return 0;
     }
