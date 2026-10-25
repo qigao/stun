@@ -12,6 +12,7 @@
 #include <tui_transcript.h>
 
 #if defined(STUN_TUI_DEMO_HEADLESS_TEST)
+#include "tui_app_internal.h"
 #include "tui_terminal_internal.h"
 #endif
 
