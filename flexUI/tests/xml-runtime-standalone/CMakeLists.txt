@@ -81,6 +81,25 @@ add_test(NAME test_flexui_tango_stream COMMAND test_flexui_tango_stream)
 set_tests_properties(test_flexui_tango_stream PROPERTIES TIMEOUT 120)
 add_dependencies(stun_xml_runtime_qualification test_flexui_tango_stream)
 
+# Build and actually run the same production Demo UI callbacks with a
+# synthetic terminal in CI. This does not replace physical terminal testing.
+option(STUN_BUILD_TUI_STREAMING_DEMO
+       "Build/test real Tango + FlexUI Streaming sample" ON)
+if(STUN_BUILD_TUI_STREAMING_DEMO)
+  add_executable(flexui_tui_streaming_demo
+    "${STUN_ROOT}/flexUI/examples/tui_streaming_demo.cpp")
+  target_link_libraries(flexui_tui_streaming_demo PRIVATE
+    flexUI flex_backend_tui tango Threads::Threads)
+  target_compile_definitions(flexui_tui_streaming_demo PRIVATE
+    STUN_TUI_DEMO_HEADLESS_TEST=1)
+  target_include_directories(flexui_tui_streaming_demo PRIVATE
+    "${STUN_ROOT}/tango/src")
+  add_test(NAME tui_streaming_demo_smoke
+    COMMAND flexui_tui_streaming_demo --headless-smoke)
+  set_tests_properties(tui_streaming_demo_smoke PROPERTIES TIMEOUT 90)
+  add_dependencies(stun_xml_runtime_qualification flexui_tui_streaming_demo)
+endif()
+
 if(TARGET gCanvas::Window OR TARGET flex_render_engine_gcanvas OR
    TARGET FlexUI::ControllerTurboScript)
   message(FATAL_ERROR "XML runtime gate must remain headless and independent of TurboScript JIT")
