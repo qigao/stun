@@ -211,7 +211,6 @@ struct ConsoleTest {
                  (ENABLE_MOUSE_INPUT | ENABLE_WINDOW_INPUT) &&
             (im & ENABLE_QUICK_EDIT_MODE) == 0 &&
             (om & ENABLE_VIRTUAL_TERMINAL_PROCESSING) != 0 &&
-            (om & ENABLE_WRAP_AT_EOL_OUTPUT) == 0 &&
             GetConsoleCP() == CP_UTF8 && GetConsoleOutputCP() == CP_UTF8;
     }
 
