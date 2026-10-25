@@ -774,19 +774,7 @@ bool tui_terminal_render(tui_terminal_t* term) {
                 last_bg = cell->bg;
             }
             
-            /* Output character. Win32 ConPTY can serialize a printable
-             * glyph in the physical final column as a deferred EOL wrap,
-             * even when its native buffer flags disable wrapping. Erasing
-             * a blank via ECH preserves the selected background and does
-             * NOT move the terminal cursor. The final column remains
-             * addressable for nonblank cells and other consumers. */
-#ifdef _WIN32
-            if (x == term->width - 1 && cell->ch == ' ' &&
-                cell->span == TUI_CELL_SPAN_SINGLE &&
-                cell->grapheme_len == 0u) {
-                if (!output_append(term, "\033[1X")) goto output_failed;
-            } else
-#endif
+            /* Output character */
             if (cell->grapheme_len != 0u) {
                 if (!output_append_bytes(term, cell->grapheme,
                                          cell->grapheme_len)) goto output_failed;

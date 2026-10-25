@@ -35,6 +35,7 @@
 #include <string>
 #include <string_view>
 #include <thread>
+#include <vector>
 
 namespace {
 
@@ -143,6 +144,61 @@ void report_owned_ui_cells(Demo& d, const tui_buffer_t* buffer) {
         top.c_str(), lower.c_str(), bottom.c_str());
     (void)std::fclose(report);
     ++d.frame_report_count;
+}
+
+/* Diagnostic-only, non-owning observation of the ACTUAL Windows Console
+ * buffer after the last producer event. This is independent of Tango's
+ * pre-render back buffer and the parent ConPTY VT replay. It does not emit
+ * terminal output, alter UI state, or run for plain uninstrumented sessions. */
+void report_os_console_cells(const std::string& path) {
+    if (path.empty()) return;
+    HANDLE active = CreateFileW(L"CONOUT$", GENERIC_READ,
+                                FILE_SHARE_READ | FILE_SHARE_WRITE,
+                                nullptr, OPEN_EXISTING, 0, nullptr);
+    if (active == INVALID_HANDLE_VALUE) return;
+    CONSOLE_SCREEN_BUFFER_INFO info{};
+    if (!GetConsoleScreenBufferInfo(active, &info)) {
+        CloseHandle(active);
+        return;
+    }
+    const int cols = info.srWindow.Right - info.srWindow.Left + 1;
+    const int rows = info.srWindow.Bottom - info.srWindow.Top + 1;
+    if (cols <= 0 || cols > 256 || rows < 2 || rows > 120) {
+        CloseHandle(active);
+        return;
+    }
+    const COORD dims{static_cast<SHORT>(cols), static_cast<SHORT>(rows)};
+    const COORD origin{0, 0};
+    SMALL_RECT rect = info.srWindow;
+    std::vector<CHAR_INFO> cells(
+        static_cast<std::size_t>(cols) * static_cast<std::size_t>(rows));
+    const BOOL captured = ReadConsoleOutputW(active, cells.data(),
+                                             dims, origin, &rect);
+    const DWORD os_error = captured ? 0u : GetLastError();
+    CloseHandle(active);
+    const auto row_ascii = [&](int row) {
+        std::string result;
+        if (!captured) return result;
+        for (int x = 0; x < std::min(cols, 54); ++x) {
+            const wchar_t ch = cells[
+                static_cast<std::size_t>(row) * static_cast<std::size_t>(cols) +
+                static_cast<std::size_t>(x)].Char.UnicodeChar;
+            result.push_back(ch >= 0x20 && ch < 0x7f ?
+                static_cast<char>(ch) : '?');
+        }
+        return result;
+    };
+    FILE* report = std::fopen(path.c_str(), "a");
+    if (!report) return;
+    const auto top = row_ascii(0);
+    const auto lower = row_ascii(rows - 2);
+    const auto bottom = row_ascii(rows - 1);
+    (void)std::fprintf(report,
+        "OS-CONSOLE captured=%d error=%lu width=%d height=%d "
+        "top='%s' lower='%s' bottom='%s'\n",
+        captured ? 1 : 0, static_cast<unsigned long>(os_error),
+        cols, rows, top.c_str(), lower.c_str(), bottom.c_str());
+    (void)std::fclose(report);
 }
 #endif
 
@@ -302,17 +358,8 @@ void on_view(const void* ptr, tui_buffer_t* back) {
 #endif
         const int w = tui_terminal_width(term);
         const int h = tui_terminal_height(term);
-        // ConPTY's external VT serializer can still wrap printable glyphs
-        // at the physical last column after the native Console mode was
-        // set to no-wrap. Keep one cell as a blank guard only for the real
-        // Win32 terminal; the reported geometry remains the host's actual
-        // 80x24 / 52x16 size and headless buffer tests stay full-width.
-        int paint_cols = w;
-#if defined(_WIN32)
-        if (term->platform_active && w > 1) paint_cols = w - 1;
-#endif
         if (w > 0 && h > 0)
-            d.box->set_viewport(paint_cols * kCellWidth, h * kCellHeight);
+            d.box->set_viewport(w * kCellWidth, h * kCellHeight);
         const auto status = d.following
             ? d.window->show_tail(d.transcript)
             : d.window->show_from_id(d.transcript, d.anchor);
@@ -444,6 +491,14 @@ void producer(Demo& d, std::uint64_t first_id,
             d.cancel_target.store(0u, std::memory_order_release);
     }
     d.producer_done.store(true, std::memory_order_release);
+#if defined(STUN_TUI_DEMO_HEADLESS_TEST) && defined(_WIN32)
+    if (!d.frame_report_path.empty()) {
+        // Observe only after the bounded UI owner has had an opportunity
+        // to consume and render the final END. Never sample the plain path.
+        std::this_thread::sleep_for(std::chrono::milliseconds(700));
+        report_os_console_cells(d.frame_report_path);
+    }
+#endif
 }
 
 #if defined(STUN_TUI_DEMO_HEADLESS_TEST)
