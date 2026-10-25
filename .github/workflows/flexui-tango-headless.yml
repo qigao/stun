@@ -1,0 +1,241 @@
+name: FlexUI Tango cross-platform headless
+
+# Targeted native UI integration gate. Do not rebuild every renderer/diagram
+# target on every unrelated PR. No desktop window, GPU, Mono or .NET SDK.
+on:
+  pull_request:
+    paths:
+      - 'flexUI/**'
+      - 'flex/backends/tui/**'
+      - 'flex/modules/**'
+      - 'shared/markdown/**'
+      - 'tango/**'
+      - '.github/scripts/restore-flexui-tango-sdk.py'
+      - '.github/scripts/tests/test_restore_flexui_tango_sdk.py'
+      - '.github/workflows/flexui-tango-headless.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+  packages: read
+
+concurrency:
+  group: flexui-tango-cross-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  sdk-releases:
+    uses: ./.github/workflows/salts-sdk-releases.yml
+
+  cross-platform:
+    name: FlexUI/Tango headless / ${{ matrix.os }}
+    needs: sdk-releases
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            rid: macos-arm64
+            triplet: arm64-osx
+          - os: windows-latest
+            rid: windows-x64
+            triplet: x64-windows-static-md
+    env:
+      GH_TOKEN: ${{ github.token }}
+      SALTS_RELEASE: ${{ needs.sdk-releases.outputs.salts_release }}
+      SALTS_UTILS_RELEASE: ${{ needs.sdk-releases.outputs.salts_utils_release }}
+      SDK_RID: ${{ matrix.rid }}
+      VCPKG_TRIPLET: ${{ matrix.triplet }}
+    steps:
+      - name: Resolve exact PR head
+        id: source
+        shell: bash
+        run: |
+          set -euo pipefail
+          sha="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" --jq '.head_sha')"
+          [[ "$sha" =~ ^[0-9a-f]{40}$ ]]
+          printf 'sha=%s\n' "$sha" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.source.outputs.sha }}
+          persist-credentials: false
+
+      - name: Verify immutable checkout and restore script tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "${{ steps.source.outputs.sha }}"
+          python .github/scripts/tests/test_restore_flexui_tango_sdk.py
+
+      - name: Configure SDK and binary-cache paths
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "SALTS_ROOT=$RUNNER_TEMP/flexui-tango-sdk" >> "$GITHUB_ENV"
+          echo "PACKAGES_ROOT=$RUNNER_TEMP/flexui-tango-nuget" >> "$GITHUB_ENV"
+          echo "VCPKG_ROOT=$GITHUB_WORKSPACE/.ci/vcpkg" >> "$GITHUB_ENV"
+          echo "VCPKG_DEFAULT_BINARY_CACHE=$RUNNER_TEMP/vcpkg-cache" >> "$GITHUB_ENV"
+          mkdir -p "$RUNNER_TEMP/vcpkg-cache"
+
+      - name: Download official Salts and SaltsUtils packages via curl
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl_args=(--fail --silent --show-error --location --retry 3
+            --proto '=https' --proto-redir '=https'
+            --connect-timeout 15 --max-time 300
+            --user "$GITHUB_ACTOR:$GH_TOKEN")
+          curl "${curl_args[@]}" 'https://nuget.pkg.github.com/qigao/index.json' \
+            --output "$RUNNER_TEMP/flexui-tango-index.json"
+          package_base="$(jq -er '
+            [.resources[] | select(."@type" == "PackageBaseAddress/3.0.0") | ."@id"]
+            | unique
+            | if length == 1 and (.[0] | test("^https://nuget[.]pkg[.]github[.]com/qigao/[A-Za-z0-9/_-]*$"))
+              then .[0] else error("Unexpected NuGet content endpoint") end
+            ' "$RUNNER_TEMP/flexui-tango-index.json")"
+          fetch_package() {
+            local name="$1" version="${2#v}"
+            version="${version,,}"
+            [[ "$version" =~ ^[0-9]+[.][0-9]+[.][0-9]+(-[0-9a-z.]+)?$ ]]
+            local archive="$PACKAGES_ROOT/$name/$version/$name.$version.nupkg"
+            mkdir -p "$(dirname "$archive")"
+            curl "${curl_args[@]}" \
+              "${package_base%/}/$name/$version/$name.$version.nupkg" \
+              --output "$archive.part"
+            mv "$archive.part" "$archive"
+          }
+          fetch_package salts.native "$SALTS_RELEASE"
+          fetch_package saltsutils.native "$SALTS_UTILS_RELEASE"
+
+      - name: Verify official release checksums and restore one SDK RID
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/flexui-tango-checks/salts" \
+                   "$RUNNER_TEMP/flexui-tango-checks/utils"
+          gh release download "$SALTS_RELEASE" --repo qigao/salts \
+            --pattern SHA256SUMS --dir "$RUNNER_TEMP/flexui-tango-checks/salts"
+          gh release download "$SALTS_UTILS_RELEASE" --repo qigao/salts-utils \
+            --pattern SHA256SUMS --dir "$RUNNER_TEMP/flexui-tango-checks/utils"
+          python .github/scripts/restore-flexui-tango-sdk.py \
+            --packages "$PACKAGES_ROOT" --sdk "$SALTS_ROOT" \
+            --rid "$SDK_RID" \
+            --salts-release "$SALTS_RELEASE" \
+            --salts-utils-release "$SALTS_UTILS_RELEASE" \
+            --salts-checksums "$RUNNER_TEMP/flexui-tango-checks/salts/SHA256SUMS" \
+            --salts-utils-checksums "$RUNNER_TEMP/flexui-tango-checks/utils/SHA256SUMS"
+
+      - name: Checkout existing vcpkg baseline (minimal headless ports only)
+        uses: actions/checkout@v4
+        with:
+          repository: microsoft/vcpkg
+          ref: b1b19307e2d2ec1eefbdb7ea069de7d4bcd31f01
+          path: .ci/vcpkg
+          persist-credentials: false
+
+      - name: Restore minimal native build dependencies
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/vcpkg-cache
+          key: flexui-tango-vcpkg-v1-${{ runner.os }}-${{ runner.arch }}-b1b19307
+
+      - name: Build/install only headless vcpkg ports
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "$RUNNER_OS" == Windows ]]; then
+            cmd.exe /c ".ci\\vcpkg\\bootstrap-vcpkg.bat -disableMetrics"
+            vcpkg_bin="$VCPKG_ROOT/vcpkg.exe"
+          else
+            "$VCPKG_ROOT/bootstrap-vcpkg.sh" -disableMetrics
+            vcpkg_bin="$VCPKG_ROOT/vcpkg"
+          fi
+          "$vcpkg_bin" install --classic --triplet "$VCPKG_TRIPLET" \
+            lexbor box2d tree-sitter nlohmann-json pugixml stb freetype
+          test -f "$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake"
+
+      - uses: actions/checkout@v4
+        with:
+          repository: skvadrik/re2c
+          ref: '4.5.1'
+          path: .ci/re2c
+          persist-credentials: false
+
+      - name: Build native re2c code-generation tool
+        shell: bash
+        run: |
+          set -euo pipefail
+          cmake -S .ci/re2c -B build/re2c-headless -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release -DRE2C_BUILD_RE2D=OFF \
+            -DRE2C_BUILD_RE2GO=OFF -DRE2C_BUILD_RE2HS=OFF
+          cmake --build build/re2c-headless --config Release --target re2c --parallel 2
+          tool="$(find "$GITHUB_WORKSPACE/build/re2c-headless" -type f \
+            \( -name re2c -o -name re2c.exe \) -print -quit)"
+          test -n "$tool"
+          "$tool" --version
+          printf 'RE2C_TOOL=%s\n' "$tool" >> "$GITHUB_ENV"
+
+      - name: Configure real FlexUI + Tango + C11 RichDoc
+        shell: bash
+        run: |
+          set -euo pipefail
+          native_path() {
+            if [[ "$RUNNER_OS" == Windows ]]; then
+              cygpath -w "$1"
+            else
+              printf '%s\n' "$1"
+            fi
+          }
+          prefix="$(native_path "$SALTS_ROOT")"
+          toolchain="$(native_path "$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake")"
+          stb_root="$(native_path "$VCPKG_ROOT/installed/$VCPKG_TRIPLET/include")"
+          re2c="$(native_path "$RE2C_TOOL")"
+          export SALTS_ROOT="$prefix"
+          cmake -S flexUI/tests/xml-runtime-standalone \
+            -B build/flexui-tango-cross -G Ninja \
+            -DCMAKE_BUILD_TYPE=Debug \
+            "-DCMAKE_TOOLCHAIN_FILE=$toolchain" \
+            "-DVCPKG_TARGET_TRIPLET=$VCPKG_TRIPLET" \
+            "-DCMAKE_PREFIX_PATH=$prefix" \
+            "-DRE2C_EXECUTABLE=$re2c" \
+            "-DSTB_INCLUDE_DIRS=$stb_root" \
+            -DENABLE_SANITIZER_ADDRESS=OFF \
+            -DENABLE_SANITIZER_UNDEFINED=OFF \
+            -DCMAKE_FIND_USE_PACKAGE_REGISTRY=OFF \
+            -DCMAKE_FIND_USE_SYSTEM_PACKAGE_REGISTRY=OFF
+
+      - name: Build real Markdown and Tango integration binaries
+        shell: bash
+        run: |
+          set -euo pipefail
+          cmake --build build/flexui-tango-cross --config Debug \
+            --target test_markdown_widget test_flexui_tango_stream --parallel 2
+
+      - name: Run two independent native Streaming conformance tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "$RUNNER_OS" == Windows ]]; then
+            export PATH="$(cygpath -w "$SALTS_ROOT/bin"):$PATH"
+          else
+            export DYLD_LIBRARY_PATH="$SALTS_ROOT/lib:$SALTS_ROOT/bin:${DYLD_LIBRARY_PATH:-}"
+          fi
+          ctest --test-dir build/flexui-tango-cross -C Debug \
+            --no-tests=error --output-on-failure --timeout 120 \
+            -R '^test_(markdown_widget|flexui_tango_stream)$'
+
+      - name: Preserve exact-head cross-platform test evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: flexui-tango-${{ matrix.rid }}-${{ steps.source.outputs.sha }}
+          retention-days: 3
+          if-no-files-found: warn
+          path: |
+            ${{ runner.temp }}/flexui-tango-sdk/flexui-tango-sdk-provenance.json
+            build/flexui-tango-cross/Testing/Temporary/LastTest.log
+            build/flexui-tango-cross/Testing/Temporary/CTestCostData.txt
