@@ -72,6 +72,9 @@ struct Demo {
     std::atomic<std::uint64_t> cancel_target{0u};
     std::atomic<bool> producer_done{false};
     std::uint64_t active_message = 0u;
+    // UI-owner-only progress, corresponding to an accepted END/CANCEL.
+    // Unlike latest BEGIN, this marks an actually settled message.
+    std::uint64_t last_settled_message = 0u;
     std::uint64_t anchor = 0u;
     std::size_t accepted = 0u;
     std::size_t rejected = 0u;
@@ -82,13 +85,18 @@ struct Demo {
     // or terminal output are changed. At most 96 bounded lines are written.
     std::string frame_report_path;
     unsigned frame_report_count = 0u;
+    unsigned frame_seen_count = 0u;
 #endif
 };
 
 #if defined(STUN_TUI_DEMO_HEADLESS_TEST) && defined(_WIN32)
 void report_owned_ui_cells(Demo& d, const tui_buffer_t* buffer) {
+    // Sample the *whole* session, including the last retained messages.
+    // Avoid many synchronous file appends that change ConPTY scheduling,
+    // and preserve a strict maximum of 96 diagnostic records.
     if (d.frame_report_path.empty() || d.frame_report_count >= 96u ||
         !buffer || buffer->height <= 0 || buffer->width <= 0) return;
+    if ((d.frame_seen_count++ % 8u) != 0u) return;
     const auto row_ascii = [&](int row) {
         std::string result;
         if (row < 0 || row >= buffer->height) return result;
@@ -124,9 +132,11 @@ void report_owned_ui_cells(Demo& d, const tui_buffer_t* buffer) {
     const auto lower = row_ascii(buffer->height - 2);
     const auto bottom = row_ascii(buffer->height - 1);
     (void)std::fprintf(report,
-        "accepted=%zu retained=%zu width=%d height=%d header=%d footer=%d "
-        "top='%s' lower='%s' bottom='%s'\n",
-        d.accepted, tui_transcript_count(d.transcript),
+        "accepted=%zu settled=%llu retained=%zu width=%d height=%d "
+        "header=%d footer=%d top='%s' lower='%s' bottom='%s'\n",
+        d.accepted,
+        static_cast<unsigned long long>(d.last_settled_message),
+        tui_transcript_count(d.transcript),
         buffer->width, buffer->height,
         contains("FlexUI + Tango") ? 1 : 0,
         contains("Retained ") ? 1 : 0,
@@ -235,10 +245,12 @@ bool on_async(const tui_async_event_t* event, const void* packet, void* ptr) {
     ++d.accepted;
     if (event->type == TUI_STREAM_BEGIN)
         d.active_message = header.message_id;
-    else if ((event->type == TUI_STREAM_END ||
-              event->type == TUI_STREAM_CANCEL) &&
-             d.active_message == header.message_id)
-        d.active_message = 0u;
+    else if (event->type == TUI_STREAM_END ||
+             event->type == TUI_STREAM_CANCEL) {
+        d.last_settled_message = header.message_id;
+        if (d.active_message == header.message_id)
+            d.active_message = 0u;
+    }
     return true;
 }
 
@@ -269,6 +281,7 @@ void on_view(const void* ptr, tui_buffer_t* back) {
                 std::to_string(tui_transcript_count(d.transcript)) +
                 "/12 | " + (d.following ? "tail" : "scrollback") +
                 " | " + std::to_string(w) + "x" + std::to_string(h) +
+                " | settled=" + std::to_string(d.last_settled_message) +
                 " | q quit, c cancel, arrows/wheel browse, End follow");
         }
         d.box->update();

@@ -533,6 +533,18 @@ public:
         if (!await("visible child-owned 52x16 reflow", 10000,
             [](const Screen &s) {return s.header() &&
                                         s.mode("tail", 52, 16);})) return false;
+        // Do not classify the ConPTY integration as stable after only the
+        // first six streamed messages. The same unmodified demo must finish
+        // all 48 messages while the host remains at 52x16, and the terminal
+        // must STILL show both fixed chrome and the settled progress marker.
+        // This catches long-session scrolling, stale diff and render races.
+        if (!await("long-session 48th message settled and visible at 52x16",
+                   30000, [](const Screen &s) {
+                       return s.header() && s.mode("tail", 52, 16) &&
+                              s.count() == 12u &&
+                              s.status().find(" | settled=48 |") !=
+                                  std::string::npos;
+                   })) return false;
         phase_ = "normal q and alternate-screen return";
         if (!write_input("q", 1) ||
             WaitForSingleObject(process_.hProcess, 10000) != WAIT_OBJECT_0)
