@@ -215,7 +215,10 @@ public:
             if (preview.size() > 300) break;
         }
         return "size=" + std::to_string(cols_) + "x" +
-               std::to_string(rows_) + ", entered-alt=" +
+               std::to_string(rows_) + ", cursor=" +
+               std::to_string(x_) + "," + std::to_string(y_) +
+               ", parser=" + std::to_string(static_cast<int>(parse_)) +
+               ", csi='" + csi_ + "', entered-alt=" +
                std::to_string(entered_alt_ ? 1 : 0) +
                ", left-alt=" + std::to_string(left_alt_ ? 1 : 0) +
                ", header=" + std::to_string(header() ? 1 : 0) +
@@ -232,6 +235,7 @@ class ConptyAcceptance {
     std::mutex mutex_;
     Screen display_;
     size_t output_count_ = 0;
+    std::string recent_vt_;
     std::atomic<bool> output_limit_hit_{false};
     std::atomic<bool> reader_done_{false};
     std::atomic<DWORD> reader_error_{0};
@@ -260,6 +264,9 @@ class ConptyAcceptance {
                 break;
             }
             output_count_ += read;
+            recent_vt_.append(chunk, static_cast<size_t>(read));
+            if (recent_vt_.size() > 2048)
+                recent_vt_.erase(0, recent_vt_.size() - 2048);
             display_.feed(chunk, read);
         }
         reader_error_ = GetLastError();
@@ -306,7 +313,22 @@ public:
         DWORD child_exit = 999;
         if (process_.hProcess) (void)GetExitCodeProcess(
             process_.hProcess, &child_exit);
-        return display_.diagnostic() + ", output_bytes=" +
+        std::string escaped_vt;
+        const size_t start = recent_vt_.size() > 512 ?
+            recent_vt_.size() - 512 : 0;
+        for (size_t i = start; i < recent_vt_.size(); ++i) {
+            const unsigned char ch =
+                static_cast<unsigned char>(recent_vt_[i]);
+            if (ch >= 0x20 && ch < 0x7f && ch != '\\' && ch != '\'') {
+                escaped_vt.push_back(static_cast<char>(ch));
+            } else {
+                char hex[8]{};
+                (void)std::snprintf(hex, sizeof(hex), "\\x%02X", ch);
+                escaped_vt += hex;
+            }
+        }
+        return display_.diagnostic() + ", recent_vt='" + escaped_vt +
+            "', output_bytes=" +
             std::to_string(output_count_) + ", reader_done=" +
             std::to_string(reader_done_ ? 1 : 0) + ", reader_error=" +
             std::to_string(reader_error_.load()) + ", child_exit=" +
