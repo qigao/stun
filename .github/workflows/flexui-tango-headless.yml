@@ -264,6 +264,7 @@ jobs:
             "-DSTB_INCLUDE_DIRS=$stb_root" \
             -DENABLE_SANITIZER_ADDRESS=OFF \
             -DENABLE_SANITIZER_UNDEFINED=OFF \
+            -DSTUN_BUILD_TUI_STREAMING_DEMO=ON \
             -DCMAKE_FIND_USE_PACKAGE_REGISTRY=OFF \
             -DCMAKE_FIND_USE_SYSTEM_PACKAGE_REGISTRY=OFF
 
@@ -272,7 +273,7 @@ jobs:
         run: |
           set -euo pipefail
           cmake --build build/flexui-tango-cross --config Debug \
-            --target test_markdown_widget test_flexui_tango_stream --parallel 2
+            --target test_markdown_widget test_flexui_tango_stream flexui_tui_streaming_demo --parallel 2
 
       - name: Run two independent native Streaming conformance tests
         shell: bash
@@ -285,7 +286,20 @@ jobs:
           fi
           ctest --test-dir build/flexui-tango-cross -C Debug \
             --no-tests=error --output-on-failure --timeout 120 \
-            -R '^test_(markdown_widget|flexui_tango_stream)$'
+            -R '^(test_(markdown_widget|flexui_tango_stream)|tui_streaming_demo_smoke)
+
+      - name: Preserve exact-head cross-platform test evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: flexui-tango-${{ matrix.rid }}-${{ steps.source.outputs.sha }}
+          retention-days: 3
+          if-no-files-found: warn
+          path: |
+            ${{ runner.temp }}/flexui-tango-sdk/flexui-tango-sdk-provenance.json
+            build/flexui-tango-cross/Testing/Temporary/LastTest.log
+            build/flexui-tango-cross/Testing/Temporary/CTestCostData.txt
+
 
       - name: Preserve exact-head cross-platform test evidence
         if: always()
