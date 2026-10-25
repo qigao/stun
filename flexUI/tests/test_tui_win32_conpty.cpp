@@ -318,9 +318,29 @@ public:
             STARTUPINFOEXW startup{};
             startup.StartupInfo.cb = sizeof(startup);
             startup.lpAttributeList = attribute_list;
-            started = CreateProcessW(wide.c_str(), cmd.data(), nullptr,
-                nullptr, FALSE, EXTENDED_STARTUPINFO_PRESENT, nullptr,
-                nullptr, &startup.StartupInfo, &process_);
+
+            // The GitHub Actions/CTest parent has redirected standard
+            // handles. In Windows those can override the ConPTY attachment
+            // during CreateProcessW and leave a live child with no output
+            // on our ConPTY pipe. Save, clear for the spawn, then restore
+            // all three immediately so the supervising process keeps its
+            // own diagnostics and CTest output handles.
+            const HANDLE old_stdin = GetStdHandle(STD_INPUT_HANDLE);
+            const HANDLE old_stdout = GetStdHandle(STD_OUTPUT_HANDLE);
+            const HANDLE old_stderr = GetStdHandle(STD_ERROR_HANDLE);
+            const BOOL cleared_in = SetStdHandle(STD_INPUT_HANDLE, nullptr);
+            const BOOL cleared_out = SetStdHandle(STD_OUTPUT_HANDLE, nullptr);
+            const BOOL cleared_err = SetStdHandle(STD_ERROR_HANDLE, nullptr);
+            if (cleared_in && cleared_out && cleared_err) {
+                started = CreateProcessW(wide.c_str(), cmd.data(), nullptr,
+                    nullptr, FALSE, EXTENDED_STARTUPINFO_PRESENT, nullptr,
+                    nullptr, &startup.StartupInfo, &process_);
+            }
+            const DWORD spawn_error = GetLastError();
+            (void)SetStdHandle(STD_INPUT_HANDLE, old_stdin);
+            (void)SetStdHandle(STD_OUTPUT_HANDLE, old_stdout);
+            (void)SetStdHandle(STD_ERROR_HANDLE, old_stderr);
+            SetLastError(spawn_error);
         }
         DeleteProcThreadAttributeList(attribute_list);
         // Release our copies only after CreateProcessW completes; ConPTY
