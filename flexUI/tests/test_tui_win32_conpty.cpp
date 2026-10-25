@@ -218,6 +218,7 @@ class ConptyAcceptance {
     std::atomic<bool> reader_done_{false};
     std::atomic<DWORD> reader_error_{0};
     std::string phase_ = "initialize";
+    std::string probe_report_path_;
 
     static std::wstring utf8_to_wide(const char* path) {
         const int count = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS,
@@ -265,10 +266,25 @@ public:
         if (child_output_read_) CloseHandle(child_output_read_);
         if (process_.hThread) CloseHandle(process_.hThread);
         if (process_.hProcess) CloseHandle(process_.hProcess);
+        if (!probe_report_path_.empty()) (void)DeleteFileA(
+            probe_report_path_.c_str());
     }
     std::string last_phase() const { return phase_; }
     std::string diagnostic() {
         std::lock_guard<std::mutex> guard(mutex_);
+        std::string independent_report;
+        if (!probe_report_path_.empty()) {
+            HANDLE f = CreateFileA(probe_report_path_.c_str(), GENERIC_READ,
+                                   FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr,
+                                   OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+            if (f != INVALID_HANDLE_VALUE) {
+                char content[512]{};
+                DWORD got = 0;
+                if (ReadFile(f, content, sizeof(content) - 1, &got, nullptr))
+                    independent_report.assign(content, got);
+                CloseHandle(f);
+            }
+        }
         DWORD child_exit = 999;
         if (process_.hProcess) (void)GetExitCodeProcess(
             process_.hProcess, &child_exit);
@@ -277,7 +293,8 @@ public:
             std::to_string(reader_done_ ? 1 : 0) + ", reader_error=" +
             std::to_string(reader_error_.load()) + ", child_exit=" +
             std::to_string(child_exit) + ", output_limit=" +
-            std::to_string(output_limit_hit_ ? 1 : 0);
+            std::to_string(output_limit_hit_ ? 1 : 0) +
+            ", child_console_info='" + independent_report + "'";
     }
     bool setup(const char* executable, bool probe = false) {
         phase_ = "CreatePseudoConsole/child";
@@ -310,11 +327,24 @@ public:
         constexpr DWORD_PTR kPseudoConsoleAttribute = 0x00020016;
         const BOOL attr_ok = UpdateProcThreadAttribute(attribute_list, 0,
             kPseudoConsoleAttribute, &pseudo_, sizeof(pseudo_), nullptr, nullptr);
+        if (probe) {
+            char directory[MAX_PATH]{};
+            char filename[MAX_PATH]{};
+            const DWORD path_size = GetTempPathA(MAX_PATH, directory);
+            if (path_size == 0 || path_size >= MAX_PATH ||
+                !GetTempFileNameA(directory, "STP", 0, filename))
+                return false;
+            probe_report_path_ = filename;
+        }
         const auto wide = utf8_to_wide(executable);
         BOOL started = FALSE;
         if (attr_ok && !wide.empty()) {
             std::wstring command = L"\"" + wide + L"\"";
-            if (probe) command += L" --probe-child";
+            if (probe) {
+                command += L" --probe-child \"";
+                command += utf8_to_wide(probe_report_path_.c_str());
+                command += L"\"";
+            }
             std::vector<wchar_t> cmd(command.begin(), command.end());
             cmd.push_back(L'\0');
             STARTUPINFOEXW startup{};
@@ -409,7 +439,7 @@ public:
 
 } // namespace
 int main(int argc, char** argv) {
-    if (argc == 2 && std::strcmp(argv[1], "--probe-child") == 0) {
+    if (argc == 3 && std::strcmp(argv[1], "--probe-child") == 0) {
         const HANDLE output = GetStdHandle(STD_OUTPUT_HANDLE);
         DWORD mode = 0;
         if (!output || output == INVALID_HANDLE_VALUE ||
@@ -418,20 +448,41 @@ int main(int argc, char** argv) {
         if (!GetConsoleScreenBufferInfo(output, &info)) return 23;
         const int width = info.srWindow.Right - info.srWindow.Left + 1;
         const int height = info.srWindow.Bottom - info.srWindow.Top + 1;
-        // This is the host-requested ConPTY size. An inherited CI console
-        // could accept WriteConsoleA while silently bypassing our pipe.
-        if (width != 80 || height != 24) return 24;
+        DWORD console_pids[64]{};
+        const DWORD nconsole = GetConsoleProcessList(console_pids, 64);
+        const HANDLE f = CreateFileA(argv[2], GENERIC_WRITE,
+                      FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr,
+                      CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+        if (f != INVALID_HANDLE_VALUE) {
+            char report[256]{};
+            const int count = std::snprintf(report, sizeof(report),
+                "observed_window=%dx%d buffer=%dx%d mode=%lu console_pids=%lu pid=%lu",
+                width, height, static_cast<int>(info.dwSize.X),
+                static_cast<int>(info.dwSize.Y),
+                static_cast<unsigned long>(mode),
+                static_cast<unsigned long>(nconsole),
+                static_cast<unsigned long>(GetCurrentProcessId()));
+            if (count > 0 && count < static_cast<int>(sizeof(report))) {
+                DWORD wrote = 0;
+                (void)WriteFile(f, report, static_cast<DWORD>(count),
+                                &wrote, nullptr);
+            }
+            CloseHandle(f);
+        }
+        // Test the two actual output paths *before* rejecting mismatched
+        // geometry. This tells whether the child has another console or the
+        // requested ConPTY simply reports a different window rectangle.
         static constexpr char marker[] = "STUN_CONPTY_HOST_PROBE\r\n";
-        DWORD n = 0;
+        DWORD written = 0;
         if (!WriteConsoleA(output, marker, sizeof(marker) - 1u,
-                           &n, nullptr) || n != sizeof(marker) - 1u)
-            return 22;
+                           &written, nullptr) ||
+            written != sizeof(marker) - 1u) return 22;
         static constexpr char raw[] = "STUN_CONPTY_FILE_PROBE\r\n";
-        n = 0;
+        written = 0;
         if (!WriteFile(output, raw, sizeof(raw) - 1u,
-                       &n, nullptr) || n != sizeof(raw) - 1u)
-            return 25;
-        return 0;
+                       &written, nullptr) ||
+            written != sizeof(raw) - 1u) return 25;
+        return width == 80 && height == 24 ? 0 : 24;
     }
     if (argc == 2 && std::strcmp(argv[1], "--selftest") == 0) {
         ConptyAcceptance probe;
