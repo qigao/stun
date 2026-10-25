@@ -167,12 +167,13 @@ public:
         }
         return {};
     }
-    bool header() const {
+    bool contains(const char* token) const {
         for (const auto& line : cells_) {
-            if (line.find("FlexUI + Tango") != std::string::npos) return true;
+            if (line.find(token) != std::string::npos) return true;
         }
         return false;
     }
+    bool header() const { return contains("FlexUI + Tango"); }
     bool mode(const char *which, int cols, int rows) const {
         const auto line = status();
         const std::string expect = std::string(" | ") + which + " | " +
@@ -278,7 +279,7 @@ public:
             std::to_string(child_exit) + ", output_limit=" +
             std::to_string(output_limit_hit_ ? 1 : 0);
     }
-    bool setup(const char* executable) {
+    bool setup(const char* executable, bool probe = false) {
         phase_ = "CreatePseudoConsole/child";
         HANDLE conpty_in = nullptr, conpty_out = nullptr;
         SECURITY_ATTRIBUTES attrs{sizeof(attrs), nullptr, TRUE};
@@ -313,6 +314,7 @@ public:
         BOOL started = FALSE;
         if (attr_ok && !wide.empty()) {
             std::wstring command = L"\"" + wide + L"\"";
+            if (probe) command += L" --probe-child";
             std::vector<wchar_t> cmd(command.begin(), command.end());
             cmd.push_back(L'\0');
             STARTUPINFOEXW startup{};
@@ -370,6 +372,17 @@ public:
         }
         return false;
     }
+    bool run_probe(const char* executable) {
+        if (!setup(executable, true)) return false;
+        if (!await("independent ConPTY child output", 6000,
+            [](const Screen& s) {
+                return s.contains("STUN_CONPTY_HOST_PROBE");
+            }, true)) return false;
+        if (WaitForSingleObject(process_.hProcess, 2000) != WAIT_OBJECT_0)
+            return false;
+        DWORD code = 999;
+        return GetExitCodeProcess(process_.hProcess, &code) && code == 0;
+    }
     bool run(const char *executable) {
         if (!setup(executable)) return false;
         if (!await("real 80x24 ConPTY terminal frame", 12000,
@@ -403,6 +416,29 @@ public:
 
 } // namespace
 int main(int argc, char** argv) {
+    if (argc == 2 && std::strcmp(argv[1], "--probe-child") == 0) {
+        const HANDLE output = GetStdHandle(STD_OUTPUT_HANDLE);
+        DWORD mode = 0;
+        if (!output || output == INVALID_HANDLE_VALUE ||
+            !GetConsoleMode(output, &mode)) return 21;
+        static constexpr char marker[] = "STUN_CONPTY_HOST_PROBE\r\n";
+        DWORD n = 0;
+        if (!WriteConsoleA(output, marker, sizeof(marker) - 1u,
+                           &n, nullptr) || n != sizeof(marker) - 1u)
+            return 22;
+        return 0;
+    }
+    if (argc == 2 && std::strcmp(argv[1], "--selftest") == 0) {
+        ConptyAcceptance probe;
+        if (!probe.run_probe(argv[0])) {
+            std::fprintf(stderr, "Independent ConPTY host probe FAILED: %s, "
+                "phase='%s'\n", probe.diagnostic().c_str(),
+                probe.last_phase().c_str());
+            return 6;
+        }
+        std::puts("Independent ConPTY host transport passed");
+        return 0;
+    }
     if (argc != 2) return 2;
     ConptyAcceptance harness;
     if (!harness.run(argv[1])) {
