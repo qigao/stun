@@ -28,6 +28,8 @@ class Screen {
     int utf8_continuations_ = 0;
     std::vector<std::string> cells_;
     bool entered_alt_ = false, left_alt_ = false;
+    bool wrap_enabled_ = true;
+    unsigned wrap_mode_changes_ = 0u;
 
     void clear() {
         cells_.assign(static_cast<size_t>(rows_),
@@ -47,8 +49,14 @@ class Screen {
 
     void put(char ch, int width = 1) {
         if (x_ >= cols_) {
-            x_ = 0;
-            newline();
+            if (wrap_enabled_) {
+                x_ = 0;
+                newline();
+            } else {
+                // DECAWM off: printing again in the final column overwrites
+                // that cell; it must not scroll a fixed footer out of view.
+                x_ = cols_ - 1;
+            }
         }
         if (x_ >= 0 && y_ >= 0 && y_ < rows_ && x_ < cols_) {
             auto& line = cells_[static_cast<size_t>(y_)];
@@ -84,6 +92,11 @@ class Screen {
         } else if (csi_ == "?1049" && code == 'l') {
             left_alt_ = true;
             clear();
+        } else if (csi_ == "?7" && (code == 'h' || code == 'l')) {
+            // Standard DEC automatic line-wrap. Windows Console mode
+            // changes may be reflected in the ConPTY VT stream.
+            wrap_enabled_ = code == 'h';
+            ++wrap_mode_changes_;
         } else if (code == 'H' || code == 'f') {
             y_ = std::clamp(number(0) - 1, 0, rows_ - 1);
             x_ = std::clamp(number(1) - 1, 0, cols_ - 1);
@@ -97,11 +110,31 @@ class Screen {
             x_ = std::min(cols_ - 1, x_ + number(0));
         } else if (code == 'D') {
             x_ = std::max(0, x_ - number(0));
-        } else if (code == 'J' && (csi_ == "2" || csi_ == "3")) {
-            // ED erases cells; unlike alternate-screen entry it does NOT
-            // home the cursor. ConPTY often emits ED around reflows.
-            for (auto& line : cells_)
-                line.assign(static_cast<size_t>(cols_), ' ');
+        } else if (code == 'J') {
+            // ED 3 erases SAVED scrollback, not visible viewport cells.
+            // ED 0/1/2 erase only the corresponding visible region and
+            // never move the cursor (unlike alternate-screen entry).
+            if (csi_ != "3") {
+                const bool before = csi_ == "1";
+                const bool all = csi_ == "2";
+                for (int row = 0; row < rows_; ++row) {
+                    int first = 0, end = cols_;
+                    if (!all) {
+                        if (before) {
+                            if (row > y_) continue;
+                            if (row == y_) end = std::min(cols_, x_ + 1);
+                        } else {
+                            if (row < y_) continue;
+                            if (row == y_) first = std::min(cols_, x_);
+                        }
+                    }
+                    if (end > first)
+                        cells_[static_cast<size_t>(row)].replace(
+                            static_cast<size_t>(first),
+                            static_cast<size_t>(end - first),
+                            static_cast<size_t>(end - first), ' ');
+                }
+            }
         } else if (code == 'X') {
             // ECH: erase N cells at cursor without moving it. ConPTY
             // normalizes native WriteConsole output into CSI n X runs.
@@ -245,8 +278,10 @@ public:
                std::to_string(rows_) + ", cursor=" +
                std::to_string(x_) + "," + std::to_string(y_) +
                ", parser=" + std::to_string(static_cast<int>(parse_)) +
-               ", csi='" + csi_ + "', entered-alt=" +
-               std::to_string(entered_alt_ ? 1 : 0) +
+               ", csi='" + csi_ + "', wrap=" +
+               std::to_string(wrap_enabled_ ? 1 : 0) +
+               ", wrap-mode-changes=" + std::to_string(wrap_mode_changes_) +
+               ", entered-alt=" + std::to_string(entered_alt_ ? 1 : 0) +
                ", left-alt=" + std::to_string(left_alt_ ? 1 : 0) +
                ", header=" + std::to_string(header() ? 1 : 0) +
                ", status='" + status() + "', preview='" + preview + "'";
@@ -574,7 +609,18 @@ int main(int argc, char** argv) {
         feed("\x1b[16;1H\x1b[52X\x1b[16;1HRetained 6/12 | tail | 52x16 |");
         if (!screen.header() || !screen.mode("tail", 52, 16) ||
             screen.count() != 6u) return 32;
-        std::puts("Windows ConPTY VT ECH and resize oracle passed");
+        // Autowrap-off at bottom-right and scrollback erasure are separate
+        // from viewport erasure. Neither may evict the fixed header/footer.
+        Screen no_wrap;
+        const std::string setup =
+            "\x1b[?1049h\x1b[?7l\x1b[1;1HFlexUI + Tango"
+            "\x1b[24;1HRetained 12/12 | tail | 80x24 | settled=48 |";
+        no_wrap.feed(setup.data(), setup.size());
+        const std::string edge = "\x1b[24;80HXY\x1b[3J";
+        no_wrap.feed(edge.data(), edge.size());
+        if (!no_wrap.header() || !no_wrap.mode("tail", 80, 24) ||
+            no_wrap.count() != 12u) return 33;
+        std::puts("Windows ConPTY VT ECH/autowrap/scrollback oracle passed");
         return 0;
     }
     if (argc == 3 && std::strcmp(argv[1], "--probe-child") == 0) {
