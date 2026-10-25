@@ -302,8 +302,17 @@ void on_view(const void* ptr, tui_buffer_t* back) {
 #endif
         const int w = tui_terminal_width(term);
         const int h = tui_terminal_height(term);
+        // ConPTY's external VT serializer can still wrap printable glyphs
+        // at the physical last column after the native Console mode was
+        // set to no-wrap. Keep one cell as a blank guard only for the real
+        // Win32 terminal; the reported geometry remains the host's actual
+        // 80x24 / 52x16 size and headless buffer tests stay full-width.
+        int paint_cols = w;
+#if defined(_WIN32)
+        if (term->platform_active && w > 1) paint_cols = w - 1;
+#endif
         if (w > 0 && h > 0)
-            d.box->set_viewport(w * kCellWidth, h * kCellHeight);
+            d.box->set_viewport(paint_cols * kCellWidth, h * kCellHeight);
         const auto status = d.following
             ? d.window->show_tail(d.transcript)
             : d.window->show_from_id(d.transcript, d.anchor);
