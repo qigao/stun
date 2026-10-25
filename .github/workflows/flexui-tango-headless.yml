@@ -176,7 +176,7 @@ jobs:
           vcpkg_root="$VCPKG_ROOT"
           deps_root="$RUNNER_TEMP/flexui-tango-xml-deps"
           if [[ "$RUNNER_OS" == Windows ]]; then
-            vcpkg_root="$(cygpath -u "$VCPKG_ROOT")"
+            vcpkg_root="$(cygpath -m "$VCPKG_ROOT")"
             deps_root="$(cygpath -m "$deps_root")"
           fi
           cmake -S flexUI/tests/xml-runtime-deps \
