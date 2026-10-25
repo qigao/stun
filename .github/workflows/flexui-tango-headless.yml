@@ -147,16 +147,19 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          vcpkg_root="$VCPKG_ROOT"
           if [[ "$RUNNER_OS" == Windows ]]; then
-            cmd.exe /c ".ci\\vcpkg\\bootstrap-vcpkg.bat -disableMetrics"
-            vcpkg_bin="$VCPKG_ROOT/vcpkg.exe"
+            vcpkg_root="$(cygpath -u "$VCPKG_ROOT")"
+            (cd "$vcpkg_root" && cmd.exe //C bootstrap-vcpkg.bat -disableMetrics)
+            vcpkg_bin="$vcpkg_root/vcpkg.exe"
           else
-            "$VCPKG_ROOT/bootstrap-vcpkg.sh" -disableMetrics
-            vcpkg_bin="$VCPKG_ROOT/vcpkg"
+            "$vcpkg_root/bootstrap-vcpkg.sh" -disableMetrics
+            vcpkg_bin="$vcpkg_root/vcpkg"
           fi
+          test -f "$vcpkg_bin"
           "$vcpkg_bin" install --classic --triplet "$VCPKG_TRIPLET" \
             lexbor box2d tree-sitter nlohmann-json pugixml stb freetype
-          test -f "$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake"
+          test -f "$vcpkg_root/scripts/buildsystems/vcpkg.cmake"
 
       - uses: actions/checkout@v4
         with:
@@ -173,7 +176,11 @@ jobs:
             -DCMAKE_BUILD_TYPE=Release -DRE2C_BUILD_RE2D=OFF \
             -DRE2C_BUILD_RE2GO=OFF -DRE2C_BUILD_RE2HS=OFF
           cmake --build build/re2c-headless --config Release --target re2c --parallel 2
-          tool="$(find "$GITHUB_WORKSPACE/build/re2c-headless" -type f \
+          workspace="$GITHUB_WORKSPACE"
+          if [[ "$RUNNER_OS" == Windows ]]; then
+            workspace="$(cygpath -u "$GITHUB_WORKSPACE")"
+          fi
+          tool="$(find "$workspace/build/re2c-headless" -type f \
             \( -name re2c -o -name re2c.exe \) -print -quit)"
           test -n "$tool"
           "$tool" --version
@@ -190,9 +197,13 @@ jobs:
               printf '%s\n' "$1"
             fi
           }
+          vcpkg_root="$VCPKG_ROOT"
+          if [[ "$RUNNER_OS" == Windows ]]; then
+            vcpkg_root="$(cygpath -u "$VCPKG_ROOT")"
+          fi
           prefix="$(native_path "$SALTS_ROOT")"
-          toolchain="$(native_path "$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake")"
-          stb_root="$(native_path "$VCPKG_ROOT/installed/$VCPKG_TRIPLET/include")"
+          toolchain="$(native_path "$vcpkg_root/scripts/buildsystems/vcpkg.cmake")"
+          stb_root="$(native_path "$vcpkg_root/installed/$VCPKG_TRIPLET/include")"
           re2c="$(native_path "$RE2C_TOOL")"
           export SALTS_ROOT="$prefix"
           cmake -S flexUI/tests/xml-runtime-standalone \
