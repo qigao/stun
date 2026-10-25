@@ -19,6 +19,7 @@ struct ConsoleTest {
     std::string last_phase = "setup";
     std::wstring last_screen;
     std::string last_status;
+    int immediate_resize_width = -1, immediate_resize_height = -1;
     unsigned last_count = 0;
     bool last_tail = false, last_history = false;
     int last_width = 0, last_height = 0;
@@ -221,8 +222,20 @@ struct ConsoleTest {
         if (active == INVALID_HANDLE_VALUE) return false;
         SMALL_RECT target{0, 0, 51, 15};
         const BOOL result = SetConsoleWindowInfo(active, TRUE, &target);
+        CONSOLE_SCREEN_BUFFER_INFO immediate{};
+        const BOOL measured = result &&
+            GetConsoleScreenBufferInfo(active, &immediate);
+        if (measured) {
+            immediate_resize_width =
+                immediate.srWindow.Right - immediate.srWindow.Left + 1;
+            immediate_resize_height =
+                immediate.srWindow.Bottom - immediate.srWindow.Top + 1;
+        }
         CloseHandle(active);
-        return result != FALSE;
+        // The OS must actually apply the viewport change, not merely
+        // return success on a request the active device ignored.
+        return measured && immediate_resize_width == 52 &&
+               immediate_resize_height == 16;
     }
 
     bool restored() {
@@ -284,11 +297,13 @@ int main(int argc, char** argv) {
         std::fprintf(stderr,
             "Win32 Console PTY-equivalent gate FAILED at '%s', OS=%lu, "
             "last frame UTF-16 cells=%zu; status='%s'; "
-            "count=%u tail=%d scrollback=%d geometry=%dx%d\n",
+            "count=%u tail=%d scrollback=%d geometry=%dx%d "
+            "OS-immediate-resize=%dx%d\n",
             test.last_phase.c_str(), static_cast<unsigned long>(error),
             test.last_screen.size(), test.last_status.c_str(),
             test.last_count, test.last_tail ? 1 : 0,
-            test.last_history ? 1 : 0, test.last_width, test.last_height);
+            test.last_history ? 1 : 0, test.last_width, test.last_height,
+            test.immediate_resize_width, test.immediate_resize_height);
         return 4;
     }
     std::puts("real Win32 Console chat passed: KEY_EVENT Home/End, "

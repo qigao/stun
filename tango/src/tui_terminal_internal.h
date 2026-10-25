@@ -49,6 +49,10 @@ struct tui_terminal {
 #ifdef _WIN32
     HANDLE h_out;
     HANDLE h_in;
+    /* Read-only handle to the actual active VT alternate screen buffer.
+     * The inherited h_out may continue to refer to the original buffer.
+     * Private platform state, not part of the public Tango ABI. */
+    HANDLE h_active_size;
     DWORD orig_out_mode;
     DWORD orig_in_mode;
     UINT orig_output_cp;
