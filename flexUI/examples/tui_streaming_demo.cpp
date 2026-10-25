@@ -22,8 +22,14 @@
 #include <chrono>
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <exception>
+
+#if defined(STUN_TUI_DEMO_HEADLESS_TEST) && !defined(_WIN32)
+#include <termios.h>
+#include <unistd.h>
+#endif
 #include <functional>
 #include <memory>
 #include <string>
@@ -37,6 +43,20 @@ constexpr std::size_t kVisible = 5u;
 constexpr std::size_t kMaxChunk = 128u;
 constexpr float kCellWidth = 8.0f;
 constexpr float kCellHeight = 16.0f;
+
+// The installed-SDK PTY fixture checks restoration before macOS revokes
+// the controlling tty on process exit. No new Tango ABI or event loop.
+#if defined(STUN_TUI_DEMO_HEADLESS_TEST) && !defined(_WIN32)
+bool same_pty_termios(const termios& lhs, const termios& rhs) {
+    return lhs.c_iflag == rhs.c_iflag &&
+           lhs.c_oflag == rhs.c_oflag &&
+           lhs.c_cflag == rhs.c_cflag &&
+           lhs.c_lflag == rhs.c_lflag &&
+           std::memcmp(lhs.c_cc, rhs.c_cc, sizeof(lhs.c_cc)) == 0 &&
+           cfgetispeed(&lhs) == cfgetispeed(&rhs) &&
+           cfgetospeed(&lhs) == cfgetospeed(&rhs);
+}
+#endif
 
 enum Command { Quit = 1, Older, Newer, Tail, Oldest, Cancel };
 
@@ -475,12 +495,38 @@ int main(int argc, char** argv) {
     Demo d;
     try {
         if (!initialize(d)) { shutdown(d); return 1; }
+#if defined(STUN_TUI_DEMO_HEADLESS_TEST) && !defined(_WIN32)
+        const bool verify_pty =
+            std::getenv("STUN_TUI_PTY_TERMIOS_CHECK") != nullptr;
+        struct termios original_pty{};
+        if (verify_pty && tcgetattr(STDIN_FILENO, &original_pty) != 0) {
+            shutdown(d);
+            return 1;
+        }
+#endif
         std::thread worker(producer, std::ref(d), 1u, 48u,
                            std::chrono::milliseconds(28));
         tui_app_run(d.app);
         d.stop.store(true, std::memory_order_release);
         worker.join();
-        const bool success = d.valid;
+        bool success = d.valid;
+#if defined(STUN_TUI_DEMO_HEADLESS_TEST) && !defined(_WIN32)
+        if (verify_pty) {
+            // tui_app_run has completed terminal_cleanup(), but STDIN is
+            // still an open controlling PTY: no post-exit ENOTTY race.
+            struct termios restored_pty{};
+            const bool restored =
+                tcgetattr(STDIN_FILENO, &restored_pty) == 0 &&
+                same_pty_termios(original_pty, restored_pty);
+            if (restored) {
+                if (std::fputs("TANGO_PTY_TERMIOS_RESTORED\n", stdout) < 0 ||
+                    std::fflush(stdout) != 0)
+                    success = false;
+            } else {
+                success = false;
+            }
+        }
+#endif
         shutdown(d);
         return success ? 0 : 1;
     } catch (const std::exception& e) {

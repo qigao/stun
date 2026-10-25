@@ -243,6 +243,7 @@ def run_test(executable):
             close_fds=True,
             env={**os.environ, "TERM": "xterm-256color",
                  "COLORTERM": "truecolor",
+                 "STUN_TUI_PTY_TERMIOS_CHECK": "1",
                  "LC_ALL": ("en_US.UTF-8" if sys.platform == "darwin"
                             else "C.UTF-8")})
 
@@ -322,8 +323,16 @@ def run_test(executable):
         require(output.index(b"\x1b[?1049h") <
                 output.rindex(b"\x1b[?1049l"),
                 "alternate screen left before it was entered")
-        require(mode_matches(original_termios, termios.tcgetattr(slave)),
-                "termios flags were not fully restored after normal exit")
+        # The production tui_app_run() path must restore the complete
+        # original termios before returning. The CI-only in-process oracle
+        # attests to that exact comparison while the PTY remains attached.
+        # Darwin revokes the slave tty on session-leader exit: a parent-side
+        # post-exit tcgetattr() raises ENOTTY even after correct restoration.
+        require(b"TANGO_PTY_TERMIOS_RESTORED" in output,
+                "missing in-process complete termios restoration evidence")
+        if sys.platform != "darwin":
+            require(mode_matches(original_termios, termios.tcgetattr(slave)),
+                    "parent-observed termios mismatch after normal exit")
         print("native POSIX PTY chat passed: keyboard, SGR mouse, "
               "SIGWINCH 52x16 UI, termios restoration and terminal controls; "
               "captured=%d bytes" %
