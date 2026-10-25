@@ -98,6 +98,20 @@ if(STUN_BUILD_TUI_STREAMING_DEMO)
     COMMAND flexui_tui_streaming_demo --headless-smoke)
   set_tests_properties(tui_streaming_demo_smoke PROPERTIES TIMEOUT 90)
   add_dependencies(stun_xml_runtime_qualification flexui_tui_streaming_demo)
+
+  # The separate native POSIX PTY gate runs the *ordinary* interactive
+  # tui_app_run() branch: actual termios, kernel tty input, SIGWINCH and
+  # alternate-screen/keyboard restoration. The synthetic smoke above does
+  # not substitute for this test. Start with Linux installed-SDK ASan/UBSan.
+  if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    find_package(Python3 COMPONENTS Interpreter REQUIRED)
+    add_test(NAME tui_streaming_demo_posix_pty
+      COMMAND "${Python3_EXECUTABLE}"
+        "${STUN_ROOT}/flexUI/tests/test_tui_streaming_pty.py"
+        "$<TARGET_FILE:flexui_tui_streaming_demo>")
+    set_tests_properties(tui_streaming_demo_posix_pty
+      PROPERTIES TIMEOUT 60)
+  endif()
 endif()
 
 if(TARGET gCanvas::Window OR TARGET flex_render_engine_gcanvas OR
