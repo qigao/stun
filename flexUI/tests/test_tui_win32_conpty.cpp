@@ -5,6 +5,7 @@
  * Windows host-owned operation; SetConsoleWindowInfo is not a substitute.
  */
 #define WIN32_LEAN_AND_MEAN
+#define NOMINMAX
 #include <windows.h>
 #include <algorithm>
 #include <atomic>
