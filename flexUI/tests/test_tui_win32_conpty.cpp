@@ -187,6 +187,21 @@ public:
     }
     bool entered_alt() const { return entered_alt_; }
     bool left_alt() const { return left_alt_; }
+    std::string diagnostic() const {
+        std::string preview;
+        for (const auto& line : cells_) {
+            if (line.find_first_not_of(' ') == std::string::npos) continue;
+            if (!preview.empty()) preview += " / ";
+            preview += line.substr(0, 78);
+            if (preview.size() > 300) break;
+        }
+        return "size=" + std::to_string(cols_) + "x" +
+               std::to_string(rows_) + ", entered-alt=" +
+               std::to_string(entered_alt_ ? 1 : 0) +
+               ", left-alt=" + std::to_string(left_alt_ ? 1 : 0) +
+               ", header=" + std::to_string(header() ? 1 : 0) +
+               ", status='" + status() + "', preview='" + preview + "'";
+    }
 };
 
 class ConptyAcceptance {
@@ -199,6 +214,8 @@ class ConptyAcceptance {
     Screen display_;
     size_t output_count_ = 0;
     std::atomic<bool> output_limit_hit_{false};
+    std::atomic<bool> reader_done_{false};
+    std::atomic<DWORD> reader_error_{0};
     std::string phase_ = "initialize";
 
     static std::wstring utf8_to_wide(const char* path) {
@@ -225,6 +242,8 @@ class ConptyAcceptance {
             output_count_ += read;
             display_.feed(chunk, read);
         }
+        reader_error_ = GetLastError();
+        reader_done_ = true;
     }
     bool write_input(const char *data, DWORD length) {
         DWORD written = 0;
@@ -247,9 +266,17 @@ public:
         if (process_.hProcess) CloseHandle(process_.hProcess);
     }
     std::string last_phase() const { return phase_; }
-    std::string last_status() {
+    std::string diagnostic() {
         std::lock_guard<std::mutex> guard(mutex_);
-        return display_.status();
+        DWORD child_exit = 999;
+        if (process_.hProcess) (void)GetExitCodeProcess(
+            process_.hProcess, &child_exit);
+        return display_.diagnostic() + ", output_bytes=" +
+            std::to_string(output_count_) + ", reader_done=" +
+            std::to_string(reader_done_ ? 1 : 0) + ", reader_error=" +
+            std::to_string(reader_error_.load()) + ", child_exit=" +
+            std::to_string(child_exit) + ", output_limit=" +
+            std::to_string(output_limit_hit_ ? 1 : 0);
     }
     bool setup(const char* executable) {
         phase_ = "CreatePseudoConsole/child";
@@ -351,8 +378,8 @@ int main(int argc, char** argv) {
     ConptyAcceptance harness;
     if (!harness.run(argv[1])) {
         std::fprintf(stderr, "Win32 ConPTY resize acceptance failed at '%s', "
-            "visible status='%s', error=%lu\n",
-            harness.last_phase().c_str(), harness.last_status().c_str(),
+            "%s, error=%lu\n",
+            harness.last_phase().c_str(), harness.diagnostic().c_str(),
             static_cast<unsigned long>(GetLastError()));
         return 5;
     }
