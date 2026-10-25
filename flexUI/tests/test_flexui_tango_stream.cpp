@@ -1,3 +1,6 @@
+#include <atomic>
+#include <future>
+
 #include <tinytest.hpp>
 #undef group
 
@@ -11,8 +14,6 @@
 #include "tui_terminal_internal.h"
 
 #include <array>
-#include <atomic>
-#include <future>
 #include <chrono>
 #include <cmath>
 #include <cstdint>
