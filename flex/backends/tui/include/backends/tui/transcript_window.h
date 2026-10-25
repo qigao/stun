@@ -77,10 +77,17 @@ public:
     return nullptr;
   }
 
-  // Render a clipped half-open slice starting at first. The caller chooses
-  // whether to follow the tail or explicitly anchor a given message; there
-  // is no implicit scroll or per-token UI mutation.
+  // Compatibility surface: ordinary callers preserve existing viewport
+  // intent. Interactive navigation chooses Tail or Anchor explicitly.
   Status show(const tui_transcript_t* transcript, std::size_t first) {
+    return show_with_policy(transcript, first, ScrollPolicy::PreserveIntent);
+  }
+
+private:
+  enum class ScrollPolicy { PreserveIntent, FollowTail, AnchorTop };
+
+  Status show_with_policy(const tui_transcript_t* transcript,
+                          std::size_t first, ScrollPolicy policy) {
     if (!transcript) return Status::Invalid;
 
     std::size_t count = 0u;
@@ -129,7 +136,20 @@ public:
       if (next[i] != visible_[i] ||
           next[i]->markdown->markdown() != desired[i].text)
         different = true;
-    if (!different) return Status::Unchanged;
+    // Anchor semantics are independent of the old viewport's scroll tail.
+    // A different first visible message starts at the top; an unchanged
+    // anchor retains its numeric scroll position across streaming reflow.
+    const bool different_anchor = count != 0u &&
+        (visible_.empty() || visible_[0]->message_id != desired[0].id);
+    if (!different) {
+      if (policy == ScrollPolicy::FollowTail &&
+          viewport_.set_scroll_offset(viewport_.scroll_x(),
+                                      viewport_.max_scroll_y())) {
+        box_.update();
+        return Status::Updated;
+      }
+      return Status::Unchanged;
+    }
 
     const auto follow = flexUI::StreamScrollFollow::before_content_update(
         viewport_);
@@ -169,18 +189,28 @@ public:
     visible_ = std::move(next);
     box_.invalidate();
     box_.update();
-    (void)follow.apply(viewport_);
+    if (policy == ScrollPolicy::FollowTail) {
+      (void)viewport_.set_scroll_offset(viewport_.scroll_x(),
+                                        viewport_.max_scroll_y());
+    } else if (policy == ScrollPolicy::AnchorTop) {
+      if (different_anchor)
+        (void)viewport_.set_scroll_offset(viewport_.scroll_x(), 0.0f);
+    } else {
+      (void)follow.apply(viewport_);
+    }
     return Status::Updated;
   }
 
+public:
   // Show the most recent N retained messages. Window identity and scroll
   // position remain separate: clients may explicitly call show_from_id()
   // when the user scrolls away from the tail.
   Status show_tail(const tui_transcript_t* transcript) {
     if (!transcript) return Status::Invalid;
     const std::size_t count = tui_transcript_count(transcript);
-    return show(transcript,
-                count > slots_.size() ? count - slots_.size() : 0u);
+    return show_with_policy(
+        transcript, count > slots_.size() ? count - slots_.size() : 0u,
+        ScrollPolicy::FollowTail);
   }
 
   // A message-ID anchor is stable through earlier settled-message evictions.
@@ -202,7 +232,8 @@ public:
         break;
       }
     }
-    return show(transcript, start == count ? 0u : start);
+    return show_with_policy(
+        transcript, start == count ? 0u : start, ScrollPolicy::AnchorTop);
   }
 
 private:

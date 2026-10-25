@@ -46,6 +46,7 @@ struct Demo {
     std::unique_ptr<flex::Renderer> renderer;
     std::unique_ptr<flexUI::Box> box;
     std::unique_ptr<flex::tui_backend::TranscriptWindow> window;
+    flexUI::Element* viewport = nullptr; // borrowed while Box is alive
     flexUI::LabelWidget* status = nullptr;
     std::atomic<bool> stop{false};
     std::atomic<std::uint64_t> cancel_target{0u};
@@ -233,6 +234,7 @@ bool initialize(Demo& d) {
     root->append(viewport);
     root->append(footer);
     d.box->set_root(root);
+    d.viewport = viewport;
     d.status = static_cast<flexUI::LabelWidget*>(footer->widget);
     d.window = std::make_unique<flex::tui_backend::TranscriptWindow>(
         *d.box, *viewport, kVisible);
@@ -242,6 +244,7 @@ bool initialize(Demo& d) {
 void shutdown(Demo& d) {
     // Every worker/API call is quiescent before the native owner is freed.
     d.window.reset();
+    d.viewport = nullptr;
     d.box.reset();
     d.renderer.reset();
     if (d.transcript) (void)tui_transcript_destroy(d.transcript);
@@ -273,9 +276,9 @@ bool publish(Demo& d, std::uint64_t id, std::uint32_t type,
     return false;
 }
 
-void producer(Demo& d, std::uint64_t limit,
-              std::chrono::milliseconds pause) {
-    for (std::uint64_t id = 1u; id <= limit &&
+void producer(Demo& d, std::uint64_t first_id,
+              std::uint64_t final_id, std::chrono::milliseconds pause) {
+    for (std::uint64_t id = first_id; id <= final_id &&
          !d.stop.load(std::memory_order_acquire); ++id) {
         if (!publish(d, id, TUI_STREAM_BEGIN, {})) break;
         const std::string content =
@@ -325,7 +328,7 @@ int headless_smoke() {
     term->color_mode = TUI_COLOR_TRUECOLOR;
     term->write_output = fake_write;
 
-    std::thread worker(producer, std::ref(d), 22u,
+    std::thread worker(producer, std::ref(d), 1u, 22u,
                        std::chrono::milliseconds(1));
     bool okay = true;
     std::size_t frames = 0u;
@@ -343,32 +346,107 @@ int headless_smoke() {
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
         if (attempt == 7999u) okay = false;
     }
-    d.stop.store(true, std::memory_order_release);
     worker.join();
     const bool at_tail = d.window && d.window->visible_count() == kVisible &&
-        d.window->visible_host(22u) != nullptr;
+        d.window->visible_host(22u) != nullptr &&
+        d.viewport && d.viewport->can_scroll_y() &&
+        std::abs(d.viewport->max_scroll_y() - d.viewport->scroll_y()) <= 2.0f;
     bool drew_text = false;
-    if (term->front && term->front->cells) {
+    const auto rendered = [&]() -> bool {
+        if (!term->front || !term->front->cells) return false;
         const std::size_t n = static_cast<std::size_t>(term->front->width) *
                               static_cast<std::size_t>(term->front->height);
         for (std::size_t i = 0u; i < n; ++i) {
             if (term->front->cells[i].ch != 0u &&
-                term->front->cells[i].ch != static_cast<std::uint32_t>(' ')) {
-                drew_text = true;
-                break;
-            }
+                term->front->cells[i].ch != static_cast<std::uint32_t>(' '))
+                return true;
         }
-    }
+        return false;
+    };
+    drew_text = rendered();
     const bool bounded = d.valid && drew_text &&
         tui_transcript_count(d.transcript) == kRetained &&
         d.accepted > 40u && d.rejected == 0u;
+
+    // Home must show the *start* of the oldest retained message even if the
+    // previously visible window was at the end of the document.
     (void)on_key(Oldest, &d);
     on_view(&d, tui_terminal_buffer(term));
     const bool browsed = !d.following && d.window &&
-        d.window->visible_host(11u) != nullptr;
+        d.window->visible_host(11u) != nullptr && d.viewport &&
+        d.viewport->scroll_y() <= 0.01f;
+
+    // One more producer starts after the view is anchored to an old message.
+    // Message 23 evicts message 11, but must not force the user's history
+    // window to jump to the tail. Trigger c while the worker is active.
+    d.producer_done.store(false, std::memory_order_release);
+    const std::size_t before_cancel = d.accepted;
+    std::thread next(producer, std::ref(d), 23u, 23u,
+                     std::chrono::milliseconds(25));
+    bool cancelled_from_ui = false;
+    bool settled = false;
+    for (std::size_t attempt = 0u; attempt < 2000u; ++attempt) {
+        if (!tui_app_dispatch_once(d.app)) { okay = false; break; }
+        ++frames;
+        if (!cancelled_from_ui && d.active_message == 23u &&
+            d.accepted >= before_cancel + 2u) {
+            cancelled_from_ui = on_key(Cancel, &d);
+        }
+        tui_async_queue_stats_t stats{};
+        if (tui_async_queue_get_stats(tui_app_async_queue(d.app),
+                                      &stats) != TUI_ASYNC_OK) {
+            okay = false;
+            break;
+        }
+        if (d.producer_done.load(std::memory_order_acquire) &&
+            stats.queued == 0u) {
+            settled = true;
+            break;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    d.stop.store(true, std::memory_order_release);
+    next.join();
+    tui_transcript_message_t cancelled{};
+    const bool did_cancel = cancelled_from_ui && settled &&
+        tui_transcript_get(d.transcript, 23u, &cancelled) ==
+            TUI_TRANSCRIPT_OK &&
+        cancelled.stream.state == TUI_STREAM_CANCELLED;
+    const bool anchored = !d.following && d.window &&
+        d.window->visible_host(12u) != nullptr &&
+        d.window->visible_host(23u) == nullptr;
+
+    // End must jump to the newest cell-visible message and bottom of the
+    // viewport, even if the window content hasn't changed since its last
+    // display (same-frame navigation / repeated End).
+    (void)on_key(Tail, &d);
+    on_view(&d, tui_terminal_buffer(term));
+    const bool returned = d.following && d.window &&
+        d.window->visible_host(23u) != nullptr && d.viewport &&
+        std::abs(d.viewport->max_scroll_y() - d.viewport->scroll_y()) <= 2.0f;
+    (void)on_key(Oldest, &d);
+    on_view(&d, tui_terminal_buffer(term));
+    const bool returned_oldest = !d.following &&
+        d.window->visible_host(12u) != nullptr &&
+        d.viewport->scroll_y() <= 0.01f;
+
+    // Reflow the actual terminal's two cell buffers after a size change.
+    // The TUI renderer must borrow the current back buffer each frame,
+    // and the Box viewport must agree with the new cell geometry.
+    tui_buffer_resize(term->front, 52, 16);
+    tui_buffer_resize(term->back, 52, 16);
+    term->width = 52;
+    term->height = 16;
+    on_view(&d, tui_terminal_buffer(term));
+    const bool resized = d.box &&
+        d.box->viewport_width() == 52.0f * kCellWidth &&
+        d.box->viewport_height() == 16.0f * kCellHeight &&
+        tui_terminal_render(term) && rendered();
     term->initialized = false; // synthetic output never changed OS console
     shutdown(d);
-    if (!okay || !at_tail || !bounded || !browsed || frames < 3u)
+    if (!okay || !at_tail || !bounded || !browsed || !did_cancel ||
+        !anchored || !returned || !returned_oldest || !resized ||
+        frames < 3u)
         return 4;
     std::puts("Tango/FlexUI streaming demo headless smoke passed");
     return 0;
@@ -396,7 +474,7 @@ int main(int argc, char** argv) {
     Demo d;
     try {
         if (!initialize(d)) { shutdown(d); return 1; }
-        std::thread worker(producer, std::ref(d), 48u,
+        std::thread worker(producer, std::ref(d), 1u, 48u,
                            std::chrono::milliseconds(28));
         tui_app_run(d.app);
         d.stop.store(true, std::memory_order_release);
