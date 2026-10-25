@@ -284,6 +284,10 @@ public:
     }
     bool entered_alt() const { return entered_alt_; }
     bool left_alt() const { return left_alt_; }
+    unsigned auto_wraps_into_footer() const {
+        return auto_wraps_into_footer_;
+    }
+    unsigned bottom_auto_wraps() const { return bottom_auto_wraps_; }
     std::string diagnostic() const {
         std::string preview;
         for (const auto& line : cells_) {
@@ -658,8 +662,8 @@ int main(int argc, char** argv) {
         const std::string sequence =
             "\x1b[?1049h\x1b[22;80Hxy";
         wrap_near_footer.feed(sequence.data(), sequence.size());
-        if (wrap_near_footer.auto_wraps_into_footer_ != 1u ||
-            wrap_near_footer.bottom_auto_wraps_ != 0u) return 34;
+        if (wrap_near_footer.auto_wraps_into_footer() != 1u ||
+            wrap_near_footer.bottom_auto_wraps() != 0u) return 34;
         std::puts("Windows ConPTY VT ECH/autowrap/scrollback oracle passed");
         return 0;
     }
