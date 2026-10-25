@@ -29,6 +29,9 @@ class Screen {
     std::vector<std::string> cells_;
     bool entered_alt_ = false, left_alt_ = false;
     bool wrap_enabled_ = true;
+    // ANSI LNM (CSI 20 h/l) is distinct from DECAWM. Normal VT LF
+    // preserves the column; only CR or enabled LNM returns to column 1.
+    bool newline_mode_ = false;
     unsigned wrap_mode_changes_ = 0u;
     unsigned bottom_auto_wraps_ = 0u;
     unsigned bottom_explicit_newlines_ = 0u;
@@ -132,6 +135,8 @@ class Screen {
             // changes may be reflected in the ConPTY VT stream.
             wrap_enabled_ = code == 'h';
             ++wrap_mode_changes_;
+        } else if (csi_ == "20" && (code == 'h' || code == 'l')) {
+            newline_mode_ = code == 'h';
         } else if (code == 't' && csi_ == "8;16;52") {
             // ConPTY sends XTWINOPS 8;rows;cols t in its *output pipe*
             // following a real host-owned ResizePseudoConsole. Apply it
@@ -278,8 +283,13 @@ public:
                 } else if (b == '\r') {
                     x_ = 0;
                 } else if (b == '\n') {
+                    // LF/IND moves down at the CURRENT column (LNM off).
+                    // ConPTY deliberately emits bare LF for a same-column
+                    // diff update, e.g. "Retained 8/12" -> "Retained 9/12".
+                    // Unconditionally resetting x_ overwrites the initial
+                    // 'R' with '9' and manufactures a false terminal fail.
                     newline(false);
-                    x_ = 0;
+                    if (newline_mode_) x_ = 0;
                 } else if (b == '\b') {
                     x_ = std::max(0, x_ - 1);
                 } else if (b >= 0x20 && b <= 0x7e) {
@@ -354,6 +364,7 @@ public:
                ", csi='" + csi_ + "', wrap=" +
                std::to_string(wrap_enabled_ ? 1 : 0) +
                ", wrap-mode-changes=" + std::to_string(wrap_mode_changes_) +
+               ", newline-mode=" + std::to_string(newline_mode_ ? 1 : 0) +
                ", bottom-auto-wraps=" + std::to_string(bottom_auto_wraps_) +
                ", bottom-explicit-newlines=" +
                std::to_string(bottom_explicit_newlines_) +
@@ -801,7 +812,21 @@ int main(int argc, char** argv) {
             !protected_no_wrap.auto_wrap_enabled() ||
             protected_no_wrap.wrap_mode_changes() != 2u)
             return 37;
-        std::puts("Windows ConPTY VT ECH/autowrap/scroll-region oracle passed");
+        // Exact ConPTY regression: CSI 22;3H followed by seven cells ends
+        // at column 10. A *bare* LF keeps that column; the next digit
+        // updates the count rather than clobbering 'R' at column 1.
+        // An explicit CRLF remains the only default move to column 1.
+        Screen bare_lf;
+        const std::string bare_lf_sequence =
+            "\x1b[?1049h\x1b[1;1HFlexUI + Tango"
+            "\x1b[23;1HRetained 8/12 | tail | 80x24 |"
+            "\x1b[22;3Hnderer:\n9";
+        bare_lf.feed(bare_lf_sequence.data(), bare_lf_sequence.size());
+        if (!bare_lf.header() || !bare_lf.mode("tail", 80, 24) ||
+            bare_lf.count() != 9u ||
+            bare_lf.status().find("Retained 9/12") != 0u)
+            return 38;
+        std::puts("Windows ConPTY VT ECH/autowrap/LF/scroll-region oracle passed");
         return 0;
     }
     if (argc == 3 && std::strcmp(argv[1], "--probe-child") == 0) {
