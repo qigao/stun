@@ -1,0 +1,400 @@
+/* Real interactive Tango + FlexUI Streaming demo.
+ * q/Esc quit, c cancel, arrows/wheel browse, Home oldest, End follow tail.
+ * Optional CI-only --headless-smoke uses a synthetic terminal output sink.
+ * No new event loop, queue, Markdown parser, or cross-thread UI mutation.
+ */
+#include <backends/tui/init.h>
+#include <backends/tui/transcript_window.h>
+#include <flexUI/box.h>
+#include <flexUI/element.h>
+#include <flexUI/widgets/label_widget.h>
+#include <tui.h>
+#include <tui_transcript.h>
+
+#if defined(STUN_TUI_DEMO_HEADLESS_TEST)
+#include "tui_terminal_internal.h"
+#endif
+
+#include <algorithm>
+#include <array>
+#include <atomic>
+#include <chrono>
+#include <cstdint>
+#include <cstdio>
+#include <cstring>
+#include <exception>
+#include <functional>
+#include <memory>
+#include <string>
+#include <string_view>
+#include <thread>
+
+namespace {
+
+constexpr std::size_t kRetained = 12u;
+constexpr std::size_t kVisible = 5u;
+constexpr std::size_t kMaxChunk = 128u;
+constexpr float kCellWidth = 8.0f;
+constexpr float kCellHeight = 16.0f;
+
+enum Command { Quit = 1, Older, Newer, Tail, Oldest, Cancel };
+
+struct Demo {
+    tui_app_t* app = nullptr;
+    tui_transcript_t* transcript = nullptr;
+    std::unique_ptr<flex::Renderer> renderer;
+    std::unique_ptr<flexUI::Box> box;
+    std::unique_ptr<flex::tui_backend::TranscriptWindow> window;
+    flexUI::LabelWidget* status = nullptr;
+    std::atomic<bool> stop{false};
+    std::atomic<std::uint64_t> cancel_target{0u};
+    std::atomic<bool> producer_done{false};
+    std::uint64_t active_message = 0u;
+    std::uint64_t anchor = 0u;
+    std::size_t accepted = 0u;
+    std::size_t rejected = 0u;
+    bool following = true;
+    bool valid = true;
+};
+
+int map_input(const tui_event_t* e) {
+    if (!e) return -1;
+    if (e->type == TUI_EVENT_MOUSE_PRESS) {
+        if (e->key == TUI_KEY_MOUSE_WHEEL_UP) return Older;
+        if (e->key == TUI_KEY_MOUSE_WHEEL_DOWN) return Newer;
+    }
+    if (e->type != TUI_EVENT_KEY) return -1;
+    if (e->key == TUI_KEY_ESCAPE || e->ch == 'q' ||
+        tui_event_is_ctrl(e, 'c')) return Quit;
+    if (e->ch == 'c') return Cancel;
+    switch (e->key) {
+        case TUI_KEY_UP: case TUI_KEY_PAGE_UP: return Older;
+        case TUI_KEY_DOWN: case TUI_KEY_PAGE_DOWN: return Newer;
+        case TUI_KEY_HOME: return Oldest;
+        case TUI_KEY_END: return Tail;
+        default: return -1;
+    }
+}
+
+std::uint64_t id_at(tui_transcript_t* t, std::size_t index) {
+    tui_transcript_message_t value{};
+    std::size_t written = 0u;
+    return tui_transcript_window(t, index, 1u, &value, 1u, &written) ==
+        TUI_TRANSCRIPT_OK && written == 1u ? value.message_id : 0u;
+}
+
+bool on_key(int command, void* ptr) {
+    auto& d = *static_cast<Demo*>(ptr);
+    if (command == Quit) {
+        d.stop.store(true, std::memory_order_release);
+        return false;
+    }
+    if (command == Cancel) {
+        if (d.active_message)
+            d.cancel_target.store(d.active_message, std::memory_order_release);
+        return true;
+    }
+    if (command == Tail) {
+        d.following = true;
+        d.anchor = 0u;
+        return true;
+    }
+    const std::size_t count = tui_transcript_count(d.transcript);
+    if (!count) return true;
+    if (command == Oldest) {
+        d.following = false;
+        d.anchor = id_at(d.transcript, 0u);
+        return true;
+    }
+    if (command != Older && command != Newer) return true;
+    const std::size_t tail_start = count > kVisible ? count - kVisible : 0u;
+    std::size_t first = tail_start;
+    if (!d.following && d.anchor) {
+        for (std::size_t i = 0u; i < count; ++i) {
+            if (id_at(d.transcript, i) >= d.anchor) {
+                first = i;
+                break;
+            }
+        }
+    }
+    if (command == Older && first) --first;
+    if (command == Newer && first < tail_start) ++first;
+    d.following = first >= tail_start;
+    d.anchor = d.following ? 0u : id_at(d.transcript, first);
+    return true;
+}
+
+bool on_async(const tui_async_event_t* event, const void* packet, void* ptr) {
+    auto& d = *static_cast<Demo*>(ptr);
+    if (!event || !packet ||
+        event->payload_size < sizeof(tui_stream_packet_header_t))
+        return d.valid = false;
+    tui_stream_packet_header_t header{};
+    std::memcpy(&header, packet, sizeof(header));
+    if (event->type == TUI_STREAM_BEGIN) {
+        tui_transcript_message_t value{};
+        const auto found = tui_transcript_get(
+            d.transcript, header.message_id, &value);
+        if (found == TUI_TRANSCRIPT_UNKNOWN) {
+            std::uint64_t evicted = 0u;
+            if (tui_transcript_open(d.transcript, header.message_id,
+                                    &evicted) != TUI_TRANSCRIPT_OK)
+                return d.valid = false;
+        } else if (found != TUI_TRANSCRIPT_OK) {
+            ++d.rejected;
+            return true;
+        }
+    }
+    const auto status = tui_transcript_apply(
+        d.transcript, event, packet, nullptr);
+    if (status == TUI_TRANSCRIPT_STALE ||
+        status == TUI_TRANSCRIPT_UNKNOWN) {
+        ++d.rejected;
+        return true;
+    }
+    if (status != TUI_TRANSCRIPT_OK) return d.valid = false;
+    ++d.accepted;
+    if (event->type == TUI_STREAM_BEGIN)
+        d.active_message = header.message_id;
+    else if ((event->type == TUI_STREAM_END ||
+              event->type == TUI_STREAM_CANCEL) &&
+             d.active_message == header.message_id)
+        d.active_message = 0u;
+    return true;
+}
+
+void on_view(const void* ptr, tui_buffer_t*) {
+    auto& d = *const_cast<Demo*>(static_cast<const Demo*>(ptr));
+    try {
+        const auto* term = tui_app_terminal(d.app);
+        if (!term || !d.window || !d.box) {
+            d.valid = false;
+            return;
+        }
+        const int w = tui_terminal_width(term);
+        const int h = tui_terminal_height(term);
+        if (w > 0 && h > 0)
+            d.box->set_viewport(w * kCellWidth, h * kCellHeight);
+        const auto status = d.following
+            ? d.window->show_tail(d.transcript)
+            : d.window->show_from_id(d.transcript, d.anchor);
+        using WindowStatus = flex::tui_backend::TranscriptWindow::Status;
+        if (status == WindowStatus::QueryRejected ||
+            status == WindowStatus::Invalid) {
+            d.valid = false;
+            (void)tui_async_queue_close(tui_app_async_queue(d.app));
+            return;
+        }
+        if (d.status) {
+            d.status->set_text("Retained " +
+                std::to_string(tui_transcript_count(d.transcript)) +
+                "/12 | " + (d.following ? "tail" : "scrollback") +
+                " | q quit, c cancel, arrows/wheel browse, End follow");
+        }
+        d.box->update();
+    } catch (const std::exception&) {
+        d.valid = false;
+        (void)tui_async_queue_close(tui_app_async_queue(d.app));
+    }
+}
+
+bool initialize(Demo& d) {
+    d.app = tui_app_create(&d, on_key, on_view, map_input);
+    if (!d.app || !tui_app_set_async_update(d.app, on_async)) return false;
+    d.transcript = tui_transcript_create(kRetained, 8192u, kMaxChunk);
+    if (!d.transcript) return false;
+    d.renderer = flex::tui_backend::create_renderer(tui_app_terminal(d.app));
+    if (!d.renderer) return false;
+    d.box = std::make_unique<flexUI::Box>(d.renderer.get());
+    d.box->set_viewport(640.0f, 384.0f);
+    d.box->load_css(R"(
+        #root { width:100%;height:100%;display:flex;
+                flex-direction:column;background-color:#151923; }
+        #title { height:28px;flex-shrink:0;color:#7aa2f7;
+                 font-size:16px; }
+        #transcript { width:100%;flex:1;min-height:0px;
+                      overflow-y:scroll;display:flex;
+                      flex-direction:column; }
+        .transcript-message { width:100%;flex-shrink:0;
+                              color:#d3daed;font-size:14px; }
+        #status { height:26px;flex-shrink:0;font-size:12px;
+                  color:#95a2b8; }
+    )");
+    auto* root = d.box->create("div", "root");
+    auto* heading = d.box->create_widget<flexUI::LabelWidget>(
+        "div", "title", "FlexUI + Tango  |  bounded Streaming chat");
+    auto* viewport = d.box->create("div", "transcript");
+    auto* footer = d.box->create_widget<flexUI::LabelWidget>(
+        "div", "status", "Streaming...");
+    if (!root || !heading || !viewport || !footer || !footer->widget)
+        return false;
+    root->append(heading);
+    root->append(viewport);
+    root->append(footer);
+    d.box->set_root(root);
+    d.status = static_cast<flexUI::LabelWidget*>(footer->widget);
+    d.window = std::make_unique<flex::tui_backend::TranscriptWindow>(
+        *d.box, *viewport, kVisible);
+    return true;
+}
+
+void shutdown(Demo& d) {
+    // Every worker/API call is quiescent before the native owner is freed.
+    d.window.reset();
+    d.box.reset();
+    d.renderer.reset();
+    if (d.transcript) (void)tui_transcript_destroy(d.transcript);
+    d.transcript = nullptr;
+    if (d.app) tui_app_destroy(d.app);
+    d.app = nullptr;
+}
+
+bool publish(Demo& d, std::uint64_t id, std::uint32_t type,
+             std::string_view text) {
+    if (text.size() > kMaxChunk) return false;
+    std::array<unsigned char, sizeof(tui_stream_packet_header_t) + kMaxChunk>
+        packet{};
+    const tui_stream_packet_header_t header{id};
+    std::memcpy(packet.data(), &header, sizeof(header));
+    if (!text.empty())
+        std::memcpy(packet.data() + sizeof(header),
+                    text.data(), text.size());
+    auto* queue = tui_app_async_queue(d.app);
+    if (!queue) return false;
+    while (!d.stop.load(std::memory_order_acquire)) {
+        const auto result = tui_async_queue_post(
+            queue, type, 1u, packet.data(), sizeof(header) + text.size(),
+            nullptr);
+        if (result == TUI_ASYNC_OK) return true;
+        if (result != TUI_ASYNC_FULL) return false;
+        std::this_thread::sleep_for(std::chrono::milliseconds(3));
+    }
+    return false;
+}
+
+void producer(Demo& d, std::uint64_t limit,
+              std::chrono::milliseconds pause) {
+    for (std::uint64_t id = 1u; id <= limit &&
+         !d.stop.load(std::memory_order_acquire); ++id) {
+        if (!publish(d, id, TUI_STREAM_BEGIN, {})) break;
+        const std::string content =
+            "### Response " + std::to_string(id) +
+            "\n\nThis **Markdown** arrives from a worker through the "
+            "native Tango event loop.\n\n"
+            "- Chinese: 中\n- Renderer: terminal cells\n"
+            "- Retention is bounded; old messages are recycled.\n\n";
+        bool cancelled = false;
+        for (std::size_t offset = 0u; offset < content.size();
+             offset += 24u) {
+            if (d.cancel_target.load(std::memory_order_acquire) == id) {
+                cancelled = true;
+                break;
+            }
+            const std::size_t n = std::min<std::size_t>(
+                24u, content.size() - offset);
+            if (!publish(d, id, TUI_STREAM_CHUNK,
+                         std::string_view(content.data() + offset, n))) {
+                d.stop.store(true, std::memory_order_release);
+                break;
+            }
+            if (pause.count()) std::this_thread::sleep_for(pause);
+        }
+        if (d.stop.load(std::memory_order_acquire)) break;
+        if (!publish(d, id, cancelled ? TUI_STREAM_CANCEL :
+                                       TUI_STREAM_END, {})) break;
+        if (cancelled)
+            d.cancel_target.store(0u, std::memory_order_release);
+    }
+    d.producer_done.store(true, std::memory_order_release);
+}
+
+#if defined(STUN_TUI_DEMO_HEADLESS_TEST)
+bool fake_write(tui_terminal_t*, const char*, size_t) { return true; }
+
+int headless_smoke() {
+    Demo d;
+    if (!initialize(d)) { shutdown(d); return 2; }
+    auto* term = tui_app_terminal(d.app);
+    term->width = 80;
+    term->height = 24;
+    term->front = tui_buffer_create(80, 24);
+    term->back = tui_buffer_create(80, 24);
+    if (!term->front || !term->back) { shutdown(d); return 3; }
+    term->initialized = true;
+    term->color_mode = TUI_COLOR_TRUECOLOR;
+    term->write_output = fake_write;
+
+    std::thread worker(producer, std::ref(d), 22u,
+                       std::chrono::milliseconds(1));
+    bool okay = true;
+    std::size_t frames = 0u;
+    for (std::size_t attempt = 0u; attempt < 8000u; ++attempt) {
+        if (!tui_app_dispatch_once(d.app)) { okay = false; break; }
+        ++frames;
+        tui_async_queue_stats_t stats{};
+        if (tui_async_queue_get_stats(tui_app_async_queue(d.app),
+                                      &stats) != TUI_ASYNC_OK) {
+            okay = false;
+            break;
+        }
+        if (d.producer_done.load(std::memory_order_acquire) &&
+            stats.queued == 0u) break;
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        if (attempt == 7999u) okay = false;
+    }
+    d.stop.store(true, std::memory_order_release);
+    worker.join();
+    const bool at_tail = d.window && d.window->visible_count() == kVisible &&
+        d.window->visible_host(22u) != nullptr;
+    const bool bounded = d.valid &&
+        tui_transcript_count(d.transcript) == kRetained &&
+        d.accepted > 40u && d.rejected == 0u;
+    (void)on_key(Oldest, &d);
+    on_view(&d, tui_terminal_buffer(term));
+    const bool browsed = !d.following && d.window &&
+        d.window->visible_host(11u) != nullptr;
+    term->initialized = false; // synthetic output never changed OS console
+    shutdown(d);
+    if (!okay || !at_tail || !bounded || !browsed || frames < 3u)
+        return 4;
+    std::puts("Tango/FlexUI streaming demo headless smoke passed");
+    return 0;
+}
+#endif
+
+} // namespace
+
+int main(int argc, char** argv) {
+    if (argc > 1 && std::strcmp(argv[1], "--help") == 0) {
+        std::puts("flexui_tui_streaming_demo [--help | --headless-smoke]\n"
+                  "q/Esc quit, c cancel, Up/Down or wheel browse, "
+                  "Home oldest, End follow tail");
+        return 0;
+    }
+    if (argc > 1 && std::strcmp(argv[1], "--headless-smoke") == 0) {
+#if defined(STUN_TUI_DEMO_HEADLESS_TEST)
+        return headless_smoke();
+#else
+        std::fputs("headless smoke requires CI-only test build\n", stderr);
+        return 2;
+#endif
+    }
+    if (argc != 1) return 2;
+    Demo d;
+    try {
+        if (!initialize(d)) { shutdown(d); return 1; }
+        std::thread worker(producer, std::ref(d), 48u,
+                           std::chrono::milliseconds(28));
+        tui_app_run(d.app);
+        d.stop.store(true, std::memory_order_release);
+        worker.join();
+        const bool success = d.valid;
+        shutdown(d);
+        return success ? 0 : 1;
+    } catch (const std::exception& e) {
+        d.stop.store(true, std::memory_order_release);
+        std::fprintf(stderr, "Streaming TUI: %s\n", e.what());
+        shutdown(d);
+        return 1;
+    }
+}
