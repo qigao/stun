@@ -22,6 +22,7 @@ set(TUI_SOURCES
     src/tui_app.c
     src/tui_async.c
     src/tui_stream.c
+    src/tui_transcript.c
     src/tui_widgets.c
     src/tui_layout.c
     src/tui_advanced.c 
