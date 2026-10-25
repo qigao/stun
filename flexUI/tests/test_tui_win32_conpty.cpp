@@ -324,9 +324,12 @@ public:
             reinterpret_cast<LPPROC_THREAD_ATTRIBUTE_LIST>(attr_memory.get());
         if (!InitializeProcThreadAttributeList(attribute_list, 1, 0,
                                                &attr_bytes)) return false;
-        constexpr DWORD_PTR kPseudoConsoleAttribute = 0x00020016;
+        // For PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE, lpValue is the HPCON
+        // value itself (not the address of the variable holding HPCON).
+        // Match Microsoft's EchoCon sample and node-pty's ConPTY launcher.
         const BOOL attr_ok = UpdateProcThreadAttribute(attribute_list, 0,
-            kPseudoConsoleAttribute, &pseudo_, sizeof(pseudo_), nullptr, nullptr);
+            PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE,
+            pseudo_, sizeof(HPCON), nullptr, nullptr);
         if (probe) {
             char directory[MAX_PATH]{};
             char filename[MAX_PATH]{};
