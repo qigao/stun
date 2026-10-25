@@ -30,6 +30,8 @@ class Screen {
     bool entered_alt_ = false, left_alt_ = false;
     bool wrap_enabled_ = true;
     unsigned wrap_mode_changes_ = 0u;
+    unsigned bottom_auto_wraps_ = 0u;
+    unsigned bottom_explicit_newlines_ = 0u;
 
     void clear() {
         cells_.assign(static_cast<size_t>(rows_),
@@ -37,11 +39,14 @@ class Screen {
         x_ = y_ = 0;
     }
 
-    void newline() {
+    void newline(bool implicit_wrap = false) {
         if (y_ + 1 < rows_) {
             ++y_;
         } else {
-            // VT LF on the bottom line scrolls the visible region.
+            // Record exactly which VT action evicted the bottom row.
+            // The UI Owner's saved cell frame remains a separate oracle.
+            if (implicit_wrap) ++bottom_auto_wraps_;
+            else ++bottom_explicit_newlines_;
             cells_.erase(cells_.begin());
             cells_.push_back(std::string(static_cast<size_t>(cols_), ' '));
         }
@@ -51,7 +56,7 @@ class Screen {
         if (x_ >= cols_) {
             if (wrap_enabled_) {
                 x_ = 0;
-                newline();
+                newline(true);
             } else {
                 // DECAWM off: printing again in the final column overwrites
                 // that cell; it must not scroll a fixed footer out of view.
@@ -218,7 +223,7 @@ public:
                 } else if (b == '\r') {
                     x_ = 0;
                 } else if (b == '\n') {
-                    newline();
+                    newline(false);
                     x_ = 0;
                 } else if (b == '\b') {
                     x_ = std::max(0, x_ - 1);
@@ -281,6 +286,9 @@ public:
                ", csi='" + csi_ + "', wrap=" +
                std::to_string(wrap_enabled_ ? 1 : 0) +
                ", wrap-mode-changes=" + std::to_string(wrap_mode_changes_) +
+               ", bottom-auto-wraps=" + std::to_string(bottom_auto_wraps_) +
+               ", bottom-explicit-newlines=" +
+               std::to_string(bottom_explicit_newlines_) +
                ", entered-alt=" + std::to_string(entered_alt_ ? 1 : 0) +
                ", left-alt=" + std::to_string(left_alt_ ? 1 : 0) +
                ", header=" + std::to_string(header() ? 1 : 0) +
