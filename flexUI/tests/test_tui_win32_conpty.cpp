@@ -289,9 +289,14 @@ public:
         (void)SetHandleInformation(child_output_read_, HANDLE_FLAG_INHERIT, 0);
         const HRESULT hr = CreatePseudoConsole(COORD{80, 24},
             conpty_in, conpty_out, 0, &pseudo_);
-        CloseHandle(conpty_in);
-        CloseHandle(conpty_out);
-        if (FAILED(hr)) return false;
+        if (FAILED(hr)) {
+            CloseHandle(conpty_in);
+            CloseHandle(conpty_out);
+            return false;
+        }
+        // Keep the device-end pipe handles open until CreateProcessW has
+        // attached the client to the pseudoconsole. Closing them here can
+        // leave a live child and a permanently empty ConPTY output pipe.
 
         SIZE_T attr_bytes = 0;
         (void)InitializeProcThreadAttributeList(nullptr, 1, 0, &attr_bytes);
@@ -318,6 +323,10 @@ public:
                 nullptr, &startup.StartupInfo, &process_);
         }
         DeleteProcThreadAttributeList(attribute_list);
+        // Release our copies only after CreateProcessW completes; ConPTY
+        // keeps its own handles. This is the Microsoft documented lifetime.
+        CloseHandle(conpty_in);
+        CloseHandle(conpty_out);
         if (!started) return false;
         reader_ = std::thread([this]() { read_output(); });
         return true;
