@@ -51,6 +51,14 @@ if(TARGET flex_backend_tui)
   target_link_libraries(flexui_tui_demo PRIVATE flexUI flex flex_backend_tui tango)
   target_include_directories(flexui_tui_demo PRIVATE ${CMAKE_SOURCE_DIR}/flex/include)
   set_target_properties(flexui_tui_demo PROPERTIES FOLDER flexUI/)
+
+  # The Streaming consumer uses Tango's native UI-owner loop, not the
+  # historical dashboard's periodic polling loop.
+  find_package(Threads REQUIRED)
+  add_executable(flexui_tui_streaming_demo tui_streaming_demo.cpp)
+  target_link_libraries(flexui_tui_streaming_demo PRIVATE
+    flexUI flex_backend_tui tango Threads::Threads)
+  set_target_properties(flexui_tui_streaming_demo PROPERTIES FOLDER flexUI/)
 endif()
 
 if(TARGET flexUI_controller_turboscript)
