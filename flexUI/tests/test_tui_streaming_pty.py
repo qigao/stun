@@ -259,11 +259,15 @@ def run_test(executable):
         # emit the terminal-control enter sequence.
         until("native rendered header",
               lambda: screen.has_header(), 6.0)
+        # ANSI rendering is incremental: the title may arrive while the
+        # first frame's footer has not yet been painted.
+        until("initial visible tail status and terminal size",
+              lambda: screen.mode() == "tail"
+              and screen.geometry() == (80, 24), 6.0)
 
         # The worker is publishing concurrently. Browse with a POSIX
         # terminal HOME sequence and verify the ordinary owner event map
         # caused a visible status transition.
-        require(screen.mode() == "tail", "not following before Home")
         send(b"\x1b[H")
         until("Home changes visible terminal state to scrollback",
               lambda: screen.mode() == "scrollback", 5.0)
@@ -334,13 +338,23 @@ def run_test(executable):
         raise
     finally:
         if child is not None and child.poll() is None:
+            # The demo has no subprocess children, but owns its process
+            # group. macOS can reject killpg after session teardown; fall
+            # back to signaling the exact child PID and always reap it.
             try:
                 os.killpg(child.pid, signal.SIGTERM)
-                child.wait(timeout=1.5)
-            except (ProcessLookupError, subprocess.TimeoutExpired):
+            except (PermissionError, ProcessLookupError):
                 if child.poll() is None:
+                    child.terminate()
+            try:
+                child.wait(timeout=1.5)
+            except subprocess.TimeoutExpired:
+                try:
                     os.killpg(child.pid, signal.SIGKILL)
-                    child.wait(timeout=2.0)
+                except (PermissionError, ProcessLookupError):
+                    if child.poll() is None:
+                        child.kill()
+                child.wait(timeout=2.0)
         os.close(master)
         os.close(slave)
 
