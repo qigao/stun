@@ -272,8 +272,12 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          targets=(test_markdown_widget test_flexui_tango_stream flexui_tui_streaming_demo)
+          if [[ "$RUNNER_OS" == Windows ]]; then
+            targets+=(test_tui_win32_console)
+          fi
           cmake --build build/flexui-tango-cross --config Debug \
-            --target test_markdown_widget test_flexui_tango_stream flexui_tui_streaming_demo --parallel 2
+            --target "${targets[@]}" --parallel 2
 
       - name: Run native Markdown, Streaming, demo and POSIX PTY conformance
         shell: bash
@@ -286,7 +290,7 @@ jobs:
           fi
           ctest --test-dir build/flexui-tango-cross -C Debug \
             --no-tests=error --output-on-failure --timeout 120 \
-            -R "^(test_(markdown_widget|flexui_tango_stream)|tui_streaming_demo_(smoke|posix_pty))"
+            -R "^(test_(markdown_widget|flexui_tango_stream)|tui_streaming_demo_(smoke|posix_pty|win32_console))"
 
       - name: Preserve exact-head cross-platform test evidence
         if: always()

@@ -112,6 +112,17 @@ if(STUN_BUILD_TUI_STREAMING_DEMO)
         "$<TARGET_FILE:flexui_tui_streaming_demo>")
     set_tests_properties(tui_streaming_demo_posix_pty
       PROPERTIES TIMEOUT 60)
+  elseif(WIN32)
+    # Spawn the unchanged real interactive demo under a fresh OS Console.
+    # Independent supervising process writes INPUT_RECORDs and reads native
+    # screen cells; never call event_map or the private owner callbacks.
+    add_executable(test_tui_win32_console
+      "${STUN_ROOT}/flexUI/tests/test_tui_win32_console.cpp")
+    add_test(NAME tui_streaming_demo_win32_console
+      COMMAND test_tui_win32_console "$<TARGET_FILE:flexui_tui_streaming_demo>")
+    set_tests_properties(tui_streaming_demo_win32_console
+      PROPERTIES TIMEOUT 80)
+    add_dependencies(stun_xml_runtime_qualification test_tui_win32_console)
   endif()
 endif()
 
