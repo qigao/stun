@@ -20,7 +20,7 @@ struct StreamScrollFollow {
   // Capture before publishing new Markdown and recalculating layout.
   // The owning event loop must not dispatch user scrolling between capture
   // and apply. A non-scrollable, existing scroll container is at its tail.
-  static StreamScrollFollow capture(const Element &scroll,
+  static StreamScrollFollow before_content_update(const Element &scroll,
                                     float tolerance = 2.0f) noexcept {
     if (!scroll.is_scroll_container()) return {};
     if (!std::isfinite(tolerance) || tolerance < 0.0f) tolerance = 2.0f;
