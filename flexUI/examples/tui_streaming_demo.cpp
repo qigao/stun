@@ -85,6 +85,10 @@ struct Demo {
     std::size_t rejected = 0u;
     bool following = true;
     bool valid = true;
+    // Explicit experimental terminal-app opt-in only. The ordinary chat
+    // remains a fixed-host window; native Tango event/owner APIs do not
+    // acquire any virtual-layout state.
+    bool experimental_virtual_spacers = false;
 #if defined(STUN_TUI_DEMO_HEADLESS_TEST) && !defined(_WIN32)
     // CI-only out-of-band navigation provenance. The next owner frame is
     // sampled independently from the parent's VT/cell reconstruction.
@@ -409,8 +413,20 @@ void on_view(const void* ptr, tui_buffer_t* back) {
         const auto prior_scroll = d.window->capture_scroll_anchor();
         const int w = tui_terminal_width(term);
         const int h = tui_terminal_height(term);
-        if (w > 0 && h > 0)
-            d.box->set_viewport(w * kCellWidth, h * kCellHeight);
+        if (w > 0 && h > 0) {
+            const float width = w * kCellWidth;
+            const float height = h * kCellHeight;
+            const bool resized = d.box->viewport_width() != width ||
+                                 d.box->viewport_height() != height;
+            d.box->set_viewport(width, height);
+            if (resized && d.experimental_virtual_spacers) {
+                // Height sync() reads viewport.width(); force the newly
+                // sized Box geometry BEFORE it decides which samples to
+                // invalidate. Without this the first SIGWINCH frame can
+                // reuse a previous-width offscreen height estimate.
+                d.box->update();
+            }
+        }
         const bool continuing_history = !d.following && d.anchor != 0u &&
             d.projected_anchor == d.anchor &&
             prior_scroll.message_id != 0u && !prior_scroll.follow_tail;
@@ -453,6 +469,22 @@ void on_view(const void* ptr, tui_buffer_t* back) {
                             static_cast<double>(d.viewport->scroll_y()),
                             static_cast<double>(d.viewport->max_scroll_y()),
                             w, h, d.valid ? 1 : 0);
+                        // A second record is diagnostic only and may be
+                        // absent in non-CI builds. It never controls the
+                        // parent cell oracle or renderer.
+                        std::fprintf(trace,
+                            "virtual_geometry epoch=%llu enabled=%d "
+                            "visible=%zu children=%zu leading=%.2f "
+                            "trailing=%.2f\n",
+                            static_cast<unsigned long long>(
+                                d.pty_command_epoch),
+                            d.experimental_virtual_spacers ? 1 : 0,
+                            d.window->visible_count(),
+                            d.viewport->child_count(),
+                            static_cast<double>(
+                                d.window->leading_spacer_height()),
+                            static_cast<double>(
+                                d.window->trailing_spacer_height()));
                         std::fclose(trace);
                         ++d.pty_frame_reports;
                     }
@@ -489,6 +521,10 @@ bool initialize(Demo& d) {
                       flex-direction:column; }
         .transcript-message { width:100%;flex-shrink:0;
                               color:#d3daed;font-size:14px; }
+        /* Experimental only: this rule does not create spacers unless the
+           app explicitly enables the opt-in window geometry path. */
+        .tui-virtual-spacer { width:100%; flex-shrink:0;
+                              height:var(--tui-virtual-height); }
         #status { height:26px;flex-shrink:0;font-size:12px;
                   color:#95a2b8; }
     )");
@@ -508,6 +544,13 @@ bool initialize(Demo& d) {
     d.status = static_cast<flexUI::LabelWidget*>(footer->widget);
     d.window = std::make_unique<flex::tui_backend::TranscriptWindow>(
         *d.box, *viewport, kVisible);
+    if (d.experimental_virtual_spacers) {
+        // The application retainer remains authoritative and bounded to
+        // kRetained. Only Box observes actual Markdown host heights. No
+        // offscreen Element tree, C11 text pointer or UiHandle escapes.
+        d.window->enable_height_tracking(kRetained, 32.0f);
+        d.window->enable_virtual_spacers();
+    }
     return true;
 }
 
@@ -784,9 +827,12 @@ int headless_smoke() {
 
 int main(int argc, char** argv) {
     if (argc > 1 && std::strcmp(argv[1], "--help") == 0) {
-        std::puts("flexui_tui_streaming_demo [--help | --headless-smoke]\n"
+        std::puts("flexui_tui_streaming_demo [--headless-smoke | "
+                  "--experimental-virtual-spacers]\n"
                   "q/Esc quit, c cancel, Up/Down or wheel browse, "
-                  "Home oldest, End follow tail");
+                  "Home oldest, End follow tail\n"
+                  "Experimental virtual spacers are opt-in, approximate for "
+                  "never-measured offscreen Markdown, and not the default.");
         return 0;
     }
     if (argc > 1 && std::strcmp(argv[1], "--headless-smoke") == 0) {
@@ -797,13 +843,25 @@ int main(int argc, char** argv) {
         return 2;
 #endif
     }
+    // Keep the default real terminal path byte-for-byte unchanged. CI may
+    // combine --frame-report with the opt-in, but other unknown options
+    // fail closed instead of silently enabling a production behavior.
+    const bool experimental_virtual_spacers =
+        (argc == 2 &&
+         std::strcmp(argv[1], "--experimental-virtual-spacers") == 0) ||
+        (argc == 4 &&
+         std::strcmp(argv[1], "--frame-report") == 0 &&
+         std::strcmp(argv[3], "--experimental-virtual-spacers") == 0);
     bool frame_diagnostic = false;
 #if defined(STUN_TUI_DEMO_HEADLESS_TEST) && defined(_WIN32)
-    frame_diagnostic = argc == 3 &&
+    frame_diagnostic = (argc == 3 || argc == 4) &&
         std::strcmp(argv[1], "--frame-report") == 0;
 #endif
-    if (argc != 1 && !frame_diagnostic) return 2;
+    if (argc != 1 && !frame_diagnostic &&
+        !(argc == 2 && experimental_virtual_spacers)) return 2;
+    if (argc == 4 && !experimental_virtual_spacers) return 2;
     Demo d;
+    d.experimental_virtual_spacers = experimental_virtual_spacers;
 #if defined(STUN_TUI_DEMO_HEADLESS_TEST) && defined(_WIN32)
     if (frame_diagnostic) d.frame_report_path = argv[2];
 #endif
