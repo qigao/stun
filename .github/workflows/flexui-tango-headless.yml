@@ -305,6 +305,21 @@ jobs:
             --no-tests=error --output-on-failure --timeout 120 \
             -R "^(test_(markdown_widget|flexui_tango_stream)|tui_streaming_demo_(smoke|posix_pty|win32_console|win32_conpty(_plain)?))"
 
+      - name: Repeat real POSIX PTY Home End and resize sessions
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          set -euo pipefail
+          export DYLD_LIBRARY_PATH="$SALTS_ROOT/lib:$SALTS_ROOT/bin:${DYLD_LIBRARY_PATH:-}"
+          # Exercise the SAME real interactive application and strict
+          # keyboard/SGR-wheel/SIGWINCH/restoration screen assertions.
+          # An intermittent Home deadline is a failure, never a skipped
+          # session or a synthetic substitute.
+          ctest --test-dir build/flexui-tango-cross -C Debug \
+            --no-tests=error --output-on-failure --timeout 65 \
+            --repeat until-fail:5 \
+            -R "^tui_streaming_demo_posix_pty$"
+
       - name: Repeat uninstrumented real Win32 ConPTY sessions
         if: runner.os == 'Windows'
         shell: bash
