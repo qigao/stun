@@ -416,17 +416,24 @@ def run_test(executable, early_home=False, home_burst=False,
             # message hosts plus two physical Spacer elements.
             require_last_owner_frame(2, False)
 
-            # Let the scripted worker settle before comparing first
-            # projected message IDs. The existing concurrent wheel/Home
-            # cases remain intact; this extra phase isolates *coordinate
-            # mapping* from C11 settled-message eviction while checking
-            # the same real terminal and owner loop.
-            until("virtual transcript reaches retained full settled history",
-                  lambda: screen.retained() == 12 and
-                  "settled=48" in screen.status(), 24.0)
+            # Real wheel rewindowing needs a FULL BOUNDED retainer, not
+            # all 48 scripted messages to finish. Waiting for all 48 here
+            # accidentally turned a scroll check into a producer-throughput
+            # deadline on slower macOS runners (at failure: retained=12,
+            # settled=30, child alive and rendering). Instead assert that
+            # >=12 messages have really settled, while the worker may
+            # continue streaming. This also stresses eviction overlapping
+            # owner navigation, not an unrealistically quiescent transcript.
+            def full_window_with_history():
+                matched = re.search(r"settled=(\d+)", screen.status())
+                return (screen.retained() == 12 and matched is not None
+                        and int(matched.group(1)) >= 12)
+
+            until("virtual transcript admits full 12-message history",
+                  full_window_with_history, 18.0)
             previous_epoch = last_owner_epoch()
             send(b"\x1b[F")
-            until("virtual End owner frame after final settle",
+            until("virtual End owner frame after full retention",
                   lambda: screen.mode() == "tail" and
                   last_owner_epoch() > previous_epoch, 5.0)
             first_tail = last_virtual_first()
