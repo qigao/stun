@@ -234,6 +234,18 @@ std::uint64_t id_at(tui_transcript_t* t, std::size_t index) {
 
 bool on_key(int command, void* ptr) {
     auto& d = *static_cast<Demo*>(ptr);
+#if defined(STUN_TUI_DEMO_HEADLESS_TEST) && !defined(_WIN32)
+    // Optional diagnostics for the *real* installed-SDK POSIX PTY test.
+    // Out-of-band logging cannot alter VT output or satisfy screen asserts.
+    if (const char* path = std::getenv("STUN_TUI_PTY_INPUT_TRACE")) {
+        if (FILE* trace = std::fopen(path, "a")) {
+            std::fprintf(trace, "command=%d following=%d retained=%zu\n",
+                         command, d.following ? 1 : 0,
+                         tui_transcript_count(d.transcript));
+            std::fclose(trace);
+        }
+    }
+#endif
     if (command == Quit) {
         d.stop.store(true, std::memory_order_release);
         return false;

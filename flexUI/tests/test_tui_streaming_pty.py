@@ -21,6 +21,7 @@ import signal
 import struct
 import subprocess
 import sys
+import tempfile
 import termios
 import time
 
@@ -192,6 +193,10 @@ def run_test(executable):
     screen = VisibleTerminal(24, 80)
     overall_deadline = time.monotonic() + TIMEOUT
     child = None
+    # Independent owner-input evidence. The CI-only demo appends the actual
+    # key command when Tango's existing event mapper invokes on_key().
+    trace_fd, input_trace = tempfile.mkstemp(prefix="stun-real-pty-input-")
+    os.close(trace_fd)
 
     def pump(wait=0.1):
         readable, _, _ = select.select([master], [], [], wait)
@@ -244,6 +249,7 @@ def run_test(executable):
             env={**os.environ, "TERM": "xterm-256color",
                  "COLORTERM": "truecolor",
                  "STUN_TUI_PTY_TERMIOS_CHECK": "1",
+                 "STUN_TUI_PTY_INPUT_TRACE": input_trace,
                  "LC_ALL": ("en_US.UTF-8" if sys.platform == "darwin"
                             else "C.UTF-8")})
 
@@ -344,6 +350,18 @@ def run_test(executable):
                screen.geometry(), screen.state), file=sys.stderr)
         print("PTY output diagnostic (tail): %r" % bytes(output[-1400:]),
               file=sys.stderr)
+        print("PTY raw output bytes=%d, literal scrollback chunks=%d, "
+              "child_alive=%s" %
+              (len(output), output.count(b"scrollback"),
+               child is not None and child.poll() is None),
+              file=sys.stderr)
+        try:
+            with open(input_trace, "rb") as trace:
+                print("PTY independent owner-input trace: %r" %
+                      trace.read(4096), file=sys.stderr)
+        except OSError as exc:
+            print("PTY owner-input trace unavailable: %s" % exc,
+                  file=sys.stderr)
         raise
     finally:
         if child is not None and child.poll() is None:
@@ -366,6 +384,10 @@ def run_test(executable):
                 child.wait(timeout=2.0)
         os.close(master)
         os.close(slave)
+        try:
+            os.unlink(input_trace)
+        except OSError:
+            pass
 
 
 def main():
