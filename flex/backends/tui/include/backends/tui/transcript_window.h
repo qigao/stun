@@ -101,6 +101,38 @@ public:
     return heights_.get();
   }
 
+  // Experimental opt-in: two permanent Box-owned spacer Elements represent
+  // offscreen retained height estimates without full-history DOM inflation.
+  // The caller must load:
+  // .tui-virtual-spacer { height:var(--tui-virtual-height);
+  //                       flex-shrink:0; width:100%; }
+  // This is NOT scroll-position-to-window admission or exact unseen geometry.
+  void enable_virtual_spacers() {
+    if (!heights_ || !visible_.empty() || leading_spacer_ ||
+        trailing_spacer_)
+      throw std::logic_error("enable spacers once before first projection");
+    leading_spacer_ = box_.create("div");
+    trailing_spacer_ = box_.create("div");
+    if (!leading_spacer_ || !trailing_spacer_)
+      throw std::runtime_error("cannot allocate bounded virtual spacers");
+    leading_spacer_->add_class("tui-virtual-spacer");
+    trailing_spacer_->add_class("tui-virtual-spacer");
+    leading_spacer_->set_custom_property("--tui-virtual-height", "0px");
+    trailing_spacer_->set_custom_property("--tui-virtual-height", "0px");
+  }
+
+  bool virtual_spacers_enabled() const noexcept {
+    return leading_spacer_ != nullptr;
+  }
+
+  float leading_spacer_height() const noexcept {
+    return leading_spacer_ ? leading_spacer_->height() : 0.0f;
+  }
+
+  float trailing_spacer_height() const noexcept {
+    return trailing_spacer_ ? trailing_spacer_->height() : 0.0f;
+  }
+
   // A stable host and UiHandle remain stable as long as message_id remains
   // in the visible window, even as source bytes or global window order change.
   flexUI::Element* visible_host(std::uint64_t message_id) const noexcept {
@@ -226,6 +258,26 @@ private:
     }
   }
 
+  // Caller controls which bounded window is visible; this method merely
+  // prepares two value-derived placeholder heights. Unknown offscreen rows
+  // remain estimates and are never advertised as exact geometry.
+  bool prepare_virtual_spacers(std::uint64_t first_id,
+                               std::size_t count) {
+    if (!leading_spacer_) return true;
+    if (!heights_ || !first_id || !count) return false;
+    const auto plan = heights_->window_extent(first_id, count);
+    if (!plan || !std::isfinite(plan->leading) ||
+        !std::isfinite(plan->trailing) ||
+        plan->leading < 0.0 || plan->trailing < 0.0 ||
+        plan->leading > 10000000.0 || plan->trailing > 10000000.0)
+      return false;
+    leading_spacer_->set_custom_property(
+        "--tui-virtual-height", std::to_string(plan->leading) + "px");
+    trailing_spacer_->set_custom_property(
+        "--tui-virtual-height", std::to_string(plan->trailing) + "px");
+    return true;
+  }
+
   Status show_with_policy(const tui_transcript_t* transcript,
                           std::size_t first, ScrollPolicy policy,
                           const TranscriptScrollAnchor* anchor = nullptr) {
@@ -266,6 +318,8 @@ private:
       geometry_changed = result == TranscriptHeightIndex::Status::Updated;
     }
 
+    if (count && !prepare_virtual_spacers(desired[0].id, count))
+      return Status::QueryRejected;
     std::vector<Slot*> next;
     next.reserve(count);
     for (const auto& item : desired) {
@@ -351,13 +405,15 @@ private:
     }
 
     std::vector<flexUI::Element*> children;
-    children.reserve(count);
+    children.reserve(count + (leading_spacer_ ? 2u : 0u));
+    if (leading_spacer_) children.push_back(leading_spacer_);
     for (std::size_t i = 0u; i < count; ++i) {
       auto* slot = next[i];
       slot->markdown->set_markdown(desired[i].text);
       slot->markdown->update(0.0f, *slot->host);
       children.push_back(slot->host);
     }
+    if (trailing_spacer_) children.push_back(trailing_spacer_);
     viewport_.replace_children(children);
     visible_ = std::move(next);
     box_.invalidate();
@@ -368,7 +424,8 @@ private:
                                         viewport_.max_scroll_y());
     } else if (policy == ScrollPolicy::AnchorTop) {
       if (different_anchor)
-        (void)viewport_.set_scroll_offset(viewport_.scroll_x(), 0.0f);
+        (void)viewport_.set_scroll_offset(
+            viewport_.scroll_x(), leading_spacer_height());
     } else if (policy == ScrollPolicy::PreserveAnchor && anchor) {
       (void)restore_anchor(*anchor);
     } else {
@@ -446,6 +503,8 @@ private:
   std::vector<tui_transcript_message_t> scratch_;
   std::unique_ptr<TranscriptHeightIndex> heights_;
   std::uint64_t layout_revision_ = 0u;
+  flexUI::Element* leading_spacer_ = nullptr;
+  flexUI::Element* trailing_spacer_ = nullptr;
 };
 
 }  // namespace flex::tui_backend
