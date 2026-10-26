@@ -44,13 +44,6 @@ struct tui_terminal {
     tui_terminal_write_fn write_output;
     tui_terminal_error_t last_error;
 
-#if defined(STUN_TUI_PTY_RENDER_TRACE_CI) && !defined(_WIN32)
-    /* Test-only owner frame awaiting actual serialized terminal commit.
-     * Compiled solely in the installed-SDK PTY conformance target. */
-    unsigned long long ci_render_epoch;
-    unsigned ci_render_reports;
-#endif
-
     bool mouse_enabled;
 
 #ifdef _WIN32
@@ -88,6 +81,13 @@ struct tui_terminal {
     size_t paste_bytes;
     bool paste_active;
     bool paste_discarding;
+#endif
+
+#if defined(STUN_TUI_PTY_RENDER_TRACE_CI) && !defined(_WIN32)
+    /* Keep this test-only tail AFTER all shared private fields so regular
+     * headless consumers see unchanged layout and offsets. */
+    unsigned long long ci_render_epoch;
+    unsigned ci_render_reports;
 #endif
 };
 
