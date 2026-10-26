@@ -94,6 +94,7 @@ struct Demo {
     // message. No worker mutates this value or any Box-owned Element.
     int pending_virtual_scroll_steps = 0;
     bool pending_virtual_scroll = false;
+    bool pending_virtual_started_following = false;
 #if defined(STUN_TUI_DEMO_HEADLESS_TEST) && !defined(_WIN32)
     // CI-only out-of-band navigation provenance. The next owner frame is
     // sampled independently from the parent's VT/cell reconstruction.
@@ -315,12 +316,20 @@ bool on_key(int command, void* ptr) {
             d.viewport->max_scroll_y() <= 0.0f)
             return true;
         if (command == Newer && d.following) return true;
+        if (!d.pending_virtual_scroll)
+            d.pending_virtual_started_following = d.following;
         d.pending_virtual_scroll_steps += command == Older ? -1 : 1;
-        // A wheel up followed by wheel down in the SAME owner batch has
-        // zero net displacement, but is still a scroll intent. Never let
-        // that fall into Home-before-BEGIN anchor resolution.
-        d.pending_virtual_scroll = true;
-        d.following = false;
+        if (d.pending_virtual_scroll_steps == 0) {
+            // Opposite input in the same owner batch cancels exactly.
+            // Restore the original follow/history intent, so neither
+            // Home nor an out-of-date history anchor takes over.
+            d.pending_virtual_scroll = false;
+            d.following = d.pending_virtual_started_following;
+            if (d.following) d.anchor = 0u;
+        } else {
+            d.pending_virtual_scroll = true;
+            d.following = false;
+        }
         return true;
     }
     const std::size_t tail_start = count > kVisible ? count - kVisible : 0u;
