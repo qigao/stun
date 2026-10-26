@@ -347,6 +347,7 @@ static int test_terminal_input_is_incremental(void) {
     tui_terminal_destroy(terminal);
     return 0;
 }
+
 static int test_eintr_preserves_fragmented_home(void) {
     tui_terminal_t *terminal = tui_terminal_create();
     tui_event_t event = {0};
@@ -356,7 +357,7 @@ static int test_eintr_preserves_fragmented_home(void) {
      * ESC [ must survive when select() returns -1/EINTR. This calls
      * precisely the seam used by the real terminal poll after select().
      * No timed sleeps, fake Home admission or second input decoder. */
-    CHECK(tui_terminal_input_push(terminal, "\\033[", 2u));
+    CHECK(tui_terminal_input_push(terminal, "\033[", 2u));
     CHECK(!tui_terminal_input_next(terminal, &event));
     CHECK(!tui_terminal_input_after_wait(terminal, &event, -1, EINTR));
     CHECK(terminal->input_len == 2u);
@@ -370,12 +371,12 @@ static int test_eintr_preserves_fragmented_home(void) {
     /* A genuine 10ms timeout must still discard a partial CSI as an
      * untrusted unit. Do not turn this fix into an indefinite escape wait
      * or replay parameter bytes as keys. */
-    CHECK(tui_terminal_input_push(terminal, "\\033[12", 4u));
+    CHECK(tui_terminal_input_push(terminal, "\033[12", 4u));
     CHECK(!tui_terminal_input_next(terminal, &event));
     CHECK(!tui_terminal_input_after_wait(terminal, &event, 0, 0));
     CHECK(terminal->input_len == 0u);
 
-    CHECK(tui_terminal_input_push(terminal, "\\033[F", 3u));
+    CHECK(tui_terminal_input_push(terminal, "\033[F", 3u));
     CHECK(tui_terminal_input_next(terminal, &event));
     CHECK(event.type == TUI_EVENT_KEY && event.key == TUI_KEY_END);
     CHECK(!tui_terminal_input_next(terminal, &event));
