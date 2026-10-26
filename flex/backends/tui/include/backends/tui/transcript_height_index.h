@@ -45,6 +45,15 @@ public:
     bool trailing_exact = true;
   };
 
+  struct LocatedOffset {
+    std::uint64_t message_id = 0u;
+    double local_y = 0.0;
+    // A target reached through any unmeasured predecessor remains
+    // approximate even if its own current height is measured.
+    bool prefix_exact = false;
+    bool message_measured = false;
+  };
+
   // Fixed maximum is determined by the application-owned C11 retainer.
   // Entries are values; only retained message IDs can occupy a slot.
   TranscriptHeightIndex(std::size_t max_retained, float fallback_height)
@@ -204,6 +213,32 @@ public:
     }
     extent.total = extent.leading + extent.visible + extent.trailing;
     return extent;
+  }
+
+  // Numerical reverse lookup for a *retained* scroll coordinate. Unknown
+  // heights are explicitly estimated; this is NOT a character-level cursor
+  // and must be reconciled with Box before claiming precise visual position.
+  // The exact end coordinate clamps to the last retained message, never to
+  // an evicted ID or to a fabricated message.
+  std::optional<LocatedOffset> locate_offset(double y) const noexcept {
+    if (!std::isfinite(y) || y < 0.0 || entries_.empty())
+      return std::nullopt;
+    double cursor = 0.0;
+    bool prefix_exact = true;
+    for (std::size_t i = 0; i < entries_.size(); ++i) {
+      const Entry& e = entries_[i];
+      const double height = e.measured ? e.height : fallback_height_;
+      const bool last = i + 1u == entries_.size();
+      if (y < cursor + height || last) {
+        return LocatedOffset{
+            e.message_id, std::clamp(y - cursor, 0.0, height),
+            prefix_exact, e.measured
+        };
+      }
+      cursor += height;
+      if (!e.measured) prefix_exact = false;
+    }
+    return std::nullopt;
   }
 
 private:
