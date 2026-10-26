@@ -1553,6 +1553,24 @@ spec("FlexUI MarkdownWidget through Tango async transport and cell renderer") {
         bool all_measured = true;
         check(heights.total_height_estimate(&all_measured) > 0.0);
         check(!all_measured);
+
+        // New empty C11 session, same bounded Box owner: prior offscreen
+        // placeholders must collapse to zero and all old identities retire.
+        const auto old_host_handle = box.handle_for(*current11);
+        auto* empty_session = tui_transcript_create(4u, 4096u, 128u);
+        check(empty_session != nullptr);
+        if (empty_session) {
+            check(window.show(empty_session, 0u) ==
+                  flex::tui_backend::TranscriptWindow::Status::Updated);
+            check(window.visible_count() == 0u);
+            check(viewport->child_count() == 2u);
+            check(std::fabs(window.leading_spacer_height()) < 1.0f);
+            check(std::fabs(window.trailing_spacer_height()) < 1.0f);
+            check(live_index->size() == 0u);
+            check(box.resolve_handle(old_host_handle) == nullptr);
+            check(tui_transcript_destroy(empty_session) ==
+                  TUI_TRANSCRIPT_OK);
+        }
         check(tui_transcript_destroy(transcript) == TUI_TRANSCRIPT_OK);
     }
 

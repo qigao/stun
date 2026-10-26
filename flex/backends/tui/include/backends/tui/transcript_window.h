@@ -298,17 +298,25 @@ private:
                                bool& changed) {
     changed = false;
     if (!leading_spacer_) return true;
-    if (!heights_ || !first_id || !count) return false;
-    const auto plan = heights_->window_extent(first_id, count);
-    if (!plan || !std::isfinite(plan->leading) ||
-        !std::isfinite(plan->trailing) ||
-        plan->leading < 0.0 || plan->trailing < 0.0 ||
-        plan->leading > 10000000.0 || plan->trailing > 10000000.0)
-      return false;
+    if (!heights_ || (count != 0u && !first_id)) return false;
+    // A new, empty native session must not inherit the previous session's
+    // virtual spacer sizes. There are no retained IDs to estimate.
+    double lead = 0.0;
+    double trail = 0.0;
+    if (count != 0u) {
+      const auto plan = heights_->window_extent(first_id, count);
+      if (!plan || !std::isfinite(plan->leading) ||
+          !std::isfinite(plan->trailing) ||
+          plan->leading < 0.0 || plan->trailing < 0.0 ||
+          plan->leading > 10000000.0 || plan->trailing > 10000000.0)
+        return false;
+      lead = plan->leading;
+      trail = plan->trailing;
+    }
     // Stage both values before mutating the live Box. A same-window view
     // still needs a relayout when offscreen height estimates are refined.
-    const auto leading = std::to_string(plan->leading) + "px";
-    const auto trailing = std::to_string(plan->trailing) + "px";
+    const auto leading = std::to_string(lead) + "px";
+    const auto trailing = std::to_string(trail) + "px";
     const auto* old_leading =
         leading_spacer_->custom_property("--tui-virtual-height");
     const auto* old_trailing =
@@ -361,8 +369,8 @@ private:
     }
 
     bool spacers_changed = false;
-    if (count && !prepare_virtual_spacers(
-            desired[0].id, count, spacers_changed))
+    if (!prepare_virtual_spacers(
+            count ? desired[0].id : 0u, count, spacers_changed))
       return Status::QueryRejected;
     std::vector<Slot*> next;
     next.reserve(count);
