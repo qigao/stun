@@ -1716,8 +1716,20 @@ spec("FlexUI MarkdownWidget through Tango async transport and cell renderer") {
         check(estimated && estimated->message_id == 1u &&
               !estimated->message_measured);
 
-        check(window.show_at_scroll_offset(transcript, 8.0) ==
+        // Scroll into the LEADING estimated spacer before materializing
+        // message #1. The owner must capture its retained ID, not silently
+        // clamp to visible message #2 at within-message offset zero.
+        (void)viewport->set_scroll_offset(0.0f, 8.0f);
+        const auto offscreen_anchor = window.capture_scroll_anchor();
+        check(!offscreen_anchor.follow_tail &&
+              offscreen_anchor.message_id == 1u &&
+              std::fabs(offscreen_anchor.within_message_y - 8.0f) < 2.5f);
+        check(window.show_preserving_anchor(transcript, offscreen_anchor) ==
               Status::Updated);
+        const auto scroll_result =
+            window.show_at_scroll_offset(transcript, 8.0);
+        check(scroll_result == Status::Updated ||
+              scroll_result == Status::Unchanged);
         auto* host1 = window.visible_host(1u);
         auto* host2 = window.visible_host(2u);
         check(host1 && host2);
