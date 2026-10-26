@@ -112,6 +112,15 @@ if(STUN_BUILD_TUI_STREAMING_DEMO)
         "$<TARGET_FILE:flexui_tui_streaming_demo>")
     set_tests_properties(tui_streaming_demo_posix_pty
       PROPERTIES TIMEOUT 60)
+    # Separate real PTY handshake: Home must be decoded, admitted and
+    # screen-visible while the first worker BEGIN is still blocked on a
+    # one-byte test-only pipe. The normal concurrent PTY gate above stays.
+    add_test(NAME tui_streaming_demo_posix_pty_early_home
+      COMMAND "${Python3_EXECUTABLE}"
+        "${STUN_ROOT}/flexUI/tests/test_tui_streaming_pty.py"
+        "$<TARGET_FILE:flexui_tui_streaming_demo>" --early-home)
+    set_tests_properties(tui_streaming_demo_posix_pty_early_home
+      PROPERTIES TIMEOUT 60)
   elseif(WIN32)
     # Spawn the unchanged real interactive demo under a fresh OS Console.
     # Independent supervising process writes INPUT_RECORDs and reads native
