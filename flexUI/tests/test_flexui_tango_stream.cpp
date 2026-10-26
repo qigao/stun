@@ -2150,9 +2150,15 @@ spec("FlexUI MarkdownWidget through Tango async transport and cell renderer") {
         constexpr std::size_t kTurns = 32u;
         const std::array<float, 4u> widths{{320.0f, 216.0f, 176.0f, 280.0f}};
         bool accepted = true;
+        std::uint64_t last_id = 0u;
+        const char* stage = "startup";
+        std::uint64_t observed_id = 0u;
+        float observed_local = 0.0f;
         std::size_t peak_nodes = initial_nodes;
         std::size_t cancellations = 0u;
         for (std::uint64_t id = 1u; id <= kTurns && accepted; ++id) {
+            last_id = id;
+            stage = "native-open-and-begin";
             std::uint64_t evicted = 99u;
             accepted = tui_transcript_open(transcript, id, &evicted) ==
                 TUI_TRANSCRIPT_OK &&
@@ -2163,11 +2169,13 @@ spec("FlexUI MarkdownWidget through Tango async transport and cell renderer") {
                 "| 名称 | 值 |\n| --- | --- |\n"
                 "| 中文 😀 | **GFM** |\n\n"
                 "```c\nint sample(void) {\n  return 42;\n}\n```\n\n";
+            stage = "first-gfm-chunks";
             accepted = append(id, first);
             if (!accepted) break;
             box.set_viewport(widths[static_cast<std::size_t>(id % 4u)],
                              176.0f);
             box.update();
+            stage = "partial-tail-projection";
             const auto partial = window.show_tail(transcript);
             accepted = partial == Status::Updated ||
                        partial == Status::Unchanged;
@@ -2175,21 +2183,25 @@ spec("FlexUI MarkdownWidget through Tango async transport and cell renderer") {
             // Another source revision increases actual height while the
             // message retains its original permanent Markdown host.
             auto* current = window.visible_host(id);
+            stage = "second-gfm-chunks";
             accepted = current &&
                 append(id, "More long text with wrapping and 中 😀.\n\n"
                            "Another paragraph for viewport scroll.\n\n");
             if (!accepted) break;
             const bool cancelled = id % 6u == 0u;
+            stage = "settle-or-cancel";
             accepted = emit(id, cancelled ? TUI_STREAM_CANCEL :
                                            TUI_STREAM_END, {}) ==
                        TUI_TRANSCRIPT_OK;
             if (!accepted) break;
             if (cancelled) {
+                stage = "stale-post-cancel-chunk";
                 ++cancellations;
                 accepted = emit(id, TUI_STREAM_CHUNK, "late") ==
                            TUI_TRANSCRIPT_STALE;
                 if (!accepted) break;
             }
+            stage = "settled-tail-projection";
             const auto updated = window.show_tail(transcript);
             accepted = (updated == Status::Updated ||
                         updated == Status::Unchanged) &&
@@ -2197,8 +2209,11 @@ spec("FlexUI MarkdownWidget through Tango async transport and cell renderer") {
             if (!accepted) break;
             const std::uint64_t oldest = id > 4u ? id - 3u : 1u;
             flex::tui_backend::TranscriptScrollAnchor mapped{};
+            stage = "oldest-anchor-seek-plus8";
             const auto seek = window.scroll_from_anchor(
                 transcript, {oldest, 4.0f, false}, 8.0, &mapped);
+            observed_id = mapped.message_id;
+            observed_local = mapped.within_message_y;
             accepted = (seek == Status::Updated ||
                         seek == Status::Unchanged) &&
                        mapped.message_id == oldest &&
@@ -2210,14 +2225,18 @@ spec("FlexUI MarkdownWidget through Tango async transport and cell renderer") {
             box.set_viewport(widths[static_cast<std::size_t>((id + 1u) % 4u)],
                              176.0f);
             box.update();
+            stage = "reflow-anchor-minus4";
             const auto reflowed = window.scroll_from_anchor(
                 transcript, mapped, -4.0, &mapped);
+            observed_id = mapped.message_id;
+            observed_local = mapped.within_message_y;
             accepted = (reflowed == Status::Updated ||
                         reflowed == Status::Unchanged) &&
                        mapped.message_id == oldest &&
                        std::fabs(mapped.within_message_y - 8.0f) < 2.5f &&
                        window.visible_host(oldest) != nullptr;
             if (!accepted) break;
+            stage = "bounded-retainer-index-and-box";
             const auto* index = window.tracked_heights();
             accepted = window.slot_capacity() == 2u &&
                 window.visible_count() <= 2u &&
@@ -2231,6 +2250,15 @@ spec("FlexUI MarkdownWidget through Tango async transport and cell renderer") {
             check(box.owned_element_count() <= initial_nodes + 256u);
             check(box.cached_style_element_count() <= initial_nodes + 256u);
         }
+        if (!accepted)
+            std::fprintf(stderr,
+                "TUI_GFM_REFLOW_FAIL turn=%llu stage=%s resolved_id=%llu "
+                "local=%.2f visible=%zu children=%zu scroll=%.2f\n",
+                static_cast<unsigned long long>(last_id), stage,
+                static_cast<unsigned long long>(observed_id),
+                static_cast<double>(observed_local), window.visible_count(),
+                viewport->child_count(),
+                static_cast<double>(viewport->scroll_y()));
         check(accepted);
         check(cancellations == 5u);
         check(tui_transcript_count(transcript) == 4u);
