@@ -1897,9 +1897,15 @@ spec("FlexUI MarkdownWidget through Tango async transport and cell renderer") {
             box.set_viewport(152.0f, 176.0f);
             box.update();
             flex::tui_backend::TranscriptScrollAnchor wheel_anchor{};
+            const auto fast_before_eviction =
+                window.in_message_scroll_fast_paths();
             const auto next_coordinate = window.scroll_from_anchor(
                 transcript, {2u, 8.0f, false},
                 16.0, &wheel_anchor);
+            // Evicted semantic ID #2 MUST use the conservative rewindow
+            // path, not a same-host optimization for a recycled Element.
+            check(window.in_message_scroll_fast_paths() ==
+                  fast_before_eviction);
             check(next_coordinate == Status::Updated ||
                   next_coordinate == Status::Unchanged);
             // At this point the width changed, so cached Box heights
