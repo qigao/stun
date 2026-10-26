@@ -221,9 +221,15 @@ public:
           static_cast<double>(anchor.within_message_y),
           0.0, *own_height);
     const double total = heights_->total_height_estimate();
-    const double maximum =
-        std::max(0.0, total - static_cast<double>(viewport_.height()));
-    const double target = std::clamp(base + delta_y, 0.0, maximum);
+    // A width/style invalidation deliberately drops old Box measurements.
+    // The fallback-only estimate can then be SHORTER than the viewport
+    // even while its real Markdown is still scrollable. Do not use
+    // (estimated total - viewport height) as a hard scroll maximum: that
+    // would turn an admitted wheel step into an accidental zero delta.
+    // Only bound the lookup to retained numeric geometry. Box independently
+    // clamps the final visible scroll offset after actual layout, and
+    // locate_offset never fabricates an ID past the final retained item.
+    const double target = std::clamp(base + delta_y, 0.0, total);
     return show_at_scroll_offset(transcript, target, resolved);
   }
 
