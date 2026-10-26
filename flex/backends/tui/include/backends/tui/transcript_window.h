@@ -294,7 +294,9 @@ private:
   // prepares two value-derived placeholder heights. Unknown offscreen rows
   // remain estimates and are never advertised as exact geometry.
   bool prepare_virtual_spacers(std::uint64_t first_id,
-                               std::size_t count) {
+                               std::size_t count,
+                               bool& changed) {
+    changed = false;
     if (!leading_spacer_) return true;
     if (!heights_ || !first_id || !count) return false;
     const auto plan = heights_->window_extent(first_id, count);
@@ -303,10 +305,18 @@ private:
         plan->leading < 0.0 || plan->trailing < 0.0 ||
         plan->leading > 10000000.0 || plan->trailing > 10000000.0)
       return false;
-    leading_spacer_->set_custom_property(
-        "--tui-virtual-height", std::to_string(plan->leading) + "px");
-    trailing_spacer_->set_custom_property(
-        "--tui-virtual-height", std::to_string(plan->trailing) + "px");
+    // Stage both values before mutating the live Box. A same-window view
+    // still needs a relayout when offscreen height estimates are refined.
+    const auto leading = std::to_string(plan->leading) + "px";
+    const auto trailing = std::to_string(plan->trailing) + "px";
+    const auto* old_leading =
+        leading_spacer_->custom_property("--tui-virtual-height");
+    const auto* old_trailing =
+        trailing_spacer_->custom_property("--tui-virtual-height");
+    changed = !old_leading || !old_trailing ||
+              *old_leading != leading || *old_trailing != trailing;
+    leading_spacer_->set_custom_property("--tui-virtual-height", leading);
+    trailing_spacer_->set_custom_property("--tui-virtual-height", trailing);
     return true;
   }
 
@@ -350,7 +360,9 @@ private:
       geometry_changed = result == TranscriptHeightIndex::Status::Updated;
     }
 
-    if (count && !prepare_virtual_spacers(desired[0].id, count))
+    bool spacers_changed = false;
+    if (count && !prepare_virtual_spacers(
+            desired[0].id, count, spacers_changed))
       return Status::QueryRejected;
     std::vector<Slot*> next;
     next.reserve(count);
@@ -388,12 +400,13 @@ private:
         box_.update();
         record_visible_heights();
         const bool moved = restore_anchor(*anchor);
-        return moved || geometry_changed ? Status::Updated : Status::Unchanged;
+        return moved || geometry_changed || spacers_changed
+            ? Status::Updated : Status::Unchanged;
       }
       if (policy == ScrollPolicy::FollowTail) {
         const bool moved = viewport_.set_scroll_offset(
             viewport_.scroll_x(), viewport_.max_scroll_y());
-        if (moved || geometry_changed) {
+        if (moved || geometry_changed || spacers_changed) {
           box_.update();
           record_visible_heights();
           return Status::Updated;
@@ -402,7 +415,7 @@ private:
       // Native revision/width/style changes can invalidate cached numeric
       // heights even with identical visible Markdown. Re-measure only after
       // an actual owner Box update; never stamp old layout as a new sample.
-      if (geometry_changed) {
+      if (geometry_changed || spacers_changed) {
         box_.update();
         record_visible_heights();
         return Status::Updated;
