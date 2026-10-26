@@ -2323,6 +2323,26 @@ spec("FlexUI MarkdownWidget through Tango async transport and cell renderer") {
             box.set_viewport(224.0f, 176.0f);
             box.update();
         }
+        // Close admission while CANCEL, stale CHUNK, replacement BEGIN,
+        // CHUNK and END are still queued. Closing must NOT discard any of
+        // those already copied events, and the worker's subsequent post
+        // must observe CLOSED before the queue/Owner are destroyed.
+        tui_async_queue_stats_t stats{};
+        check(tui_async_queue_get_stats(queue, &stats) == TUI_ASYNC_OK);
+        const std::size_t queued_before_close = stats.queued;
+        check(queued_before_close >= 5u && !stats.closed);
+        check(tui_async_queue_close(queue) == TUI_ASYNC_OK);
+        allow_after_close.set_value();
+        worker.join();
+        check(producer_ok.load(std::memory_order_acquire));
+        check(after_close.load(std::memory_order_acquire) ==
+              TUI_ASYNC_CLOSED);
+        check(tui_async_queue_get_stats(queue, &stats) == TUI_ASYNC_OK);
+        check(stats.closed && stats.queued == queued_before_close);
+
+        // The very next real UI Owner dispatch must drain those accepted
+        // records in FIFO order even though new admission is closed. Its
+        // ONE coalesced frame must reflow the virtual Box and retire #1.
         if (cancel_delivered) {
             check(tui_app_dispatch_once(app));
             check(owner.valid && owner.frames == 2u);
@@ -2339,13 +2359,6 @@ spec("FlexUI MarkdownWidget through Tango async transport and cell renderer") {
             }
             check(viewport->child_count() == 3u);
         }
-        check(tui_async_queue_close(queue) == TUI_ASYNC_OK);
-        allow_after_close.set_value();
-        worker.join();
-        check(producer_ok.load(std::memory_order_acquire));
-        check(after_close.load(std::memory_order_acquire) ==
-              TUI_ASYNC_CLOSED);
-        tui_async_queue_stats_t stats{};
         check(tui_async_queue_get_stats(queue, &stats) == TUI_ASYNC_OK);
         check(stats.closed && stats.queued == 0u);
         check(tui_app_pump_messages(app, 128u) == 0u);
