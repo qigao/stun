@@ -93,6 +93,7 @@ struct Demo {
     // pixel-coordinate window map. The ordinary demo still browses by
     // message. No worker mutates this value or any Box-owned Element.
     int pending_virtual_scroll_steps = 0;
+    bool pending_virtual_scroll = false;
 #if defined(STUN_TUI_DEMO_HEADLESS_TEST) && !defined(_WIN32)
     // CI-only out-of-band navigation provenance. The next owner frame is
     // sampled independently from the parent's VT/cell reconstruction.
@@ -287,6 +288,7 @@ bool on_key(int command, void* ptr) {
     }
     if (command == Tail) {
         d.pending_virtual_scroll_steps = 0;
+        d.pending_virtual_scroll = false;
         d.following = true;
         d.anchor = 0u;
         return true;
@@ -294,6 +296,7 @@ bool on_key(int command, void* ptr) {
     const std::size_t count = tui_transcript_count(d.transcript);
     if (command == Oldest) {
         d.pending_virtual_scroll_steps = 0;
+        d.pending_virtual_scroll = false;
         // Home is an intent, even before the first asynchronous BEGIN has
         // been admitted. Keep a pending oldest anchor (zero) until the
         // owner receives its first retained message; never turn this into
@@ -313,6 +316,10 @@ bool on_key(int command, void* ptr) {
             return true;
         if (command == Newer && d.following) return true;
         d.pending_virtual_scroll_steps += command == Older ? -1 : 1;
+        // A wheel up followed by wheel down in the SAME owner batch has
+        // zero net displacement, but is still a scroll intent. Never let
+        // that fall into Home-before-BEGIN anchor resolution.
+        d.pending_virtual_scroll = true;
         d.following = false;
         return true;
     }
@@ -424,6 +431,7 @@ void on_view(const void* ptr, tui_buffer_t* back) {
         // A value-only zero anchor is pending intent, not an invalid query
         // and not permission to resume following a streaming producer.
         if (!d.following && !d.anchor &&
+            !d.pending_virtual_scroll &&
             tui_transcript_count(d.transcript) != 0u)
             d.anchor = id_at(d.transcript, 0u);
         // Snapshot BEFORE a viewport resize changes Box layout geometry.
@@ -449,7 +457,7 @@ void on_view(const void* ptr, tui_buffer_t* back) {
             }
         }
         const bool has_virtual_scroll = d.experimental_virtual_spacers &&
-            d.pending_virtual_scroll_steps != 0;
+            d.pending_virtual_scroll;
         const bool continuing_history = !d.following && d.anchor != 0u &&
             d.projected_anchor == d.anchor &&
             prior_scroll.message_id != 0u && !prior_scroll.follow_tail;
@@ -477,6 +485,7 @@ void on_view(const void* ptr, tui_buffer_t* back) {
         }
         if (has_virtual_scroll) {
             d.pending_virtual_scroll_steps = 0;
+            d.pending_virtual_scroll = false;
             d.anchor = mapped_scroll.message_id;
             d.following = false;
         }
