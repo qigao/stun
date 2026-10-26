@@ -186,7 +186,8 @@ def started_as_tty():
     return master, slave
 
 
-def run_test(executable, early_home=False, home_burst=False):
+def run_test(executable, early_home=False, home_burst=False,
+             virtual_spacers=False):
     master, slave = started_as_tty()
     original_termios = termios.tcgetattr(slave)
     output = bytearray()
@@ -249,6 +250,25 @@ def run_test(executable, early_home=False, home_burst=False):
                     (command, int(following))).encode("ascii")
         require(expected in last,
                 "owner post-layout navigation state mismatch: %r" % last)
+        if virtual_spacers:
+            geometry = [line for line in lines
+                        if line.startswith(b"virtual_geometry epoch=")]
+            require(geometry, "no virtual geometry owner-frame record")
+            last_geometry = geometry[-1]
+            require(b"enabled=1" in last_geometry,
+                    "virtual spacer path not enabled: %r" % last_geometry)
+            sample = re.search(
+                rb"visible=(\d+) children=(\d+) "
+                rb"leading=([\d.]+) trailing=([\d.]+)",
+                last_geometry)
+            require(sample is not None,
+                    "invalid virtual owner geometry: %r" % last_geometry)
+            visible, children = int(sample[1]), int(sample[2])
+            require(0 <= visible <= 5 and
+                    (children == 0 if visible == 0
+                     else children == visible + 2),
+                    "unbounded/incorrect virtual Box children: %r" %
+                    last_geometry)
 
     def mode_matches(original, restored):
         return original == restored
@@ -269,8 +289,11 @@ def run_test(executable, early_home=False, home_burst=False):
         }
         if early_home:
             environment["STUN_TUI_PTY_BEGIN_GATE_FD"] = str(gate_read)
+        argv = [executable]
+        if virtual_spacers:
+            argv.append("--experimental-virtual-spacers")
         child = subprocess.Popen(
-            [executable], stdin=slave, stdout=slave, stderr=slave,
+            argv, stdin=slave, stdout=slave, stderr=slave,
             start_new_session=True,
             preexec_fn=make_controlling_terminal,
             close_fds=True,
@@ -367,6 +390,11 @@ def run_test(executable, early_home=False, home_burst=False):
         until("SGR wheel-up changes visible scroll state",
               lambda: screen.mode() == "scrollback"
               and screen.status() != prior_status, 8.0)
+        if virtual_spacers:
+            # This is not a headless index-only acceptance: the wheel
+            # entered the real UI Owner and Box now contains bounded
+            # message hosts plus two physical Spacer elements.
+            require_last_owner_frame(2, False)
 
         # Resize an actual PTY, deliver SIGWINCH to the child with a genuine
         # tty controlling process group, and require another terminal frame.
@@ -409,8 +437,9 @@ def run_test(executable, early_home=False, home_burst=False):
                     "parent-observed termios mismatch after normal exit")
         print("native POSIX PTY chat passed: keyboard, SGR mouse, "
               "SIGWINCH 52x16 UI, termios restoration and terminal controls; "
-              "early_home=%d, home_burst=%d, captured=%d bytes" %
-              (int(early_home), int(home_burst), len(output)))
+              "early_home=%d, home_burst=%d, virtual=%d, captured=%d bytes" %
+              (int(early_home), int(home_burst),
+               int(virtual_spacers), len(output)))
     except Exception:
         print("PTY visible status: %r; retained=%d; mode=%r; "
               "geometry=%r; parser_state=%s" %
@@ -469,11 +498,14 @@ def main():
                         help="gate first worker BEGIN until real PTY Home is visible")
     parser.add_argument("--home-burst", action="store_true",
                         help="interleave strict real Home/End under active Markdown bursts")
+    parser.add_argument("--virtual-spacers", action="store_true",
+                        help="run the ordinary PTY owner with opt-in bounded FlexUI spacers")
     args = parser.parse_args()
     require(os.path.isfile(args.executable),
             "missing real streaming demo executable")
     run_test(os.path.abspath(args.executable), early_home=args.early_home,
-             home_burst=args.home_burst)
+             home_burst=args.home_burst,
+             virtual_spacers=args.virtual_spacers)
 
 
 if __name__ == "__main__":
