@@ -507,6 +507,21 @@ jobs:
               "turns", "cancels", "crossings", "peak_elements",
               "visible_hosts"
           )
+          gfm_height_expression = re.compile(
+              r"TUI_GFM_HEIGHT initial_px=([0-9]+(?:\.[0-9]+)?) "
+              r"content_px=([0-9]+(?:\.[0-9]+)?) "
+              r"narrow_px=([0-9]+(?:\.[0-9]+)?) "
+              r"restored_px=([0-9]+(?:\.[0-9]+)?) "
+              r"source_delta_px=([0-9]+(?:\.[0-9]+)?) "
+              r"wrap_delta_px=([0-9]+(?:\.[0-9]+)?) "
+              r"unwrap_delta_px=([0-9]+(?:\.[0-9]+)?) "
+              r"anchor_preserved=(\d+)"
+          )
+          gfm_height_names = (
+              "initial_px", "content_px", "narrow_px", "restored_px",
+              "source_delta_px", "wrap_delta_px", "unwrap_delta_px",
+              "anchor_preserved"
+          )
           paths = {
               "asan_ubsan": Path("build/xml-runtime/Testing/Temporary/LastTest.log"),
               "lsan": Path("build/xml-runtime-lsan/Testing/Temporary/LastTest.log"),
@@ -522,6 +537,7 @@ jobs:
               "reuse_modes": {},
               "height_modes": {},
               "gfm_modes": {},
+              "gfm_height_modes": {},
           }
           for mode, path in paths.items():
               log = path.read_text(encoding="utf-8")
@@ -636,6 +652,32 @@ jobs:
                       f"{gfm_values}"
                   )
               evidence["gfm_modes"][mode] = gfm_values
+              height_matches = list(gfm_height_expression.finditer(log))
+              if len(height_matches) != 1:
+                  raise SystemExit(
+                      f"{mode}: expected one TUI_GFM_HEIGHT actual-Box "
+                      f"geometry result in {path}, got {len(height_matches)}"
+                  )
+              actual = {
+                  name: (int(value) if name == "anchor_preserved" else
+                         float(value))
+                  for name, value in zip(
+                      gfm_height_names, height_matches[0].groups())
+              }
+              if (actual["initial_px"] <= 72.0 or
+                  actual["source_delta_px"] <= 1.0 or
+                  actual["wrap_delta_px"] <= 1.0 or
+                  actual["unwrap_delta_px"] <= 1.0 or
+                  actual["content_px"] <= actual["initial_px"] + 1.0 or
+                  actual["narrow_px"] <= actual["content_px"] + 1.0 or
+                  actual["restored_px"] >= actual["narrow_px"] - 1.0 or
+                  abs(actual["restored_px"] -
+                      actual["content_px"]) >= 2.0 or
+                  actual["anchor_preserved"] != 1):
+                  raise SystemExit(
+                      f"{mode}: invalid real GFM grow/shrink evidence {actual}"
+                  )
+              evidence["gfm_height_modes"][mode] = actual
           output = Path("build/tui-long-session-metrics.json")
           output.write_text(json.dumps(evidence, indent=2, sort_keys=True) + "\n",
                             encoding="utf-8")
@@ -691,6 +733,19 @@ jobs:
                                 f'{result["crossings"]} | '
                                 f'{result["peak_elements"]} | '
                                 f'{result["visible_hosts"]} |\n')
+                  out.write("\n### Real GFM source/viewport height changes\n\n")
+                  out.write("| Mode | Baseline px | Content px | Narrow px | "
+                            "Restored px | Source growth px | Wrap growth px | "
+                            "Unwrap shrink px |\n")
+                  out.write("|---|---:|---:|---:|---:|---:|---:|---:|\n")
+                  for mode, result in evidence["gfm_height_modes"].items():
+                      out.write(f'| {mode} | {result["initial_px"]:.2f} | '
+                                f'{result["content_px"]:.2f} | '
+                                f'{result["narrow_px"]:.2f} | '
+                                f'{result["restored_px"]:.2f} | '
+                                f'{result["source_delta_px"]:.2f} | '
+                                f'{result["wrap_delta_px"]:.2f} | '
+                                f'{result["unwrap_delta_px"]:.2f} |\n')
           print(output.read_text(encoding="utf-8"))
           PY
 
