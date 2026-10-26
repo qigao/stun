@@ -94,6 +94,13 @@ if(STUN_BUILD_TUI_STREAMING_DEMO)
     STUN_TUI_DEMO_HEADLESS_TEST=1)
   target_include_directories(flexui_tui_streaming_demo PRIVATE
     "${STUN_ROOT}/tango/src")
+  # Strictly CI-only: allow the real Tango C11 render/flush path to attest
+  # to a post-write committed frame. Ordinary runtime targets stay unchanged.
+  if(UNIX)
+    target_compile_definitions(tango PRIVATE STUN_TUI_PTY_RENDER_TRACE_CI=1)
+    target_compile_definitions(flexui_tui_streaming_demo PRIVATE
+      STUN_TUI_PTY_RENDER_TRACE_CI=1)
+  endif()
   # No mode switch: the default smoke MUST exercise bounded coordinate
   # virtual scrolling with live Box height measurement and scroll anchors.
   add_test(NAME tui_streaming_demo_smoke
