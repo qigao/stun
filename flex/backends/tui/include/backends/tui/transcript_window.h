@@ -412,9 +412,19 @@ private:
             ? Status::Updated : Status::Unchanged;
       }
       if (policy == ScrollPolicy::FollowTail) {
-        const bool moved = viewport_.set_scroll_offset(
-            viewport_.scroll_x(), viewport_.max_scroll_y());
-        if (moved || geometry_changed || spacers_changed) {
+        // Offscreen retained history may change spacer geometry without
+        // changing a single visible Markdown byte. Reflow must precede
+        // reading max_scroll_y(), or a growing leading spacer strands the
+        // reader above the actual tail until another producer event.
+        if (geometry_changed || spacers_changed) {
+          box_.update();
+          record_visible_heights();
+          (void)viewport_.set_scroll_offset(
+              viewport_.scroll_x(), viewport_.max_scroll_y());
+          return Status::Updated;
+        }
+        if (viewport_.set_scroll_offset(
+                viewport_.scroll_x(), viewport_.max_scroll_y())) {
           box_.update();
           record_visible_heights();
           return Status::Updated;

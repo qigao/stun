@@ -1623,6 +1623,98 @@ spec("FlexUI MarkdownWidget through Tango async transport and cell renderer") {
         check(box.cached_style_element_count() <= owned);
     }
 
+    it("follows the new tail after a hidden message invalidates measured spacer height") {
+        // A hidden ACTIVE message changes its generation/sequence revision.
+        // Its *previously measured* short height becomes an estimated 400px
+        // spacer while the two visible MarkdownWidget hosts stay identical.
+        // Follow-tail must use the NEW Box max_scroll_y, not the old one.
+        flexUI::Box box(nullptr);
+        box.set_viewport(320.0f, 176.0f);
+        box.load_css(
+            "#tail-root {display:flex;flex-direction:column;"
+            "width:320px;height:176px;} "
+            "#tail-window {display:flex;flex-direction:column;"
+            "width:180px;height:60px;overflow-y:scroll;} "
+            ".transcript-message {width:180px;flex-shrink:0;} "
+            ".tui-virtual-spacer {width:180px;flex-shrink:0;"
+            "height:var(--tui-virtual-height);}");
+        auto* root = box.create("div", "tail-root");
+        auto* viewport = box.create("div", "tail-window");
+        check(root && viewport);
+        if (!root || !viewport) return;
+        root->append(viewport);
+        box.set_root(root);
+        box.update();
+        flex::tui_backend::TranscriptWindow window(box, *viewport, 2u);
+        window.enable_height_tracking(3u, 400.0f);
+        window.enable_virtual_spacers();
+        auto* transcript = tui_transcript_create(3u, 4096u, 128u);
+        check(transcript != nullptr);
+        if (!transcript) return;
+
+        std::uint64_t sequence = 0u;
+        const auto emit = [&](std::uint64_t id, std::uint32_t type,
+                              std::string_view chunk) {
+            if (chunk.size() > 128u) return false;
+            std::array<unsigned char,
+                       sizeof(tui_stream_packet_header_t) + 128u> packet{};
+            const tui_stream_packet_header_t header{id};
+            std::memcpy(packet.data(), &header, sizeof(header));
+            if (!chunk.empty())
+                std::memcpy(packet.data() + sizeof(header),
+                            chunk.data(), chunk.size());
+            const tui_async_event_t event{
+                type, 1u, ++sequence, sizeof(header) + chunk.size()
+            };
+            return tui_transcript_apply(
+                transcript, &event, packet.data(), nullptr) ==
+                TUI_TRANSCRIPT_OK;
+        };
+        bool admitted = true;
+        for (std::uint64_t id = 1u; id <= 3u; ++id) {
+            std::uint64_t evicted = 99u;
+            admitted = admitted &&
+                tui_transcript_open(transcript, id, &evicted) ==
+                    TUI_TRANSCRIPT_OK && evicted == 0u &&
+                emit(id, TUI_STREAM_BEGIN, {}) &&
+                emit(id, TUI_STREAM_CHUNK, "Tiny markdown line.\n") &&
+                (id == 1u || emit(id, TUI_STREAM_END, {}));
+        }
+        check(admitted);
+        if (!admitted) {
+            check(tui_transcript_destroy(transcript) == TUI_TRANSCRIPT_OK);
+            return;
+        }
+        using Status = flex::tui_backend::TranscriptWindow::Status;
+        check(window.show(transcript, 0u) == Status::Updated);
+        const auto* index = window.tracked_heights();
+        check(index && index->lookup(1u).has_value());
+        check(index && index->lookup(1u)->measured);
+        const float measured_before = index->lookup(1u)->height;
+        check(measured_before < 300.0f);
+        check(window.show_tail(transcript) == Status::Updated);
+        auto* host2 = window.visible_host(2u);
+        auto* host3 = window.visible_host(3u);
+        check(host2 && host3 && viewport->child_count() == 4u);
+        const float previous_max = viewport->max_scroll_y();
+        check(viewport->scroll_y() >= previous_max - 1.0f);
+        check(window.leading_spacer_height() < 300.0f);
+
+        // The C11 owner still admits content for old active message #1;
+        // neither visible message #2 nor #3 has changed.
+        check(emit(1u, TUI_STREAM_CHUNK, "More words.\n"));
+        check(window.show_tail(transcript) == Status::Updated);
+        const float new_max = viewport->max_scroll_y();
+        check(new_max >= previous_max + 30.0f);
+        check(std::fabs(viewport->scroll_y() - new_max) < 2.0f);
+        check(window.leading_spacer_height() > 399.0f);
+        check(window.visible_host(1u) == nullptr);
+        check(window.visible_host(2u) == host2);
+        check(window.visible_host(3u) == host3);
+        check(viewport->child_count() == 4u);
+        check(tui_transcript_destroy(transcript) == TUI_TRANSCRIPT_OK);
+    }
+
     it("keeps opt-in virtual spacers and fixed hosts bounded for 128 messages") {
         // Exercise projection churn + explicit scroll-position rewindowing
         // with the real C11 retainer and only two permanent Markdown hosts.
