@@ -614,6 +614,10 @@ bool tui_terminal_poll(tui_terminal_t* term, tui_event_t* event) {
         const size_t read_size = available < sizeof(buf) ? available :
                                                             sizeof(buf);
         const ssize_t n = read(STDIN_FILENO, buf, read_size);
+        // A signal can also interrupt read() after select() indicated
+        // readiness. Preserve the same partial CSI contract in both paths.
+        if (n < 0 && errno == EINTR)
+            return tui_terminal_input_after_wait(term, event, -1, EINTR);
         if (n <= 0) return tui_terminal_input_flush(term, event);
         if (!tui_terminal_input_push(term, buf, (size_t)n)) return false;
         if (tui_terminal_input_next(term, event)) return true;
