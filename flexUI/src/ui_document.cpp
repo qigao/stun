@@ -1187,7 +1187,7 @@ UiDocumentInstantiateResult UiDocumentInstantiator::instantiate_impl(
     if (binding_transaction) {
       box.bindings_.rollback_transaction(*binding_transaction);
     }
-    box.root_ = nullptr;
+    if (options.mode == UiMountMode::Root) box.root_ = nullptr;
     box.next_element_generation_ = original_element_generation;
     box.active_widgets_.resize(original_active_widget_count);
     box.widgets_.resize(original_widget_count);
