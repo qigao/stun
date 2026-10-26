@@ -193,6 +193,78 @@ def read_owner_trace_lines(path):
     return captured.splitlines()
 
 
+
+def require_navigation_provenance(records, previous_epoch, command, following,
+                                  require_virtual=False):
+    """Require the *new* input admission and its exact post-Box owner frame.
+
+    No trace record, however convincing, replaces the caller's independent
+    real PTY screen.mode() assertion. The strict visible deadline is unchanged.
+    """
+    admissions = [line for line in records
+                  if line.startswith(b"command=")]
+    require(admissions, "missing independent on_key command admission")
+    # The CI-only demo deliberately stops logging after 64 commands.
+    # Beyond that, a previously successful Home could masquerade as a new one.
+    require(len(admissions) < 64,
+            "PTY command trace saturated; latest input provenance unknown")
+    admission = admissions[-1]
+    parsed = re.fullmatch(
+        rb"command=(\d+) following=[01] retained=\d+ "
+        rb"anchor=\d+ projected=\d+ epoch=(\d+)", admission)
+    require(parsed is not None,
+            "malformed or incomplete latest command admission: %r" % admission)
+    actual_command, epoch = int(parsed[1]), int(parsed[2])
+    require(epoch > previous_epoch,
+            "no new on_key admission since command epoch %d; last=%r" %
+            (previous_epoch, admission))
+    require(actual_command == command,
+            "wrong latest command: expected %d; got %r" % (command, admission))
+
+    frames = [line for line in records
+              if line.startswith(b"owner_view_epoch=")]
+    require(frames, "missing post-Box owner frame for new input")
+    frame = frames[-1]
+    matched = re.match(
+        rb"owner_view_epoch=(\d+) command=(\d+) following=(\d+) ",
+        frame)
+    require(matched is not None,
+            "malformed or incomplete owner frame: %r" % frame)
+    frame_epoch, frame_command, frame_follow = map(int, matched.groups())
+    require(frame_epoch == epoch,
+            "post-Box owner frame belongs to another input epoch: "
+            "admission=%d frame=%d" % (epoch, frame_epoch))
+    require(frame_command == command and frame_follow == int(following),
+            "post-Box owner state mismatch: %r" % frame)
+    cell_match = re.search(rb"cell_mode=(-?\d+) cell_row=(-?\d+)", frame)
+    require(cell_match is not None,
+            "missing owned Cell Buffer provenance: %r" % frame)
+    require(int(cell_match[1]) == (0 if following else 1)
+            and int(cell_match[2]) >= 0,
+            "owned Cell Buffer disagrees with new navigation: %r" % frame)
+
+    if require_virtual:
+        geometry = [line for line in records
+                    if line.startswith(b"virtual_geometry epoch=")]
+        require(geometry, "no virtual Box geometry provenance")
+        latest = geometry[-1]
+        head = re.match(rb"virtual_geometry epoch=(\d+) enabled=(\d+) ", latest)
+        require(head is not None and int(head[1]) == epoch and
+                int(head[2]) == 1,
+                "virtual geometry is stale or disabled for new input: %r" %
+                latest)
+        sample = re.search(
+            rb"visible=(\d+) children=(\d+) "
+            rb"leading=([\d.]+) trailing=([\d.]+)", latest)
+        require(sample is not None,
+                "invalid bounded virtual owner geometry: %r" % latest)
+        visible, children = int(sample[1]), int(sample[2])
+        require(0 <= visible <= 5 and
+                (children == 0 if visible == 0
+                 else children == visible + 2),
+                "unbounded/incorrect virtual Box children: %r" % latest)
+    return epoch
+
 def winsize(fd, rows, cols):
     fcntl.ioctl(fd, termios.TIOCSWINSZ, struct.pack("HHHH", rows, cols, 0, 0))
 
@@ -254,49 +326,26 @@ def run_test(executable, early_home=False, home_burst=False,
         n = os.write(master, data)
         require(n == len(data), "short PTY input write")
 
-    def require_last_owner_frame(command, following):
-        # Post-Box owner evidence is separate from physical VT/cell evidence.
-        # A successful input write or command trace can never substitute
-        # for the independent screen.mode() assertion made by the caller.
-        lines = read_owner_trace_lines(input_trace)
-        frames = [line for line in lines if line.startswith(b"owner_view_epoch=")]
-        require(frames, "missing independent owner post-layout frame evidence")
-        last = frames[-1]
-        expected = ("command=%d following=%d " %
-                    (command, int(following))).encode("ascii")
-        require(expected in last,
-                "owner post-layout navigation state mismatch: %r" % last)
-        # This is the first owned *cell* observation, before Tango serializes
-        # its ANSI delta. The existing screen.mode() check remains the only
-        # physical-terminal acceptance, and cannot be bypassed by this trace.
-        cell_match = re.search(rb"cell_mode=(-?\d+) cell_row=(-?\d+)", last)
-        require(cell_match is not None,
-                "missing post-Box cell-buffer provenance: %r" % last)
-        cell_mode, cell_row = int(cell_match[1]), int(cell_match[2])
-        require(cell_mode == (0 if following else 1) and cell_row >= 0,
-                "owner cell-buffer mode differs from navigation: %r" % last)
-        # Default demo mode now owns two virtual Spacer nodes. Validate
-        # their real owner/Box geometry even in ordinary-rate PTY sessions,
-        # not only in the rapid explicit virtual-history stress case.
-        if not legacy_message_scroll:
-            geometry = [line for line in lines
-                        if line.startswith(b"virtual_geometry epoch=")]
-            require(geometry, "no virtual geometry owner-frame record")
-            last_geometry = geometry[-1]
-            require(b"enabled=1" in last_geometry,
-                    "virtual spacer path not enabled: %r" % last_geometry)
-            sample = re.search(
-                rb"visible=(\d+) children=(\d+) "
-                rb"leading=([\d.]+) trailing=([\d.]+)",
-                last_geometry)
-            require(sample is not None,
-                    "invalid virtual owner geometry: %r" % last_geometry)
-            visible, children = int(sample[1]), int(sample[2])
-            require(0 <= visible <= 5 and
-                    (children == 0 if visible == 0
-                     else children == visible + 2),
-                    "unbounded/incorrect virtual Box children: %r" %
-                    last_geometry)
+    def last_command_epoch():
+        records = read_owner_trace_lines(input_trace)
+        commands = [line for line in records if line.startswith(b"command=")]
+        if not commands:
+            return 0
+        match = re.search(rb" epoch=(\d+)$", commands[-1])
+        require(match is not None,
+                "incomplete command trace before navigation: %r" %
+                commands[-1])
+        require(len(commands) < 64,
+                "PTY command trace saturated; cannot accept more navigation")
+        return int(match[1])
+
+    def require_last_owner_frame(command, following, previous_epoch):
+        # Screen-cell acceptance has already succeeded independently.
+        # The exact fresh epoch must reach BOTH UI Owner and Box cells.
+        return require_navigation_provenance(
+            read_owner_trace_lines(input_trace),
+            previous_epoch, command, following,
+            require_virtual=not legacy_message_scroll)
 
     def last_owner_epoch():
         records = read_owner_trace_lines(input_trace)
@@ -382,16 +431,16 @@ def run_test(executable, early_home=False, home_burst=False,
         # In the gated test it cannot publish until Home reaches UI Owner
         # and the independent cell oracle observes scrollback. Use genuine
         # PTY bytes and preserve the existing strict 5-second deadline.
+        home_epoch = last_command_epoch()
         send(b"\x1b[H")
         until("Home changes visible terminal state to scrollback",
               lambda: screen.mode() == "scrollback", 5.0)
-        require_last_owner_frame(5, False)
+        require_last_owner_frame(5, False, home_epoch)
         if early_home:
             # Assert BOTH independent command admission and the rendered
             # footer before releasing the producer. Raw VT grep is never
             # used in place of actual visible terminal state.
-            with open(input_trace, "rb") as admission:
-                admitted = admission.read(4096)
+            admitted = b"\n".join(read_owner_trace_lines(input_trace))
             require(b"command=5 following=1 retained=0" in admitted,
                     "Home did not reach UI Owner before first BEGIN")
             require(os.write(gate_write, b"G") == 1,
@@ -404,10 +453,11 @@ def run_test(executable, early_home=False, home_burst=False,
 
         # With the user looking at history, new worker messages must not
         # hide the ability to return to the newest window via END.
+        tail_epoch = last_command_epoch()
         send(b"\x1b[F")
         until("End changes visible terminal state to tail mode",
               lambda: screen.mode() == "tail", 5.0)
-        require_last_owner_frame(4, True)
+        require_last_owner_frame(4, True, tail_epoch)
 
         # Observe at least six admitted messages *on the rendered screen*.
         # A fixed sleep falsely assumes the CI host can render five windows
@@ -424,17 +474,20 @@ def run_test(executable, early_home=False, home_burst=False,
             # owner frame coalescing is fine, dropping an input is not.
             for round_no in range(3):
                 if round_no % 2 == 0:
+                    home_epoch = last_command_epoch()
                     send(b"\x1b[")
                     send(b"H")
                 else:
+                    home_epoch = last_command_epoch()
                     send(b"\x1b[H")
                 until("concurrent Home %d visible scrollback" % round_no,
                       lambda: screen.mode() == "scrollback", 5.0)
-                require_last_owner_frame(5, False)
+                require_last_owner_frame(5, False, home_epoch)
+                tail_epoch = last_command_epoch()
                 send(b"\x1b[F")
                 until("concurrent End %d visible tail" % round_no,
                       lambda: screen.mode() == "tail", 5.0)
-                require_last_owner_frame(4, True)
+                require_last_owner_frame(4, True, tail_epoch)
 
             # Race a *real kernel SIGWINCH* with an unfinished Home CSI
             # prefix while the normal worker is publishing Markdown.
@@ -443,20 +496,23 @@ def run_test(executable, early_home=False, home_burst=False,
             # ESC [. This complements, but does not replace, the native
             # deterministic EINTR regression. A physically visible Home
             # within the original five-second limit is still required.
+            home_epoch = last_command_epoch()
             send(b"\x1b[")
             os.kill(child.pid, signal.SIGWINCH)
             send(b"H")
             until("fragmented Home with SIGWINCH visible scrollback",
                   lambda: screen.mode() == "scrollback", 5.0)
-            require_last_owner_frame(5, False)
+            require_last_owner_frame(5, False, home_epoch)
+            tail_epoch = last_command_epoch()
             send(b"\x1b[F")
             until("End after interrupted Home visible tail",
                   lambda: screen.mode() == "tail", 5.0)
-            require_last_owner_frame(4, True)
+            require_last_owner_frame(4, True, tail_epoch)
 
         # Drive one native mouse wheel event. The SGR parser is invoked from
         # tui_terminal_poll(), not from a test-only decoder entry point.
         prior_status = screen.status()
+        wheel_epoch = last_command_epoch()
         send(b"\x1b[<64;3;3M")  # wheel-up at column 3, row 3
         until("SGR wheel-up changes visible scroll state",
               lambda: screen.mode() == "scrollback"
@@ -465,7 +521,7 @@ def run_test(executable, early_home=False, home_burst=False,
             # Every default ordinary PTY session now verifies that a real
             # wheel enters the virtual Box geometry path, not only changes
             # the footer text.
-            require_last_owner_frame(2, False)
+            require_last_owner_frame(2, False, wheel_epoch)
 
         if virtual_spacers:
             # This extra coordinate-to-window test uses the explicitly
@@ -485,10 +541,12 @@ def run_test(executable, early_home=False, home_burst=False,
             until("all 48 rapid messages are settled for stable scroll map",
                   stable_retained_history, 18.0)
             previous_epoch = last_owner_epoch()
+            tail_epoch = last_command_epoch()
             send(b"\x1b[F")
             until("virtual End owner frame after full retention",
                   lambda: screen.mode() == "tail" and
                   last_owner_epoch() > previous_epoch, 5.0)
+            require_last_owner_frame(4, True, tail_epoch)
             first_tail = last_virtual_first()
             require(first_tail > 0,
                     "missing first projected message at virtual tail")
@@ -498,12 +556,13 @@ def run_test(executable, early_home=False, home_burst=False,
             # previous offscreen Spacer. The UI Owner must reproject
             # *older retained messages*, not merely change footer text.
             # Keep actual Home/End and 52x16 terminal restoration checks.
+            wheel_epoch = last_command_epoch()
             send(b"\x1b[<64;3;3M" * 24)
             until("real wheel coordinate rewindows retained virtual hosts",
                   lambda: screen.mode() == "scrollback" and
                   last_owner_epoch() > previous_epoch and
                   0 < last_virtual_first() < first_tail, 8.0)
-            require_last_owner_frame(2, False)
+            require_last_owner_frame(2, False, wheel_epoch)
 
         # Resize an actual PTY, deliver SIGWINCH to the child with a genuine
         # tty controlling process group, and require another terminal frame.
@@ -522,16 +581,18 @@ def run_test(executable, early_home=False, home_burst=False,
             # A queued resize may coincide with a partial CSI read; neither
             # owner command provenance nor Box-cell evidence substitutes for
             # the actual 52x16 PTY screen.
+            tail_epoch = last_command_epoch()
             send(b"\x1b[F")
             until("post-resize End displays tail",
                   lambda: screen.mode() == "tail"
                   and screen.geometry() == (52, 16), 5.0)
-            require_last_owner_frame(4, True)
+            require_last_owner_frame(4, True, tail_epoch)
+            home_epoch = last_command_epoch()
             send(b"\x1b[H")
             until("post-resize Home displays scrollback",
                   lambda: screen.mode() == "scrollback"
                   and screen.geometry() == (52, 16), 5.0)
-            require_last_owner_frame(5, False)
+            require_last_owner_frame(5, False, home_epoch)
 
         # Graceful input exit is needed to assert actual terminal restoration;
         # SIGTERM would only test abnormal process termination.
