@@ -1075,7 +1075,10 @@ UiDocumentInstantiateResult UiDocumentInstantiator::instantiate_impl(
   bool index_committed = false;
   bool child_attached = false;
   std::vector<Element *> original_children;
-  const auto *bindings = program ? &program->impl_->bindings : nullptr;
+  // Do not open a no-op binding transaction for controller-free fragments:
+  // Child publication must be the last potentially failing operation.
+  const auto *bindings = program && !program->impl_->bindings.empty()
+                             ? &program->impl_->bindings : nullptr;
   try {
     UiDocumentError build_error;
     detached.root = build_node(definition.root, detached, program == nullptr,
