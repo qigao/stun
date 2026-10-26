@@ -555,7 +555,13 @@ private:
 
     bool different = count != visible_.size();
     for (std::size_t i = 0u; i < count && !different; ++i)
+      // Fixed Box slots can be recycled for a different message with
+      // BYTE-IDENTICAL GFM. Pointer and Markdown equality alone cannot
+      // establish presentation identity: skipping this rebind would leave
+      // the old UiHandle/ID live while the height index already locates
+      // the newly requested retained message.
       if (next[i] != visible_[i] ||
+          next[i]->message_id != desired[i].id ||
           next[i]->markdown->markdown() != desired[i].text)
         different = true;
     // Anchor semantics are independent of the old viewport's scroll tail.
