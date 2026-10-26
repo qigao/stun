@@ -97,6 +97,14 @@ if(STUN_BUILD_TUI_STREAMING_DEMO)
   add_test(NAME tui_streaming_demo_smoke
     COMMAND flexui_tui_streaming_demo --headless-smoke)
   set_tests_properties(tui_streaming_demo_smoke PROPERTIES TIMEOUT 90)
+  # Same 80x24 synthetic-owner/front-buffer fixture with virtual geometry.
+  # In particular, 80x24 equals the provisional Box size: the FIRST owner
+  # turn must lay out root/viewport before height-index sync is admitted.
+  add_test(NAME tui_streaming_demo_smoke_virtual_spacers
+    COMMAND flexui_tui_streaming_demo --headless-smoke
+      --experimental-virtual-spacers)
+  set_tests_properties(tui_streaming_demo_smoke_virtual_spacers
+    PROPERTIES TIMEOUT 90)
   add_dependencies(stun_xml_runtime_qualification flexui_tui_streaming_demo)
 
   # The separate native POSIX PTY gate runs the *ordinary* interactive
