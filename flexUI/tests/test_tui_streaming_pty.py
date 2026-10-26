@@ -418,6 +418,24 @@ def run_test(executable, early_home=False, home_burst=False,
                       lambda: screen.mode() == "tail", 5.0)
                 require_last_owner_frame(4, True)
 
+            # Race a *real kernel SIGWINCH* with an unfinished Home CSI
+            # prefix while the normal worker is publishing Markdown.
+            # A signal may interrupt POSIX select()/read(); neither path
+            # may mistake EINTR for the 10ms ambiguity timeout and discard
+            # ESC [. This complements, but does not replace, the native
+            # deterministic EINTR regression. A physically visible Home
+            # within the original five-second limit is still required.
+            send(b"\\x1b[")
+            os.kill(child.pid, signal.SIGWINCH)
+            send(b"H")
+            until("fragmented Home with SIGWINCH visible scrollback",
+                  lambda: screen.mode() == "scrollback", 5.0)
+            require_last_owner_frame(5, False)
+            send(b"\\x1b[F")
+            until("End after interrupted Home visible tail",
+                  lambda: screen.mode() == "tail", 5.0)
+            require_last_owner_frame(4, True)
+
         # Drive one native mouse wheel event. The SGR parser is invoked from
         # tui_terminal_poll(), not from a test-only decoder entry point.
         prior_status = screen.status()
