@@ -494,8 +494,12 @@ void on_view(const void* ptr, tui_buffer_t* back) {
                     ? d.window->show_preserving_anchor(d.transcript, prior_scroll)
                     : d.window->show_from_id(d.transcript, d.anchor);
         using WindowStatus = flex::tui_backend::TranscriptWindow::Status;
-        if (status == WindowStatus::QueryRejected ||
-            status == WindowStatus::Invalid) {
+        // Allocation/resource refusal from the optional presentation stage
+        // is terminal for this demo's current frame: do not continue
+        // painting a stale Box after native C11 has admitted newer data.
+        // The ordinary application still uses the same UI Owner and queue.
+        if (status != WindowStatus::Updated &&
+            status != WindowStatus::Unchanged) {
             d.valid = false;
             (void)tui_async_queue_close(tui_app_async_queue(d.app));
             return;
