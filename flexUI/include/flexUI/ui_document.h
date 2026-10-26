@@ -97,6 +97,7 @@ enum class UiDocumentErrorCode {
   InvalidIdScope,
   DuplicateSlot,
   UnsupportedFragmentBindings,
+  MissingSlot,
 };
 
 struct UiDocumentError {
@@ -224,6 +225,7 @@ struct UiMountOptions {
   UiIdPolicy id_policy = UiIdPolicy::Global;
   Element *parent = nullptr; // Required only for Child; must belong to Box.
   std::string id_scope;       // Required only for Scoped.
+  std::vector<std::string> required_slots; // Checked before any factory or Box mutation.
 };
 
 struct UiDocumentTree {
