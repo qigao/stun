@@ -26,6 +26,8 @@
 #include <cstring>
 #include <limits>
 #include <memory>
+#include <memory_resource>
+#include <new>
 #include <string>
 #include <string_view>
 #include <thread>
@@ -1943,6 +1945,150 @@ spec("FlexUI MarkdownWidget through Tango async transport and cell renderer") {
             check(std::fabs(viewport->max_scroll_y() -
                             viewport->scroll_y()) < 2.5f);
         }
+        check(tui_transcript_destroy(transcript) == TUI_TRANSCRIPT_OK);
+    }
+
+    it("rolls back real allocator failure before mutating virtual Markdown projection") {
+        // The projection stage uses a real C++17 memory_resource; deliberately
+        // reject its next allocation. This tests std::bad_alloc from the
+        // staging allocator (not merely a mocked return/status code) while
+        // the C11 native retainer and the previously projected Box remain
+        // intact. Reusing the same resource must allow clean recovery.
+        struct FailOnceResource final : std::pmr::memory_resource {
+            bool fail_next = false;
+            std::size_t failure_count = 0u;
+        protected:
+            void* do_allocate(std::size_t bytes,
+                              std::size_t alignment) override {
+                if (fail_next) {
+                    fail_next = false;
+                    ++failure_count;
+                    throw std::bad_alloc();
+                }
+                return std::pmr::new_delete_resource()->allocate(
+                    bytes, alignment);
+            }
+            void do_deallocate(void* ptr, std::size_t bytes,
+                               std::size_t alignment) override {
+                std::pmr::new_delete_resource()->deallocate(
+                    ptr, bytes, alignment);
+            }
+            bool do_is_equal(
+                const std::pmr::memory_resource& other) const
+                noexcept override {
+                return this == &other;
+            }
+        } staging;
+
+        flexUI::Box box(nullptr);
+        box.set_viewport(320.0f, 160.0f);
+        box.load_css(
+            "#alloc-root {width:100%;height:100%;display:flex;"
+            "flex-direction:column;} "
+            "#alloc-window {width:180px;height:72px;overflow-y:scroll;"
+            "display:flex;flex-direction:column;} "
+            ".transcript-message {width:100%;flex-shrink:0;} "
+            ".tui-virtual-spacer {width:100%;flex-shrink:0;"
+            "height:var(--tui-virtual-height);}");
+        auto* root = box.create("div", "alloc-root");
+        auto* viewport = box.create("div", "alloc-window");
+        check(root && viewport);
+        if (!root || !viewport) return;
+        root->append(viewport);
+        box.set_root(root);
+        box.update();
+        flex::tui_backend::TranscriptWindow window(
+            box, *viewport, 1u, &staging);
+        window.enable_height_tracking(2u, 24.0f);
+        window.enable_virtual_spacers();
+        auto* transcript = tui_transcript_create(2u, 4096u, 64u);
+        check(transcript != nullptr);
+        if (!transcript) return;
+        std::uint64_t sequence = 0u;
+        const auto emit = [&](std::uint64_t id, std::uint32_t type,
+                              std::string_view text) {
+            if (text.size() > 64u) return TUI_TRANSCRIPT_INVALID;
+            std::array<unsigned char,
+                       sizeof(tui_stream_packet_header_t) + 64u> packet{};
+            const tui_stream_packet_header_t header{id};
+            std::memcpy(packet.data(), &header, sizeof(header));
+            if (!text.empty())
+                std::memcpy(packet.data() + sizeof(header),
+                            text.data(), text.size());
+            const tui_async_event_t event{
+                type, 1u, ++sequence, sizeof(header) + text.size()
+            };
+            return tui_transcript_apply(
+                transcript, &event, packet.data(), nullptr);
+        };
+        std::uint64_t evicted = 99u;
+        check(tui_transcript_open(transcript, 11u, &evicted) ==
+              TUI_TRANSCRIPT_OK && evicted == 0u);
+        check(emit(11u, TUI_STREAM_BEGIN, {}) == TUI_TRANSCRIPT_OK);
+        check(emit(11u, TUI_STREAM_CHUNK,
+                   "## First\n\nCJK 中 and emoji 😀.\n\n") ==
+              TUI_TRANSCRIPT_OK);
+        check(emit(11u, TUI_STREAM_END, {}) == TUI_TRANSCRIPT_OK);
+        using Status = flex::tui_backend::TranscriptWindow::Status;
+        check(window.show_tail(transcript) == Status::Updated);
+        auto* old_host = window.visible_host(11u);
+        check(old_host != nullptr);
+        if (!old_host) {
+            check(tui_transcript_destroy(transcript) == TUI_TRANSCRIPT_OK);
+            return;
+        }
+        const auto old_handle = box.handle_for(*old_host);
+        const auto* index = window.tracked_heights();
+        check(index && index->lookup(11u) && index->lookup(11u)->measured);
+        const auto owned = box.owned_element_count();
+        const auto styles = box.cached_style_element_count();
+        const auto old_y = viewport->scroll_y();
+        const auto old_first = window.first_visible_message_id();
+
+        // This native admission SUCCEEDS: presentation failure does not
+        // unwind message sequencing or fabricate a C11 rollback.
+        check(tui_transcript_open(transcript, 12u, &evicted) ==
+              TUI_TRANSCRIPT_OK && evicted == 0u);
+        check(emit(12u, TUI_STREAM_BEGIN, {}) == TUI_TRANSCRIPT_OK);
+        check(emit(12u, TUI_STREAM_CHUNK,
+                   "## Second\n\nA replacement GFM viewport.\n\n") ==
+              TUI_TRANSCRIPT_OK);
+        check(emit(12u, TUI_STREAM_END, {}) == TUI_TRANSCRIPT_OK);
+        check(tui_transcript_count(transcript) == 2u);
+        staging.fail_next = true;
+        check(window.show_tail(transcript) == Status::ResourceExhausted);
+        check(staging.failure_count == 1u);
+        check(window.visible_host(11u) == old_host);
+        check(window.visible_host(12u) == nullptr);
+        check(window.first_visible_message_id() == old_first);
+        check(box.resolve_handle(old_handle) == old_host);
+        check(index && index->lookup(11u) && !index->lookup(12u));
+        check(viewport->child_count() == 3u);
+        check(std::fabs(viewport->scroll_y() - old_y) < 0.01f);
+        check(box.owned_element_count() == owned);
+        check(box.cached_style_element_count() == styles);
+
+        // A second independent rejection happens during anchor-based
+        // rewindowing; both failures return an explicit status, not an
+        // uncaught exception or a half-recycled UiHandle.
+        staging.fail_next = true;
+        check(window.show_preserving_anchor(
+                  transcript, {12u, 0.0f, false}) ==
+              Status::ResourceExhausted);
+        check(staging.failure_count == 2u);
+        check(window.visible_host(11u) == old_host);
+        check(box.resolve_handle(old_handle) == old_host);
+        check(index && !index->lookup(12u));
+
+        // Release the allocator fault: same exact C11 source now projects.
+        check(window.show_tail(transcript) == Status::Updated);
+        check(window.visible_host(11u) == nullptr);
+        check(window.visible_host(12u) == old_host);
+        check(box.resolve_handle(old_handle) == nullptr);
+        check(index && index->lookup(12u) && index->lookup(12u)->measured);
+        check(viewport->child_count() == 3u);
+        check(box.owned_element_count() <= owned + 48u);
+        check(box.cached_style_element_count() <= styles + 48u);
         check(tui_transcript_destroy(transcript) == TUI_TRANSCRIPT_OK);
     }
 
