@@ -11,7 +11,9 @@ import tempfile
 import unittest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from test_tui_streaming_pty import PTY_TRACE_LIMIT, read_owner_trace_lines
+from test_tui_streaming_pty import (PTY_TRACE_LIMIT,
+                                    read_owner_trace_lines,
+                                    require_navigation_provenance)
 
 
 class PtyTraceReaderTest(unittest.TestCase):
@@ -45,6 +47,69 @@ class PtyTraceReaderTest(unittest.TestCase):
             records = read_owner_trace_lines(path)
             self.assertEqual(len(records), 1)
             self.assertEqual(len(records[0]), PTY_TRACE_LIMIT - 1)
+
+
+class PtyNavigationEpochTest(unittest.TestCase):
+    @staticmethod
+    def records(epoch=9, frame_epoch=None, command=5, follow=0,
+                cell_mode=1, geometry_epoch=None):
+        if frame_epoch is None:
+            frame_epoch = epoch
+        if geometry_epoch is None:
+            geometry_epoch = epoch
+        return [
+            ("command=%d following=1 retained=6 anchor=0 "
+             "projected=0 epoch=%d" % (command, epoch)).encode("ascii"),
+            ("owner_view_epoch=%d command=%d following=%d "
+             "retained=6 anchor=1 projected=1 scroll_y=0.0 max_y=100.0 "
+             "frame=80x24 valid=1 cell_mode=%d cell_row=22" %
+             (frame_epoch, command, follow, cell_mode)).encode("ascii"),
+            ("virtual_geometry epoch=%d enabled=1 visible=5 children=7 "
+             "leading=100.0 trailing=0.0 first=1" %
+             geometry_epoch).encode("ascii"),
+        ]
+
+    def test_new_command_owner_cells_and_geometry_same_epoch(self):
+        self.assertEqual(
+            require_navigation_provenance(self.records(), 8, 5, False, True),
+            9)
+
+    def test_repeated_home_cannot_use_old_command(self):
+        with self.assertRaisesRegex(AssertionError, "no new on_key admission"):
+            require_navigation_provenance(
+                self.records(epoch=8), 8, 5, False, True)
+
+    def test_fresh_command_cannot_use_old_owner_frame(self):
+        with self.assertRaisesRegex(
+                AssertionError, "belongs to another input epoch"):
+            require_navigation_provenance(
+                self.records(frame_epoch=8), 8, 5, False, True)
+
+    def test_fresh_command_rejects_wrong_follow_state(self):
+        with self.assertRaisesRegex(AssertionError, "owner state mismatch"):
+            require_navigation_provenance(
+                self.records(follow=1), 8, 5, False, True)
+
+    def test_correct_owner_with_stale_box_geometry_is_inconclusive(self):
+        with self.assertRaisesRegex(AssertionError, "geometry is stale"):
+            require_navigation_provenance(
+                self.records(geometry_epoch=8), 8, 5, False, True)
+
+    def test_wrong_owned_cell_mode_does_not_pass(self):
+        with self.assertRaisesRegex(AssertionError, "Cell Buffer disagrees"):
+            require_navigation_provenance(
+                self.records(cell_mode=0), 8, 5, False, True)
+
+    def test_last_command_not_expected_is_rejected(self):
+        with self.assertRaisesRegex(AssertionError, "wrong latest command"):
+            require_navigation_provenance(
+                self.records(command=4), 8, 5, False, True)
+
+    def test_saturated_out_of_band_trace_is_not_valid_proof(self):
+        records = self.records()[:1] * 64 + self.records()[1:]
+        with self.assertRaisesRegex(AssertionError, "trace saturated"):
+            require_navigation_provenance(records, 8, 5, False, True)
+
 
 
 if __name__ == "__main__":
