@@ -73,6 +73,12 @@ std::string code_line_text(const Element* line) {
         answer += static_cast<const Element*>(node)->text();
     return answer;
 }
+std::string flattened_text(const Element* element) {
+    std::string answer = element->text();
+    for (auto* node : element->children())
+        answer += flattened_text(static_cast<const Element*>(node));
+    return answer;
+}
 } // namespace
 
 spec("MarkdownWidget Parsing") {
@@ -95,6 +101,98 @@ spec("MarkdownWidget Parsing") {
         auto* p = static_cast<Element*>(md->children()[0]);
         check(p->has_class(Symbol("md-p")));
         check(p->text() == "Hello World");
+    }
+
+    it("streams Markdown chunks and converges to the one-shot projection") {
+        const std::string source =
+            "# Streaming 🌊\n\n"
+            "A **bold** paragraph with 中 and 👩‍💻.\n\n"
+            "\u0060\u0060\u0060c\nint answer = 42;\n\u0060\u0060\u0060\n";
+
+        auto* streamed = box->create_widget<MarkdownWidget>(
+            "div", "md-stream-append", "");
+        root->append(streamed);
+        auto* stream_widget = static_cast<MarkdownWidget*>(streamed->widget);
+        check(stream_widget != nullptr);
+        if (!stream_widget) return;
+
+        const std::string chunks[] = {
+            "# Stream",
+            "ing 🌊\n\nA **bo",
+            "ld** paragraph with 中 and ",
+            "👩‍💻.\n\n\u0060\u0060\u0060c\nint ",
+            "answer = 42;\n\u0060\u0060\u0060\n"
+        };
+        for (const auto& chunk : chunks) {
+            check(stream_widget->append_markdown(chunk) ==
+                  MarkdownAppendStatus::Appended);
+            // A real owner turn publishes the currently parseable snapshot.
+            // More chunks may arrive on later turns; no producer touches UI.
+            stream_widget->update(0.0f, *streamed);
+        }
+        check(stream_widget->markdown() == source);
+
+        auto* reference = box->create_widget<MarkdownWidget>(
+            "div", "md-stream-one-shot", source);
+        root->append(reference);
+        reference->widget->update(0.0f, *reference);
+
+        check(streamed->child_count() == reference->child_count());
+        check(flattened_text(streamed) == flattened_text(reference));
+        check(streamed->child_count() == 3u);
+        if (streamed->child_count() == 3u) {
+            check(streamed->child_at(0u)->has_class(Symbol("h1")));
+            check(streamed->child_at(1u)->has_class(Symbol("md-p")));
+            check(streamed->child_at(2u)->has_class(Symbol("md-code-block")));
+        }
+
+        // Multiple deltas before one owner update coalesce into one projection.
+        auto* batched = box->create_widget<MarkdownWidget>(
+            "div", "md-stream-batched", "");
+        root->append(batched);
+        auto* batch_widget = static_cast<MarkdownWidget*>(batched->widget);
+        check(batch_widget != nullptr);
+        if (!batch_widget) return;
+        for (const auto& chunk : chunks)
+            check(batch_widget->append_markdown(chunk) ==
+                  MarkdownAppendStatus::Appended);
+        batch_widget->update(0.0f, *batched);
+        check(batch_widget->markdown() == source);
+        check(batched->child_count() == reference->child_count());
+        check(flattened_text(batched) == flattened_text(reference));
+    }
+
+    it("accepts UTF-8 split across stream appends and rejects capacity atomically") {
+        auto* md = box->create_widget<MarkdownWidget>(
+            "div", "md-stream-split-utf8", "");
+        root->append(md);
+        auto* widget = static_cast<MarkdownWidget*>(md->widget);
+        check(widget != nullptr);
+        if (!widget) return;
+
+        check(widget->append_markdown("UTF-8 ") == MarkdownAppendStatus::Appended);
+        widget->update(0.0f, *md);
+
+        const std::string emoji = "👩‍💻";
+        for (std::size_t i = 0u; i < emoji.size(); ++i) {
+            check(widget->append_markdown(std::string_view(emoji.data() + i, 1u)) ==
+                  MarkdownAppendStatus::Appended);
+            widget->update(0.0f, *md);
+        }
+        check(widget->append_markdown(" and 中\n") == MarkdownAppendStatus::Appended);
+        widget->update(0.0f, *md);
+        check(widget->markdown() == "UTF-8 " + emoji + " and 中\n");
+        check(flattened_text(md) == "UTF-8 " + emoji + " and 中");
+
+        const std::string accepted_source = widget->markdown();
+        const std::string visible_before = flattened_text(md);
+        check(widget->append_markdown("") == MarkdownAppendStatus::NoChange);
+        const std::string oversized(MarkdownWidget::kMaxMarkdownBytes, 'x');
+        check(widget->append_markdown(oversized) ==
+              MarkdownAppendStatus::CapacityExceeded);
+        check(widget->markdown() == accepted_source);
+        widget->update(0.0f, *md);
+        check(flattened_text(md) == visible_before);
     }
 
     it("Headers") {
@@ -906,7 +1004,11 @@ spec("MarkdownWidget Parsing") {
         const auto* link_title = link->attribute("title");
         const auto* src = image->attribute("src");
         const auto* image_title = image->attribute("title");
-        check(href && *href == "https://example.org/caf%C3%A9");
+        // TinyTest stringifies check() expressions as printf-style
+        // diagnostic text. Keep percent-encoded URLs out of that format
+        // literal, so %C3%A9 cannot be interpreted as conversion flags.
+        const std::string expected_url = "https://example.org/caf%C3%A9";
+        check(href && *href == expected_url);
         check(link_title && *link_title == "T ©");
         check(src && *src == "/img/猫.png");
         check(image_title && *image_title == "Photo ©");

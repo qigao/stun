@@ -54,6 +54,16 @@ foreach(test IN ITEMS test_ui_content_models test_ui_xml_admission test_ui_xml
   set_tests_properties(${test} PROPERTIES TIMEOUT 120)
   add_dependencies(stun_xml_runtime_qualification ${test})
 endforeach()
+
+# The MarkdownWidget streaming consumer contract must run in the focused
+# headless production-runtime gate; parser conformance alone does not exercise
+# the FlexUI projection/lifecycle path.
+add_executable(test_markdown_widget "${STUN_ROOT}/flexUI/tests/test_markdown_widget.cpp")
+target_link_libraries(test_markdown_widget PRIVATE flexUI Salts::TinyTest)
+add_test(NAME test_markdown_widget COMMAND test_markdown_widget)
+set_tests_properties(test_markdown_widget PROPERTIES TIMEOUT 120)
+add_dependencies(stun_xml_runtime_qualification test_markdown_widget)
+
 if(TARGET gCanvas::Window OR TARGET flex_render_engine_gcanvas OR
    TARGET FlexUI::ControllerTurboScript)
   message(FATAL_ERROR "XML runtime gate must remain headless and independent of TurboScript JIT")
