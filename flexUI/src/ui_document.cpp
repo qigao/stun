@@ -35,7 +35,7 @@ UiDocumentError make_error(UiDocumentErrorCode code, std::string message, int li
 bool is_string_property(const std::string &name) {
   return name == "class" || name == "classes" || name == "utility" || name == "utilities" ||
          name == "text" || name == "content" || name == "slot" ||
-         name.rfind("on.", 0) == 0 ||
+         name.rfind("var.", 0) == 0 || name.rfind("on.", 0) == 0 ||
          name.rfind("bind.", 0) == 0;
 }
 
@@ -104,6 +104,10 @@ UiDocumentError validate_node_fields(
         return make_error(UiDocumentErrorCode::InvalidProperty,
                           "tab_index requires a finite integer value");
       }
+    }
+    if (name.rfind("var.", 0) == 0 && name.size() == 4) {
+      return make_error(UiDocumentErrorCode::InvalidProperty,
+                        "var. requires a CSS custom property name");
     }
     if (name.rfind("attr.", 0) == 0 && name.size() == 5) {
       return make_error(UiDocumentErrorCode::InvalidProperty, "attr. requires an attribute name");
@@ -622,7 +626,9 @@ void apply_properties(Element &element, const UiNodeDefinition &definition,
         name == "focusable" || name == "tab_index") {
       continue;
     }
-    if (name.rfind("attr.", 0) == 0) {
+    if (name.rfind("var.", 0) == 0) {
+      element.set_custom_property("--" + name.substr(4), value_to_string(value));
+    } else if (name.rfind("attr.", 0) == 0) {
       element.set_attribute(name.substr(5), value_to_string(value));
     } else if (include_event_attributes && name.rfind("on.", 0) == 0) {
       element.set_attribute("data-flexui-on-" + name.substr(3), std::get<std::string>(value));
