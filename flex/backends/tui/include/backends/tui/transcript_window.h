@@ -186,6 +186,47 @@ public:
     return show_at_scroll_offset(transcript, target, resolved);
   }
 
+  // A history scroll can arrive in the SAME Owner turn as settled-message
+  // eviction and Box resize. Old absolute scroll_y then has a stale origin.
+  // Rebase a value-only message/local anchor against the NEW retained index
+  // before applying the relative step, rather than interpreting a removed
+  // prefix as still existing. If the old ID has been evicted, clamp to the
+  // new oldest retained message at local zero, never to tail.
+  Status scroll_from_anchor(const tui_transcript_t* transcript,
+                            TranscriptScrollAnchor anchor, double delta_y,
+                            TranscriptScrollAnchor* resolved = nullptr) {
+    if (!transcript || !heights_ || !leading_spacer_ ||
+        anchor.follow_tail || !anchor.message_id ||
+        !std::isfinite(anchor.within_message_y) ||
+        anchor.within_message_y < 0.0f || !std::isfinite(delta_y) ||
+        !viewport_.is_scroll_container() ||
+        !std::isfinite(viewport_.width()) ||
+        !std::isfinite(viewport_.height()) ||
+        viewport_.height() < 0.0f)
+      return Status::Invalid;
+    const auto status = heights_->sync(
+        transcript, viewport_.width(), layout_revision_);
+    if (status != TranscriptHeightIndex::Status::Updated &&
+        status != TranscriptHeightIndex::Status::Unchanged)
+      return Status::QueryRejected;
+
+    // Query by stable ID, never by a slot index that could have shifted
+    // after native C11 retirement. Both values remain estimates when
+    // predecessors are unmeasured or the layout revision changed.
+    double base = 0.0;
+    const auto prefix = heights_->height_before(anchor.message_id);
+    const auto own_height = heights_->height_for(anchor.message_id);
+    if (prefix && own_height)
+      base = *prefix + std::clamp(
+          static_cast<double>(anchor.within_message_y),
+          0.0, *own_height);
+    const double total = heights_->total_height_estimate();
+    const double maximum =
+        std::max(0.0, total - static_cast<double>(viewport_.height()));
+    const double target = std::clamp(base + delta_y, 0.0, maximum);
+    return show_at_scroll_offset(transcript, target, resolved);
+  }
+
   float leading_spacer_height() const noexcept {
     return leading_spacer_ ? leading_spacer_->height() : 0.0f;
   }
