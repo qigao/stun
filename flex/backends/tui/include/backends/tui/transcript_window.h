@@ -528,6 +528,12 @@ private:
             count ? scratch_[0].message_id : 0u,
             count, spacers_changed))
       return Status::QueryRejected;
+    // A terminal-state change (including CANCEL) can invalidate native
+    // height revisions without changing Markdown bytes or Spacer CSS.
+    // Box::update() skips its layout stage unless the tree is dirty, so
+    // force actual layout before recording a fresh measured height.
+    if (geometry_changed && !spacers_changed)
+      viewport_.mark_layout_dirty();
       if (policy == ScrollPolicy::PreserveAnchor && anchor) {
         // Reflow can change host geometry even when the Markdown source did
         // not change (e.g. resize or CSS width change).
