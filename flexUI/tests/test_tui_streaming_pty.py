@@ -425,13 +425,13 @@ def run_test(executable, early_home=False, home_burst=False,
             # ESC [. This complements, but does not replace, the native
             # deterministic EINTR regression. A physically visible Home
             # within the original five-second limit is still required.
-            send(b"\\x1b[")
+            send(b"\x1b[")
             os.kill(child.pid, signal.SIGWINCH)
             send(b"H")
             until("fragmented Home with SIGWINCH visible scrollback",
                   lambda: screen.mode() == "scrollback", 5.0)
             require_last_owner_frame(5, False)
-            send(b"\\x1b[F")
+            send(b"\x1b[F")
             until("End after interrupted Home visible tail",
                   lambda: screen.mode() == "tail", 5.0)
             require_last_owner_frame(4, True)
