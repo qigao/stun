@@ -1623,6 +1623,149 @@ spec("FlexUI MarkdownWidget through Tango async transport and cell renderer") {
         check(box.cached_style_element_count() <= owned);
     }
 
+    it("anchors GFM tables, fenced code and wide glyphs while estimates become measurements") {
+        // Drive real C11 source -> MarkdownWidget -> Box layout. Message #1
+        // starts outside the two-host window with only an estimated height;
+        // a user scroll promotes it into an actual measured GFM document.
+        flexUI::Box box(nullptr);
+        box.set_viewport(320.0f, 176.0f);
+        box.load_css(
+            "#gfm-root {width:100%;height:100%;display:flex;"
+            "flex-direction:column;} "
+            "#gfm-window {width:75%;height:72px;overflow-y:scroll;"
+            "display:flex;flex-direction:column;} "
+            ".transcript-message {width:100%;flex-shrink:0;} "
+            ".tui-virtual-spacer {width:100%;flex-shrink:0;"
+            "height:var(--tui-virtual-height);}");
+        auto* root = box.create("div", "gfm-root");
+        auto* viewport = box.create("div", "gfm-window");
+        check(root && viewport);
+        if (!root || !viewport) return;
+        root->append(viewport);
+        box.set_root(root);
+        box.update();
+
+        flex::tui_backend::TranscriptWindow window(box, *viewport, 2u);
+        window.enable_height_tracking(3u, 24.0f);
+        window.enable_virtual_spacers();
+        auto* transcript = tui_transcript_create(3u, 8192u, 64u);
+        check(transcript != nullptr);
+        if (!transcript) return;
+
+        std::uint64_t sequence = 0u;
+        const auto emit = [&](std::uint64_t id, std::uint32_t type,
+                              std::string_view source) {
+            if (source.size() > 64u) return false;
+            std::array<unsigned char,
+                       sizeof(tui_stream_packet_header_t) + 64u> packet{};
+            const tui_stream_packet_header_t header{id};
+            std::memcpy(packet.data(), &header, sizeof(header));
+            if (!source.empty())
+                std::memcpy(packet.data() + sizeof(header),
+                            source.data(), source.size());
+            const tui_async_event_t event{
+                type, 1u, ++sequence, sizeof(header) + source.size()
+            };
+            return tui_transcript_apply(
+                transcript, &event, packet.data(), nullptr) ==
+                TUI_TRANSCRIPT_OK;
+        };
+        const auto send = [&](std::uint64_t id, std::string_view source) {
+            for (std::size_t offset = 0u; offset < source.size();
+                 offset += 48u) {
+                if (!emit(id, TUI_STREAM_CHUNK, source.substr(offset, 48u)))
+                    return false;
+            }
+            return true;
+        };
+        const std::array<std::string, 3> sources{{
+            "| 名称 | 结果 |\n| --- | --- |\n"
+            "| 中文中中 | 😀 emoji |\n| longer 中文 | more 😀 emoji |\n\n",
+            "```c\n// 中文 + 😀 emoji\n"
+            "int calculate(void) {\n  return 42;\n}\n```\n\n",
+            "### Last response\n\nParagraph one.\n\nParagraph two.\n\n"
+        }};
+        bool accepted = true;
+        for (std::uint64_t id = 1u; id <= 3u; ++id) {
+            std::uint64_t evicted = 99u;
+            accepted = accepted &&
+                tui_transcript_open(transcript, id, &evicted) ==
+                    TUI_TRANSCRIPT_OK && evicted == 0u &&
+                emit(id, TUI_STREAM_BEGIN, {}) &&
+                send(id, sources[static_cast<std::size_t>(id - 1u)]) &&
+                (id == 1u || emit(id, TUI_STREAM_END, {}));
+        }
+        check(accepted);
+        if (!accepted) {
+            check(tui_transcript_destroy(transcript) == TUI_TRANSCRIPT_OK);
+            return;
+        }
+
+        using Status = flex::tui_backend::TranscriptWindow::Status;
+        check(window.show_tail(transcript) == Status::Updated);
+        const auto* heights = window.tracked_heights();
+        check(heights && heights->lookup(1u) && heights->lookup(2u));
+        if (!heights || !heights->lookup(1u) || !heights->lookup(2u)) {
+            check(tui_transcript_destroy(transcript) == TUI_TRANSCRIPT_OK);
+            return;
+        }
+        check(!heights->lookup(1u)->measured);
+        check(heights->lookup(2u)->measured);
+        check(std::fabs(window.leading_spacer_height() - 24.0f) < 1.0f);
+        const auto estimated = window.virtual_location(8.0);
+        check(estimated && estimated->message_id == 1u &&
+              !estimated->message_measured);
+
+        check(window.show_at_scroll_offset(transcript, 8.0) ==
+              Status::Updated);
+        auto* host1 = window.visible_host(1u);
+        auto* host2 = window.visible_host(2u);
+        check(host1 && host2);
+        if (!host1 || !host2) {
+            check(tui_transcript_destroy(transcript) == TUI_TRANSCRIPT_OK);
+            return;
+        }
+        const auto measured = heights->lookup(1u);
+        check(measured && measured->measured &&
+              measured->height > 24.0f);
+        const auto resolved = window.virtual_location(8.0);
+        check(resolved && resolved->message_id == 1u &&
+              resolved->message_measured);
+        const auto anchor = window.capture_scroll_anchor();
+        check(!anchor.follow_tail && anchor.message_id == 1u);
+        check(std::fabs(anchor.within_message_y - 8.0f) < 2.5f);
+
+        // Complete a GFM source while it remains visible: line wraps,
+        // table cells and code fences can all change actual Box height.
+        check(send(1u,
+                   "| 新增行中文 | 😀 😀 emoji |\n\n"
+                   "```c\nint second(void) {\n  return 7;\n}\n```\n"));
+        check(window.show_preserving_anchor(transcript, anchor) ==
+              Status::Updated);
+        check(window.visible_host(1u) == host1);
+        check(window.visible_host(2u) == host2);
+        check(heights->lookup(1u) && heights->lookup(1u)->measured);
+        check(std::fabs(viewport->scroll_y() -
+                        (host1->y() + anchor.within_message_y)) < 2.5f);
+
+        // A narrower viewport invalidates all cached widths. Preserve
+        // message identity/local position after the real Box reflow.
+        const float previous_width = viewport->width();
+        box.set_viewport(224.0f, 176.0f);
+        box.update();
+        check(viewport->width() + 1.0f < previous_width);
+        const auto reflow = window.show_preserving_anchor(transcript, anchor);
+        check(reflow == Status::Updated || reflow == Status::Unchanged);
+        check(window.visible_host(1u) == host1);
+        check(heights->lookup(1u) && heights->lookup(1u)->measured);
+        check(std::fabs(heights->width() - viewport->width()) < 1.0f);
+        check(std::fabs(viewport->scroll_y() -
+                        (host1->y() + anchor.within_message_y)) < 2.5f);
+        check(viewport->child_count() == 4u);
+        check(emit(1u, TUI_STREAM_END, {}));
+        check(tui_transcript_destroy(transcript) == TUI_TRANSCRIPT_OK);
+    }
+
     it("follows the new tail after a hidden message invalidates measured spacer height") {
         // A hidden ACTIVE message changes its generation/sequence revision.
         // Its *previously measured* short height becomes an estimated 400px
