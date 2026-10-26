@@ -466,15 +466,12 @@ bool tui_terminal_init(tui_terminal_t* term) {
     /* Enter alternate screen and hide cursor.  Unix input enables bracketed
      * paste so pasted ESC/CSI bytes stay outside the key decoder. */
 #ifdef _WIN32
-    /* Win32 ConPTY preserves a separate DECAWM state in addition to the
-     * native screen-buffer output mode. The cell-diff renderer addresses
-     * every row explicitly; letting ConPTY auto-wrap a full cell row can
-     * advance into the following fixed status row, which a later diff
-     * will not repaint. Disable VT autowrap on the newly entered alternate
-     * buffer, and restore its default before returning to the main screen.
-     * The native ENABLE_WRAP_AT_EOL_OUTPUT contract remains independent. */
-    const char* enter_sequence = "\033[?1049h\033[?7l\033[?25l\033[2J";
-    const char* rollback_sequence = "\033[?7h\033[?25h\033[?1049l\033[0m";
+    /* Keep the terminal's DECAWM (?7) state undisturbed. The apparent
+     * ConPTY footer corruption came from bare-LF handling in a test oracle,
+     * not a requirement to toggle user terminal wrap mode on entry/exit.
+     * Native Win32 active-screen-buffer output modes remain qualified. */
+    const char* enter_sequence = "\033[?1049h\033[?25l\033[2J";
+    const char* rollback_sequence = "\033[?25h\033[?1049l\033[0m";
 #else
     const char* enter_sequence = "\033[?1049h\033[?25l\033[2J\033[?2004h";
     const char* rollback_sequence = "\033[?2004l\033[?25h\033[?1049l\033[0m";
@@ -555,7 +552,7 @@ bool tui_terminal_cleanup(tui_terminal_t* term) {
     if (!tui_terminal_disable_mouse(term)) ok = false;
     
 #ifdef _WIN32
-    const char* leave_sequence = "\033[?7h\033[?25h\033[?1049l\033[0m";
+    const char* leave_sequence = "\033[?25h\033[?1049l\033[0m";
 #else
     const char* leave_sequence = "\033[?2004l\033[?25h\033[?1049l\033[0m";
 #endif

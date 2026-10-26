@@ -786,11 +786,10 @@ int main(int argc, char** argv) {
             protected_footer.scroll_region_commands() != 1u ||
             protected_footer.scroll_region_linefeeds() != 1u)
             return 35;
-        // DECAWM is independent of ENABLE_WRAP_AT_EOL_OUTPUT. At the
-        // penultimate row's final cell, ordinary VT autowrap can overwrite
-        // a fixed footer even without reaching the final screen row.
-        // The real Win32 alternate-screen path must explicitly send ?7l,
-        // then ?7h before leaving. Do not weaken the live ConPTY test.
+        // DECAWM is separate from ENABLE_WRAP_AT_EOL_OUTPUT. Keep the
+        // explicit on/off scenarios in this test-only VT oracle; Tango's
+        // normal ALT lifecycle must preserve the user's existing VT mode.
+        // Keep live ConPTY visible-screen acceptance unchanged.
         Screen protected_no_wrap;
         const std::string no_wrap_sequence =
             "\x1b[?1049h\x1b[?7l\x1b[1;1HFlexUI + Tango"
