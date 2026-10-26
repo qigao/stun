@@ -163,7 +163,7 @@ spec("ChartFrame provides a Box-owned utility styled semantic shell") {
         render_theme_snapshot(flexUI::ThemeMode::System, true);
 
     check_true(light.command_count > 0);
-    check_size_eq(light.command_count, dark.command_count);
+    check_true(light.command_count == dark.command_count);
     check_false(color_near(light.card, dark.card));
     check_false(color_near(light.text, dark.text));
     check_false(color_near(light.tooltip, dark.tooltip));
@@ -220,11 +220,11 @@ spec("ChartFrame provides a Box-owned utility styled semantic shell") {
     const auto wide_repeat =
         render_theme_snapshot(flexUI::ThemeMode::Light, false, 640.0f);
 
-    check_float_eq(narrow.root_width, 320.0f, 0.001f);
-    check_float_eq(wide.root_width, 640.0f, 0.001f);
+    check_true(std::abs(narrow.root_width - 320.0f) <= 0.001f);
+    check_true(std::abs(wide.root_width - 640.0f) <= 0.001f);
     check_true(wide.surface_width > narrow.surface_width);
     check(narrow.command_signature != wide.command_signature);
     check(wide.command_signature == wide_repeat.command_signature);
-    check_size_eq(wide.command_count, wide_repeat.command_count);
+    check_true(wide.command_count == wide_repeat.command_count);
   }
 }
