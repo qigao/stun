@@ -2136,6 +2136,63 @@ spec("FlexUI MarkdownWidget through Tango async transport and cell renderer") {
         std::printf("TUI_VIRTUAL_STRESS turns=128 peak_elements=%zu "
                     "peak_styles=%zu visible_hosts=%zu\n",
                     peak_owned, peak_styles, window.visible_count());
+        // Exercise the REAL semantic-anchor / coordinate-scroll path against
+        // settled native-retained Markdown, not just the numeric height
+        // index or a synthetic scrollbar. Two Box hosts stay permanent.
+        // Report p50/p95 per owner turn as a comparable CI baseline.
+        constexpr std::size_t kWheelTurns = 96u;
+        std::vector<std::int64_t> wheel_us;
+        wheel_us.reserve(kWheelTurns);
+        bool wheel_ok = qualified;
+        std::size_t peak_wheel_elements = box.owned_element_count();
+        const auto wheel_start = std::chrono::steady_clock::now();
+        for (std::size_t turn = 0u; turn < kWheelTurns && wheel_ok; ++turn) {
+            const bool backward = (turn & 1u) != 0u;
+            const flex::tui_backend::TranscriptScrollAnchor request{
+                125u, backward ? 12.0f : 4.0f, false};
+            flex::tui_backend::TranscriptScrollAnchor mapped{};
+            const auto begin = std::chrono::steady_clock::now();
+            const auto status = window.scroll_from_anchor(
+                transcript, request, backward ? -8.0 : 8.0, &mapped);
+            wheel_us.push_back(
+                std::chrono::duration_cast<std::chrono::microseconds>(
+                    std::chrono::steady_clock::now() - begin).count());
+            wheel_ok = (status == Status::Updated ||
+                        status == Status::Unchanged) &&
+                mapped.message_id == 125u && !mapped.follow_tail &&
+                std::fabs(mapped.within_message_y -
+                          (backward ? 4.0f : 12.0f)) < 2.5f &&
+                window.visible_host(125u) != nullptr &&
+                window.visible_count() == 2u &&
+                viewport->child_count() == 4u;
+            peak_wheel_elements = std::max(
+                peak_wheel_elements, box.owned_element_count());
+            check(box.owned_element_count() <= initial_owned + 64u);
+            check(box.cached_style_element_count() <= initial_owned + 64u);
+        }
+        const auto wheel_ms =
+            std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::steady_clock::now() - wheel_start).count();
+        check(wheel_ok);
+        check(wheel_us.size() == kWheelTurns);
+        if (!wheel_us.empty()) {
+            std::sort(wheel_us.begin(), wheel_us.end());
+            const auto p50 = wheel_us[wheel_us.size() / 2u];
+            const auto p95 = wheel_us[
+                (wheel_us.size() - 1u) * 95u / 100u];
+            std::printf(
+                "TUI_VIRTUAL_WHEEL turns=%zu elapsed_ms=%lld "
+                "p50_scroll_us=%lld p95_scroll_us=%lld "
+                "peak_elements=%zu visible_hosts=%zu\n",
+                wheel_us.size(), static_cast<long long>(wheel_ms),
+                static_cast<long long>(p50),
+                static_cast<long long>(p95), peak_wheel_elements,
+                window.visible_count());
+            // Wide growth envelope, not a product frame-time SLA:
+            // ASan, LSan, CI architecture and host load differ.
+            check(wheel_ms <= 30000);
+            check(p95 <= 100000);
+        }
         check(tui_transcript_destroy(transcript) == TUI_TRANSCRIPT_OK);
     }
 
