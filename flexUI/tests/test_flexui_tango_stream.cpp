@@ -1822,9 +1822,11 @@ spec("FlexUI MarkdownWidget through Tango async transport and cell renderer") {
                         (host1->y() + 40.0f)) < 2.5f);
         check(heights->lookup(1u) && heights->lookup(1u)->measured);
         check(std::fabs(heights->width() - viewport->width()) < 1.0f);
-        check(window.show_preserving_anchor(transcript, anchor) ==
-              Status::Updated ||
-              window.visible_host(1u) == host1);
+        const auto returned_anchor =
+            window.show_preserving_anchor(transcript, anchor);
+        check(returned_anchor == Status::Updated ||
+              returned_anchor == Status::Unchanged);
+        check(window.visible_host(1u) == host1);
 
         // A REAL retained-message eviction and viewport width change now
         // happen in one owner turn. The old GFM anchor (#1) must clamp to
