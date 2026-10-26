@@ -195,7 +195,8 @@ def read_owner_trace_lines(path):
 
 
 def require_navigation_provenance(records, previous_epoch, command, following,
-                                  require_virtual=False):
+                                  require_virtual=False, raw_output=None,
+                                  raw_start=None):
     """Require the *new* input admission and its exact post-Box owner frame.
 
     No trace record, however convincing, replaces the caller's independent
@@ -263,7 +264,72 @@ def require_navigation_provenance(records, previous_epoch, command, following,
                 (children == 0 if visible == 0
                  else children == visible + 2),
                 "unbounded/incorrect virtual Box children: %r" % latest)
+    if raw_start is not None:
+        require_render_receipt(records, epoch, following, raw_output, raw_start)
     return epoch
+
+
+def fnv1a64(data):
+    """Stable hash of exactly the native Tango serialized VT diff bytes."""
+    value = 14695981039346656037
+    for byte in data:
+        value = ((value ^ byte) * 1099511628211) & 0xffffffffffffffff
+    return value
+
+
+def require_render_receipt(records, epoch, following, raw_output, raw_start):
+    """Post-write front commit + independent raw kernel PTY byte comparison.
+
+    The PTY's visible-cell oracle is a separate mandatory assertion and
+    MUST remain the only evidence that Home/End became screen-visible.
+    """
+    receipts = [(i, line) for i, line in enumerate(records)
+                if line.startswith((b"render_commit ", b"render_failed "))]
+    require(receipts, "no native terminal diff-write receipt")
+    index, last = receipts[-1]
+    require(last.startswith(b"render_commit "),
+            "native Tango render did not commit: %r" % last)
+    matched = re.fullmatch(
+        rb"render_commit epoch=(\d+) bytes=(\d+) fnv64=([0-9a-f]{16}) "
+        rb"prefix=([0-9a-f]+) cell_mode=(-?\d+) cell_row=(-?\d+) "
+        rb"error=(\d+)", last)
+    require(matched is not None,
+            "malformed native diff-write receipt: %r" % last)
+    receipt_epoch, nbytes = int(matched[1]), int(matched[2])
+    require(receipt_epoch == epoch,
+            "native diff-write receipt belongs to stale epoch: %r" % last)
+    require(nbytes > 0 and nbytes <= MAX_CAPTURE,
+            "native render committed no bounded VT diff bytes: %r" % last)
+    prefix = bytes.fromhex(matched[4].decode("ascii"))
+    require(len(prefix) == min(16, nbytes),
+            "native serialized VT prefix is incomplete: %r" % last)
+    require(int(matched[5]) == (0 if following else 1)
+            and int(matched[6]) >= 0 and int(matched[7]) == 0,
+            "native committed front cells differ from Owner or write failed: "
+            "%r" % last)
+    owner_indices = [i for i, line in enumerate(records)
+                     if line.startswith(b"owner_view_epoch=")]
+    require(owner_indices and index > owner_indices[-1],
+            "render receipt was recorded before the requested Owner view")
+
+    require(raw_output is not None and 0 <= raw_start <= len(raw_output),
+            "missing bounded physical VT output capture")
+    expected_hash = int(matched[3], 16)
+    # Robust across arbitrary PTY read boundaries: match the entire
+    # serialized native diff, not a literal 'scrollback' substring.
+    where = raw_output.find(prefix, raw_start)
+    attempts = 0
+    while where >= 0 and attempts < 128:
+        if where + nbytes <= len(raw_output) and (
+                fnv1a64(raw_output[where:where + nbytes]) == expected_hash):
+            return where
+        where = raw_output.find(prefix, where + 1)
+        attempts += 1
+    raise AssertionError(
+        "committed Tango VT diff bytes absent from physical PTY output: "
+        "epoch=%d bytes=%d start=%d captured=%d prefix=%r" %
+        (epoch, nbytes, raw_start, len(raw_output), prefix))
+
 
 def winsize(fd, rows, cols):
     fcntl.ioctl(fd, termios.TIOCSWINSZ, struct.pack("HHHH", rows, cols, 0, 0))
@@ -339,13 +405,14 @@ def run_test(executable, early_home=False, home_burst=False,
                 "PTY command trace saturated; cannot accept more navigation")
         return int(match[1])
 
-    def require_last_owner_frame(command, following, previous_epoch):
-        # Screen-cell acceptance has already succeeded independently.
-        # The exact fresh epoch must reach BOTH UI Owner and Box cells.
+    def require_last_owner_frame(command, following, previous_epoch,
+                                 raw_start):
+        # Physical visible-cell assertion is independent and mandatory.
         return require_navigation_provenance(
             read_owner_trace_lines(input_trace),
             previous_epoch, command, following,
-            require_virtual=not legacy_message_scroll)
+            require_virtual=not legacy_message_scroll,
+            raw_output=output, raw_start=raw_start)
 
     def last_owner_epoch():
         records = read_owner_trace_lines(input_trace)
@@ -432,10 +499,11 @@ def run_test(executable, early_home=False, home_burst=False,
         # and the independent cell oracle observes scrollback. Use genuine
         # PTY bytes and preserve the existing strict 5-second deadline.
         home_epoch = last_command_epoch()
+        home_raw_start = len(output)
         send(b"\x1b[H")
         until("Home changes visible terminal state to scrollback",
               lambda: screen.mode() == "scrollback", 5.0)
-        require_last_owner_frame(5, False, home_epoch)
+        require_last_owner_frame(5, False, home_epoch, home_raw_start)
         if early_home:
             # Assert BOTH independent command admission and the rendered
             # footer before releasing the producer. Raw VT grep is never
@@ -454,10 +522,11 @@ def run_test(executable, early_home=False, home_burst=False,
         # With the user looking at history, new worker messages must not
         # hide the ability to return to the newest window via END.
         tail_epoch = last_command_epoch()
+        tail_raw_start = len(output)
         send(b"\x1b[F")
         until("End changes visible terminal state to tail mode",
               lambda: screen.mode() == "tail", 5.0)
-        require_last_owner_frame(4, True, tail_epoch)
+        require_last_owner_frame(4, True, tail_epoch, tail_raw_start)
 
         # Observe at least six admitted messages *on the rendered screen*.
         # A fixed sleep falsely assumes the CI host can render five windows
@@ -475,19 +544,22 @@ def run_test(executable, early_home=False, home_burst=False,
             for round_no in range(3):
                 if round_no % 2 == 0:
                     home_epoch = last_command_epoch()
+                    home_raw_start = len(output)
                     send(b"\x1b[")
                     send(b"H")
                 else:
                     home_epoch = last_command_epoch()
+                    home_raw_start = len(output)
                     send(b"\x1b[H")
                 until("concurrent Home %d visible scrollback" % round_no,
                       lambda: screen.mode() == "scrollback", 5.0)
-                require_last_owner_frame(5, False, home_epoch)
+                require_last_owner_frame(5, False, home_epoch, home_raw_start)
                 tail_epoch = last_command_epoch()
+                tail_raw_start = len(output)
                 send(b"\x1b[F")
                 until("concurrent End %d visible tail" % round_no,
                       lambda: screen.mode() == "tail", 5.0)
-                require_last_owner_frame(4, True, tail_epoch)
+                require_last_owner_frame(4, True, tail_epoch, tail_raw_start)
 
             # Race a *real kernel SIGWINCH* with an unfinished Home CSI
             # prefix while the normal worker is publishing Markdown.
@@ -497,22 +569,25 @@ def run_test(executable, early_home=False, home_burst=False,
             # deterministic EINTR regression. A physically visible Home
             # within the original five-second limit is still required.
             home_epoch = last_command_epoch()
+            home_raw_start = len(output)
             send(b"\x1b[")
             os.kill(child.pid, signal.SIGWINCH)
             send(b"H")
             until("fragmented Home with SIGWINCH visible scrollback",
                   lambda: screen.mode() == "scrollback", 5.0)
-            require_last_owner_frame(5, False, home_epoch)
+            require_last_owner_frame(5, False, home_epoch, home_raw_start)
             tail_epoch = last_command_epoch()
+            tail_raw_start = len(output)
             send(b"\x1b[F")
             until("End after interrupted Home visible tail",
                   lambda: screen.mode() == "tail", 5.0)
-            require_last_owner_frame(4, True, tail_epoch)
+            require_last_owner_frame(4, True, tail_epoch, tail_raw_start)
 
         # Drive one native mouse wheel event. The SGR parser is invoked from
         # tui_terminal_poll(), not from a test-only decoder entry point.
         prior_status = screen.status()
         wheel_epoch = last_command_epoch()
+        wheel_raw_start = len(output)
         send(b"\x1b[<64;3;3M")  # wheel-up at column 3, row 3
         until("SGR wheel-up changes visible scroll state",
               lambda: screen.mode() == "scrollback"
@@ -521,7 +596,7 @@ def run_test(executable, early_home=False, home_burst=False,
             # Every default ordinary PTY session now verifies that a real
             # wheel enters the virtual Box geometry path, not only changes
             # the footer text.
-            require_last_owner_frame(2, False, wheel_epoch)
+            require_last_owner_frame(2, False, wheel_epoch, wheel_raw_start)
 
         if virtual_spacers:
             # This extra coordinate-to-window test uses the explicitly
@@ -542,11 +617,12 @@ def run_test(executable, early_home=False, home_burst=False,
                   stable_retained_history, 18.0)
             previous_epoch = last_owner_epoch()
             tail_epoch = last_command_epoch()
+            tail_raw_start = len(output)
             send(b"\x1b[F")
             until("virtual End owner frame after full retention",
                   lambda: screen.mode() == "tail" and
                   last_owner_epoch() > previous_epoch, 5.0)
-            require_last_owner_frame(4, True, tail_epoch)
+            require_last_owner_frame(4, True, tail_epoch, tail_raw_start)
             first_tail = last_virtual_first()
             require(first_tail > 0,
                     "missing first projected message at virtual tail")
@@ -557,12 +633,13 @@ def run_test(executable, early_home=False, home_burst=False,
             # *older retained messages*, not merely change footer text.
             # Keep actual Home/End and 52x16 terminal restoration checks.
             wheel_epoch = last_command_epoch()
+            wheel_raw_start = len(output)
             send(b"\x1b[<64;3;3M" * 24)
             until("real wheel coordinate rewindows retained virtual hosts",
                   lambda: screen.mode() == "scrollback" and
                   last_owner_epoch() > previous_epoch and
                   0 < last_virtual_first() < first_tail, 8.0)
-            require_last_owner_frame(2, False, wheel_epoch)
+            require_last_owner_frame(2, False, wheel_epoch, wheel_raw_start)
 
         # Resize an actual PTY, deliver SIGWINCH to the child with a genuine
         # tty controlling process group, and require another terminal frame.
@@ -582,17 +659,19 @@ def run_test(executable, early_home=False, home_burst=False,
             # owner command provenance nor Box-cell evidence substitutes for
             # the actual 52x16 PTY screen.
             tail_epoch = last_command_epoch()
+            tail_raw_start = len(output)
             send(b"\x1b[F")
             until("post-resize End displays tail",
                   lambda: screen.mode() == "tail"
                   and screen.geometry() == (52, 16), 5.0)
-            require_last_owner_frame(4, True, tail_epoch)
+            require_last_owner_frame(4, True, tail_epoch, tail_raw_start)
             home_epoch = last_command_epoch()
+            home_raw_start = len(output)
             send(b"\x1b[H")
             until("post-resize Home displays scrollback",
                   lambda: screen.mode() == "scrollback"
                   and screen.geometry() == (52, 16), 5.0)
-            require_last_owner_frame(5, False, home_epoch)
+            require_last_owner_frame(5, False, home_epoch, home_raw_start)
 
         # Graceful input exit is needed to assert actual terminal restoration;
         # SIGTERM would only test abnormal process termination.
