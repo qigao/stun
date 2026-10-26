@@ -186,13 +186,17 @@ def started_as_tty():
     return master, slave
 
 
-def run_test(executable):
+def run_test(executable, early_home=False):
     master, slave = started_as_tty()
     original_termios = termios.tcgetattr(slave)
     output = bytearray()
     screen = VisibleTerminal(24, 80)
     overall_deadline = time.monotonic() + TIMEOUT
     child = None
+    # The optional test-only pipe prevents the worker's first BEGIN until
+    # the parent has observed genuine Home navigation through a real PTY.
+    # It does not fake terminal input or alter UI event decoding.
+    gate_read, gate_write = os.pipe() if early_home else (None, None)
     # Independent owner-input evidence. The CI-only demo appends the actual
     # key command when Tango's existing event mapper invokes on_key().
     trace_fd, input_trace = tempfile.mkstemp(prefix="stun-real-pty-input-")
@@ -241,17 +245,26 @@ def run_test(executable):
             # eligible to become the foreground controlling terminal.
             fcntl.ioctl(0, termios.TIOCSCTTY, 0)
 
+        environment = {
+            **os.environ, "TERM": "xterm-256color",
+            "COLORTERM": "truecolor",
+            "STUN_TUI_PTY_TERMIOS_CHECK": "1",
+            "STUN_TUI_PTY_INPUT_TRACE": input_trace,
+            "LC_ALL": ("en_US.UTF-8" if sys.platform == "darwin"
+                       else "C.UTF-8")
+        }
+        if early_home:
+            environment["STUN_TUI_PTY_BEGIN_GATE_FD"] = str(gate_read)
         child = subprocess.Popen(
             [executable], stdin=slave, stdout=slave, stderr=slave,
             start_new_session=True,
             preexec_fn=make_controlling_terminal,
             close_fds=True,
-            env={**os.environ, "TERM": "xterm-256color",
-                 "COLORTERM": "truecolor",
-                 "STUN_TUI_PTY_TERMIOS_CHECK": "1",
-                 "STUN_TUI_PTY_INPUT_TRACE": input_trace,
-                 "LC_ALL": ("en_US.UTF-8" if sys.platform == "darwin"
-                            else "C.UTF-8")})
+            pass_fds=(gate_read,) if early_home else (),
+            env=environment)
+        if gate_read is not None:
+            os.close(gate_read)
+            gate_read = None
 
         until("alternate screen and raw terminal entry",
               lambda: b"\x1b[?1049h" in output and
@@ -271,13 +284,33 @@ def run_test(executable):
         until("initial visible tail status and terminal size",
               lambda: screen.mode() == "tail"
               and screen.geometry() == (80, 24), 6.0)
+        if early_home:
+            require(screen.retained() == 0,
+                    "worker admitted BEGIN before physical Home gate")
 
-        # The worker is publishing concurrently. Browse with a POSIX
+        # The worker is publishing concurrently in the default test.
+        # In the extra gated test it cannot publish until Home reaches UI
+        # Owner and the independent cell oracle has observed scrollback. Browse with a POSIX
         # terminal HOME sequence and verify the ordinary owner event map
         # caused a visible status transition.
         send(b"\x1b[H")
         until("Home changes visible terminal state to scrollback",
               lambda: screen.mode() == "scrollback", 5.0)
+        if early_home:
+            # Assert BOTH independent command admission and the rendered
+            # footer before releasing the producer. Raw VT grep is never
+            # used in place of actual visible terminal state.
+            with open(input_trace, "rb") as admission:
+                admitted = admission.read(4096)
+            require(b"command=5 following=1 retained=0" in admitted,
+                    "Home did not reach UI Owner before first BEGIN")
+            require(os.write(gate_write, b"G") == 1,
+                    "could not release first producer BEGIN")
+            os.close(gate_write)
+            gate_write = None
+            until("first BEGIN preserves early Home scrollback intent",
+                  lambda: screen.retained() >= 1 and
+                  screen.mode() == "scrollback", 12.0)
 
         # With the user looking at history, new worker messages must not
         # hide the ability to return to the newest window via END.
@@ -341,8 +374,8 @@ def run_test(executable):
                     "parent-observed termios mismatch after normal exit")
         print("native POSIX PTY chat passed: keyboard, SGR mouse, "
               "SIGWINCH 52x16 UI, termios restoration and terminal controls; "
-              "captured=%d bytes" %
-              len(output))
+              "early_home=%d, captured=%d bytes" %
+              (int(early_home), len(output)))
     except Exception:
         print("PTY visible status: %r; retained=%d; mode=%r; "
               "geometry=%r; parser_state=%s" %
@@ -382,6 +415,10 @@ def run_test(executable):
                     if child.poll() is None:
                         child.kill()
                 child.wait(timeout=2.0)
+        if gate_read is not None:
+            os.close(gate_read)
+        if gate_write is not None:
+            os.close(gate_write)
         os.close(master)
         os.close(slave)
         try:
@@ -393,10 +430,12 @@ def run_test(executable):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("executable")
+    parser.add_argument("--early-home", action="store_true",
+                        help="gate first worker BEGIN until real PTY Home is visible")
     args = parser.parse_args()
     require(os.path.isfile(args.executable),
             "missing real streaming demo executable")
-    run_test(os.path.abspath(args.executable))
+    run_test(os.path.abspath(args.executable), early_home=args.early_home)
 
 
 if __name__ == "__main__":
