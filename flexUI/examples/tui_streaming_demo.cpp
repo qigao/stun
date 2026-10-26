@@ -799,6 +799,20 @@ int headless_smoke(bool experimental_virtual_spacers = false) {
             d.window->visible_host(22u) != nullptr &&
             std::abs(d.viewport->max_scroll_y() -
                      d.viewport->scroll_y()) <= 2.0f;
+
+        // The same owner turn can coalesce opposing wheel input. A
+        // balanced pair must keep the original tail/host/scroll state,
+        // not silently admit a Home-like zero ID anchor.
+        const float before_balanced_y = d.viewport->scroll_y();
+        const auto before_balanced_first =
+            d.window->first_visible_message_id();
+        (void)on_key(Older, &d);
+        (void)on_key(Newer, &d);
+        on_view(&d, tui_terminal_buffer(term));
+        coordinate_scrolling = coordinate_scrolling && d.valid &&
+            d.following && d.anchor == 0u &&
+            d.window->first_visible_message_id() == before_balanced_first &&
+            std::abs(d.viewport->scroll_y() - before_balanced_y) < 2.0f;
     }
 
     // Home must show the *start* of the oldest retained message even if the
