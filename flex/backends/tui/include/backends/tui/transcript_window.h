@@ -17,6 +17,7 @@
 #include <tui_transcript.h>
 
 #include <algorithm>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <limits>
@@ -26,6 +27,16 @@
 #include <vector>
 
 namespace flex::tui_backend {
+
+/* UI-owner-only presentation coordinate; no borrowed Element* or C11 bytes.
+ * The offset uses FlexUI layout coordinates (the TUI maps these to cells).
+ * This first slice preserves anchors among bounded visible hosts, not an
+ * all-history variable-height virtualization or a character-level cursor. */
+struct TranscriptScrollAnchor {
+  std::uint64_t message_id = 0u;
+  float within_message_y = 0.0f;
+  bool follow_tail = false;
+};
 
 class TranscriptWindow {
 public:
@@ -77,17 +88,117 @@ public:
     return nullptr;
   }
 
-  // Compatibility surface: ordinary callers preserve existing viewport
-  // intent. Interactive navigation chooses Tail or Anchor explicitly.
+  // A snapshot has only value identity and a within-message layout offset.
+  // The caller captures it BEFORE changing the viewport size or publishing
+  // new source. Never keep borrowed UI pointers across a window shift.
+  TranscriptScrollAnchor capture_scroll_anchor(
+      float tail_tolerance = 2.0f) const noexcept {
+    if (visible_.empty() || !viewport_.is_scroll_container() ||
+        !std::isfinite(viewport_.scroll_y()) ||
+        !std::isfinite(viewport_.max_scroll_y()))
+      return {};
+    if (!std::isfinite(tail_tolerance) || tail_tolerance < 0.0f)
+      tail_tolerance = 2.0f;
+    const float scroll_y = viewport_.scroll_y();
+    if (viewport_.max_scroll_y() - scroll_y <= tail_tolerance)
+      return {0u, 0.0f, true};
+    for (const Slot* slot : visible_) {
+      const float top = slot->host->y();
+      const float height = slot->host->height();
+      if (!slot->message_id || !std::isfinite(top) ||
+          !std::isfinite(height) || height < 0.0f)
+        return {};
+      if (scroll_y < top + height)
+        return {slot->message_id,
+                std::clamp(scroll_y - top, 0.0f, height), false};
+    }
+    const Slot* last = visible_.back();
+    return {last->message_id,
+            std::clamp(scroll_y - last->host->y(), 0.0f,
+                       std::max(0.0f, last->host->height())), false};
+  }
+
+  // Opt-in stable viewport policy. Preserve the same retained message and
+  // its local layout offset when an earlier Markdown block grows or reflows.
+  // If that ID has been evicted, clamp to the first retained message at 0;
+  // only an explicit follow_tail value can switch to the newest messages.
+  // Source ownership and admission remain entirely in the C11 transcript.
+  Status show_preserving_anchor(const tui_transcript_t* transcript,
+                                TranscriptScrollAnchor anchor) {
+    if (!transcript) return Status::Invalid;
+    if (anchor.follow_tail) return show_tail(transcript);
+    if (!anchor.message_id || !std::isfinite(anchor.within_message_y) ||
+        anchor.within_message_y < 0.0f)
+      return Status::Invalid;
+    const std::size_t count = tui_transcript_count(transcript);
+    if (!count) return show_with_policy(
+        transcript, 0u, ScrollPolicy::AnchorTop);
+
+    std::size_t anchor_index = count;
+    std::size_t previous_first_index = count;
+    std::uint64_t first_retained_id = 0u;
+    std::uint64_t matched_id = 0u;
+    const std::uint64_t previous_first_id =
+        visible_.empty() ? 0u : visible_.front()->message_id;
+    for (std::size_t i = 0u; i < count; ++i) {
+      tui_transcript_message_t item{};
+      std::size_t written = 0u;
+      if (tui_transcript_window(transcript, i, 1u, &item, 1u,
+                                &written) != TUI_TRANSCRIPT_OK ||
+          written != 1u)
+        return Status::QueryRejected;
+      if (!i) first_retained_id = item.message_id;
+      if (item.message_id == previous_first_id) previous_first_index = i;
+      if (anchor_index == count && item.message_id >= anchor.message_id) {
+        anchor_index = i;
+        matched_id = item.message_id;
+      }
+    }
+    if (anchor_index == count) {
+      anchor_index = 0u;
+      matched_id = first_retained_id;
+    }
+    if (matched_id != anchor.message_id) anchor.within_message_y = 0.0f;
+    anchor.message_id = matched_id;
+
+    // Keep the previous first visible host when it and the anchor still
+    // coexist within the fixed slot budget. Otherwise rebase the bounded
+    // window at the retained anchor, without materializing offscreen hosts.
+    std::size_t first = anchor_index;
+    if (previous_first_index <= anchor_index &&
+        anchor_index - previous_first_index < slots_.size())
+      first = previous_first_index;
+    return show_with_policy(transcript, first, ScrollPolicy::PreserveAnchor,
+                            &anchor);
+  }
+
+  // Compatibility surface: existing show() retains numeric scroll behavior.
   Status show(const tui_transcript_t* transcript, std::size_t first) {
     return show_with_policy(transcript, first, ScrollPolicy::PreserveIntent);
   }
 
 private:
-  enum class ScrollPolicy { PreserveIntent, FollowTail, AnchorTop };
+  enum class ScrollPolicy {
+    PreserveIntent, FollowTail, AnchorTop, PreserveAnchor
+  };
+
+  bool restore_anchor(const TranscriptScrollAnchor& anchor) {
+    if (!viewport_.is_scroll_container()) return false;
+    for (const Slot* slot : visible_) {
+      if (slot->message_id != anchor.message_id) continue;
+      const float top = slot->host->y();
+      const float height = slot->host->height();
+      if (!std::isfinite(top) || !std::isfinite(height) || height < 0.0f)
+        return false;
+      return viewport_.set_scroll_offset(viewport_.scroll_x(),
+          top + std::clamp(anchor.within_message_y, 0.0f, height));
+    }
+    return viewport_.set_scroll_offset(viewport_.scroll_x(), 0.0f);
+  }
 
   Status show_with_policy(const tui_transcript_t* transcript,
-                          std::size_t first, ScrollPolicy policy) {
+                          std::size_t first, ScrollPolicy policy,
+                          const TranscriptScrollAnchor* anchor = nullptr) {
     if (!transcript) return Status::Invalid;
 
     std::size_t count = 0u;
@@ -142,6 +253,12 @@ private:
     const bool different_anchor = count != 0u &&
         (visible_.empty() || visible_[0]->message_id != desired[0].id);
     if (!different) {
+      if (policy == ScrollPolicy::PreserveAnchor && anchor) {
+        // Reflow can change host geometry even when the Markdown source did
+        // not change (e.g. resize or CSS width change).
+        box_.update();
+        return restore_anchor(*anchor) ? Status::Updated : Status::Unchanged;
+      }
       if (policy == ScrollPolicy::FollowTail &&
           viewport_.set_scroll_offset(viewport_.scroll_x(),
                                       viewport_.max_scroll_y())) {
@@ -195,6 +312,8 @@ private:
     } else if (policy == ScrollPolicy::AnchorTop) {
       if (different_anchor)
         (void)viewport_.set_scroll_offset(viewport_.scroll_x(), 0.0f);
+    } else if (policy == ScrollPolicy::PreserveAnchor && anchor) {
+      (void)restore_anchor(*anchor);
     } else {
       (void)follow.apply(viewport_);
     }
