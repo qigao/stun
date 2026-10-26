@@ -764,8 +764,33 @@ int main(int argc, char** argv) {
             return 1;
         }
 #endif
-        std::thread worker(producer, std::ref(d), 1u, 48u,
-                           std::chrono::milliseconds(28));
+        std::thread worker([&d] {
+#if defined(STUN_TUI_DEMO_HEADLESS_TEST) && !defined(_WIN32)
+            // Test-only synchronization with a REAL PTY owner. The child
+            // runs the ordinary application and input loop; only the first
+            // producer BEGIN waits for the parent to admit/observe Home.
+            // A pipe byte gates startup deterministically without sleeps.
+            if (const char* gate = std::getenv(
+                    "STUN_TUI_PTY_BEGIN_GATE_FD")) {
+                char* end = nullptr;
+                const long parsed = std::strtol(gate, &end, 10);
+                if (!*gate || !end || *end || parsed < 3 ||
+                    parsed > 65535) {
+                    std::fputs("invalid PTY BEGIN gate descriptor\n", stderr);
+                    return;
+                }
+                const int fd = static_cast<int>(parsed);
+                char permit = 0;
+                const ssize_t received = ::read(fd, &permit, 1u);
+                (void)::close(fd);
+                if (received != 1 || permit != 'G') {
+                    std::fputs("PTY BEGIN gate not released\n", stderr);
+                    return;
+                }
+            }
+#endif
+            producer(d, 1u, 48u, std::chrono::milliseconds(28));
+        });
         tui_app_run(d.app);
         d.stop.store(true, std::memory_order_release);
         worker.join();
