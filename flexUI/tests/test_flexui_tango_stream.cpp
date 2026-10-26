@@ -2144,9 +2144,14 @@ spec("FlexUI MarkdownWidget through Tango async transport and cell renderer") {
         // armed. This does NOT bypass native generation/revision checks.
         const auto allocations_before_reuse = staging.allocations;
         const auto failures_before_reuse = staging.failure_count;
+        std::array<std::int64_t, 96u> reuse_latencies_us{};
         staging.fail_next = true;
-        for (unsigned turn = 0u; turn < 96u; ++turn) {
+        for (unsigned turn = 0u; turn < reuse_latencies_us.size(); ++turn) {
+            const auto before = std::chrono::steady_clock::now();
             const auto redraw = window.show_tail(transcript);
+            reuse_latencies_us[turn] =
+                std::chrono::duration_cast<std::chrono::microseconds>(
+                    std::chrono::steady_clock::now() - before).count();
             check(redraw == Status::Updated ||
                   redraw == Status::Unchanged);
             check(window.visible_host(12u) == old_host);
@@ -2171,6 +2176,22 @@ spec("FlexUI MarkdownWidget through Tango async transport and cell renderer") {
         check(window.visible_host(12u) == old_host);
         staging.fail_next = false;
         check(staging.allocations == staging.frees);
+        std::sort(reuse_latencies_us.begin(), reuse_latencies_us.end());
+        const auto reuse_p50 = reuse_latencies_us[
+            reuse_latencies_us.size() / 2u];
+        const auto reuse_p95 = reuse_latencies_us[
+            (reuse_latencies_us.size() - 1u) * 95u / 100u];
+        const std::size_t staging_mallocs =
+            staging.allocations - allocations_before_reuse;
+        check(staging_mallocs == 0u);
+        check(reuse_p50 <= reuse_p95);
+        // Compare ASan and LSan baselines independently; avoid a frame
+        // budget claim from this tiny, fixed native-source fixture.
+        std::printf(
+            "TUI_PROJECTION_REUSE turns=96 staging_mallocs=%zu "
+            "p50_reuse_us=%lld p95_reuse_us=%lld cancel_reflow=1\n",
+            staging_mallocs, static_cast<long long>(reuse_p50),
+            static_cast<long long>(reuse_p95));
         trace("before-destroy");
         check(tui_transcript_destroy(transcript) == TUI_TRANSCRIPT_OK);
         trace("after-destroy");
