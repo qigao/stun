@@ -6,6 +6,7 @@
 
 #include <backends/tui/init.h>
 #include <backends/tui/transcript_window.h>
+#include <backends/tui/transcript_height_index.h>
 #include <flexUI/box.h>
 #include <flexUI/element.h>
 #include <flexUI/widgets/markdown_widget.h>
@@ -1254,6 +1255,152 @@ spec("FlexUI MarkdownWidget through Tango async transport and cell renderer") {
         // Linux ASan/LSan; leave bounded growth room for other compilers.
         check(box.owned_element_count() <= original_nodes + 192u);
         check(box.cached_style_element_count() <= original_nodes + 192u);
+        check(tui_transcript_destroy(transcript) == TUI_TRANSCRIPT_OK);
+    }
+
+    it("tracks bounded C11 message heights without stale geometry ownership") {
+        // This private cache is a numeric precursor for offscreen spacers.
+        // Actual heights come from two Box-owned MarkdownWidget hosts; the
+        // other retained messages only carry explicit fallback estimates.
+        flexUI::Box box(nullptr);
+        box.set_viewport(320.0f, 176.0f);
+        box.load_css(
+            "#root { width:320px; height:176px; display:flex; "
+            "flex-direction:column; } "
+            "#height-window { width:180px; height:72px; overflow-y:scroll; "
+            "display:flex; flex-direction:column; } "
+            ".transcript-message { width:180px; flex-shrink:0; }");
+        auto* root = box.create("div", "root");
+        auto* viewport = box.create("div", "height-window");
+        check(root && viewport);
+        if (!root || !viewport) return;
+        root->append(viewport);
+        box.set_root(root);
+        flex::tui_backend::TranscriptWindow window(box, *viewport, 2u);
+        auto* transcript = tui_transcript_create(4u, 4096u, 128u);
+        check(transcript != nullptr);
+        if (!transcript) return;
+
+        std::uint64_t sequence = 0u;
+        const auto emit = [&](std::uint64_t id, std::uint32_t type,
+                              std::string_view text) {
+            if (text.size() > 128u) return false;
+            std::array<unsigned char,
+                       sizeof(tui_stream_packet_header_t) + 128u> data{};
+            const tui_stream_packet_header_t header{id};
+            std::memcpy(data.data(), &header, sizeof(header));
+            if (!text.empty())
+                std::memcpy(data.data() + sizeof(header),
+                            text.data(), text.size());
+            const tui_async_event_t event{
+                type, 1u, ++sequence, sizeof(header) + text.size()
+            };
+            return tui_transcript_apply(
+                transcript, &event, data.data(), nullptr) ==
+                TUI_TRANSCRIPT_OK;
+        };
+        bool accepted = true;
+        for (std::uint64_t id = 10u; id <= 13u; ++id) {
+            std::uint64_t evicted = 99u;
+            accepted = accepted &&
+                tui_transcript_open(transcript, id, &evicted) ==
+                    TUI_TRANSCRIPT_OK && evicted == 0u &&
+                emit(id, TUI_STREAM_BEGIN, {}) &&
+                emit(id, TUI_STREAM_CHUNK, "## Typed 中\n\nBody paragraph\n\n") &&
+                (id == 12u || emit(id, TUI_STREAM_END, {}));
+        }
+        check(accepted);
+        if (!accepted) {
+            check(tui_transcript_destroy(transcript) == TUI_TRANSCRIPT_OK);
+            return;
+        }
+        check(window.show(transcript, 1u) ==
+              flex::tui_backend::TranscriptWindow::Status::Updated);
+        box.update();
+        auto* host11 = window.visible_host(11u);
+        auto* host12 = window.visible_host(12u);
+        check(host11 && host12 && viewport->width() > 0.0f);
+        if (!host11 || !host12 || viewport->width() <= 0.0f) {
+            check(tui_transcript_destroy(transcript) == TUI_TRANSCRIPT_OK);
+            return;
+        }
+
+        using Index = flex::tui_backend::TranscriptHeightIndex;
+        Index heights(4u, 24.0f);
+        const float width = viewport->width();
+        check(heights.sync(transcript, width) == Index::Status::Updated);
+        check(heights.size() == 4u && heights.capacity() == 4u);
+        const auto first_prefix = heights.height_before(11u);
+        check(first_prefix && std::fabs(*first_prefix - 24.0) < 0.01);
+        const float height11 = host11->height();
+        const float height12 = host12->height();
+        check(height11 > 0.0f && height12 > 0.0f);
+        check(heights.record_height(11u, height11));
+        check(heights.record_height(12u, height12));
+        const auto height_info12 = heights.lookup(12u);
+        check(height_info12 && height_info12->measured);
+        const auto before12 = heights.height_before(12u);
+        check(before12 &&
+              std::fabs(*before12 - (24.0 + height11)) < 0.01);
+        bool exact_prefix = true;
+        (void)heights.height_before(12u, &exact_prefix);
+        check(!exact_prefix); // ID 10 is retained, but not measured.
+        check(!heights.height_before(99u));
+        check(!heights.record_height(99u, 1.0f));
+        check(!heights.record_height(12u,
+                std::numeric_limits<float>::infinity()));
+
+        check(heights.sync(transcript, width) == Index::Status::Unchanged);
+        check(heights.lookup(12u)->measured);
+        // A late chunk changes only message 12's revision: id 11's actual
+        // height stays valid, while id 12 falls back until remeasured.
+        check(emit(12u, TUI_STREAM_CHUNK, "Extra **new** paragraph\n\n"));
+        check(heights.sync(transcript, width) == Index::Status::Updated);
+        check(heights.lookup(11u)->measured);
+        check(!heights.lookup(12u)->measured);
+        check(window.show(transcript, 1u) ==
+              flex::tui_backend::TranscriptWindow::Status::Updated);
+        box.update();
+        check(heights.record_height(12u, host12->height()));
+        // Width invalidation is conservative: an unchanged C11 revision
+        // needs a new Box measurement after wrapping changes.
+        check(heights.sync(transcript, width - 20.0f) ==
+              Index::Status::Updated);
+        check(!heights.lookup(11u)->measured);
+        check(!heights.lookup(12u)->measured);
+        const auto frozen_size = heights.size();
+        check(heights.sync(
+                  transcript, std::numeric_limits<float>::quiet_NaN()) ==
+              Index::Status::Invalid);
+        check(heights.size() == frozen_size);
+        check(heights.width() == width - 20.0f);
+        check(emit(12u, TUI_STREAM_END, {}));
+
+        // Full C11 capacity admits a new message by evicting only the
+        // earliest settled message. Its numeric measurements disappear.
+        std::uint64_t evicted = 0u;
+        check(tui_transcript_open(transcript, 14u, &evicted) ==
+              TUI_TRANSCRIPT_OK && evicted == 10u);
+        check(emit(14u, TUI_STREAM_BEGIN, {}));
+        check(emit(14u, TUI_STREAM_CHUNK, "New retained content\n\n"));
+        check(emit(14u, TUI_STREAM_END, {}));
+        check(heights.sync(transcript, width - 20.0f) ==
+              Index::Status::Updated);
+        check(heights.size() == 4u);
+        check(!heights.lookup(10u));
+        check(heights.lookup(11u).has_value());
+        check(heights.lookup(14u).has_value());
+        check(!heights.height_before(10u));
+        check(heights.height_before(11u).has_value());
+
+        // A smaller cache refuses oversized native retention before changing
+        // any entries, without silently discarding newest message geometry.
+        Index too_small(3u, 24.0f);
+        check(too_small.sync(transcript, width) == Index::Status::Capacity);
+        check(too_small.size() == 0u);
+        bool all_measured = true;
+        check(heights.total_height_estimate(&all_measured) > 0.0);
+        check(!all_measured);
         check(tui_transcript_destroy(transcript) == TUI_TRANSCRIPT_OK);
     }
 
