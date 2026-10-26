@@ -596,6 +596,14 @@ void on_view(const void* ptr, tui_buffer_t* back) {
                             static_cast<unsigned long long>(
                                 d.window->first_visible_message_id()));
                         std::fclose(trace);
+#if defined(STUN_TUI_PTY_RENDER_TRACE_CI)
+                        // The real Tango C11 renderer will independently
+                        // attest to VT diff write + front-buffer commit for
+                        // THIS navigation epoch, never just a Box render.
+                        tui_terminal_ci_arm_next_render(term,
+                            static_cast<unsigned long long>(
+                                d.pty_command_epoch));
+#endif
                         ++d.pty_frame_reports;
                     }
                 }
