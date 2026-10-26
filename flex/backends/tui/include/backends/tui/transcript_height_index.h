@@ -66,6 +66,12 @@ public:
       throw std::invalid_argument("invalid bounded transcript height index");
     scratch_.resize(maximum_);
     entries_.reserve(maximum_);
+    // Both value buffers are bounded by the native retainer capacity.
+    // Reuse staging across owner scroll/resize turns: allocating a new
+    // vector on every height sync adds heap churn to the UI event loop.
+    // Admission remains transactional because only a completed staging
+    // snapshot is swapped into entries_.
+    staged_.reserve(maximum_);
   }
 
   std::size_t size() const noexcept { return entries_.size(); }
@@ -94,8 +100,7 @@ public:
     const bool same_layout = width_ == layout_width &&
         layout_revision_ == layout_revision;
     bool changed = !same_layout || count != entries_.size();
-    std::vector<Entry> staged;
-    staged.reserve(count);
+    staged_.clear();
     std::uint64_t previous_id = 0u;
     for (std::size_t i = 0u; i < count; ++i) {
       const tui_transcript_message_t& message = scratch_[i];
@@ -125,10 +130,10 @@ public:
           entries_[i].last_sequence != current.last_sequence ||
           entries_[i].measured != current.measured)
         changed = true;
-      staged.push_back(current);
+      staged_.push_back(current);
     }
 
-    entries_.swap(staged);
+    entries_.swap(staged_);
     width_ = layout_width;
     layout_revision_ = layout_revision;
     return changed ? Status::Updated : Status::Unchanged;
@@ -260,6 +265,9 @@ private:
   std::uint64_t layout_revision_ = 0u;
   std::vector<tui_transcript_message_t> scratch_;
   std::vector<Entry> entries_;
+  // Scratch-only, per-index bounded value storage. No C11 text pointers,
+  // Element handles, or ownership references live in this vector.
+  std::vector<Entry> staged_;
 };
 
 }  // namespace flex::tui_backend
