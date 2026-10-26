@@ -250,6 +250,15 @@ def run_test(executable, early_home=False, home_burst=False,
                     (command, int(following))).encode("ascii")
         require(expected in last,
                 "owner post-layout navigation state mismatch: %r" % last)
+        # This is the first owned *cell* observation, before Tango serializes
+        # its ANSI delta. The existing screen.mode() check remains the only
+        # physical-terminal acceptance, and cannot be bypassed by this trace.
+        cell_match = re.search(rb"cell_mode=(-?\\d+) cell_row=(-?\\d+)", last)
+        require(cell_match is not None,
+                "missing post-Box cell-buffer provenance: %r" % last)
+        cell_mode, cell_row = int(cell_match[1]), int(cell_match[2])
+        require(cell_mode == (0 if following else 1) and cell_row >= 0,
+                "owner cell-buffer mode differs from navigation: %r" % last)
         if virtual_spacers:
             geometry = [line for line in lines
                         if line.startswith(b"virtual_geometry epoch=")]
@@ -470,6 +479,23 @@ def run_test(executable, early_home=False, home_burst=False,
               and screen.has_header(), 6.0)
         require(child.poll() is None, "application exited during resize")
 
+        if home_burst:
+            # Exercise the same strict physical Home/End oracle AFTER a real
+            # SIGWINCH while Markdown and the scroll viewport have reflowed.
+            # A queued resize may coincide with a partial CSI read; neither
+            # owner command provenance nor Box-cell evidence substitutes for
+            # the actual 52x16 PTY screen.
+            send(b"\\x1b[F")
+            until("post-resize End displays tail", 
+                  lambda: screen.mode() == "tail"
+                  and screen.geometry() == (52, 16), 5.0)
+            require_last_owner_frame(4, True)
+            send(b"\\x1b[H")
+            until("post-resize Home displays scrollback",
+                  lambda: screen.mode() == "scrollback"
+                  and screen.geometry() == (52, 16), 5.0)
+            require_last_owner_frame(5, False)
+
         # Graceful input exit is needed to assert actual terminal restoration;
         # SIGTERM would only test abnormal process termination.
         send(b"q")
@@ -518,7 +544,7 @@ def run_test(executable, early_home=False, home_burst=False,
         try:
             with open(input_trace, "rb") as trace:
                 print("PTY independent owner-input trace: %r" %
-                      trace.read(4096), file=sys.stderr)
+                      trace.read(32768)[-8192:], file=sys.stderr)
         except OSError as exc:
             print("PTY owner-input trace unavailable: %s" % exc,
                   file=sys.stderr)
