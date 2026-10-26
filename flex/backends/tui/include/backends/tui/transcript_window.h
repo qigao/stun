@@ -23,7 +23,7 @@
 #include <cstdint>
 #include <limits>
 #include <memory>
-#include <memory_resource>
+#include <cstdlib>
 #include <new>
 #include <stdexcept>
 #include <string>
@@ -56,17 +56,22 @@ public:
   // pairs and the maximum number of projected messages in a frame.
   // All slots are id-less until assigned; no index entry is created by
   // construction. The application owns viewport, Box and registry lifetimes.
-  // The optional resource is private C++ staging storage, not a C11/Tango
-  // allocator or a shared runtime setting. A test may supply a bounded
-  // failure-injection memory_resource; production uses the default resource.
-  // The borrowed resource must outlive this TranscriptWindow.
+  // Private UI-owner staging allocator: allocation returns nullptr on
+  // resource exhaustion. Production uses real malloc/free, while tests
+  // inject a bounded malloc-backed failure. No C11/Tango ABI changes.
+  // Both callbacks must be supplied together (or both omitted).
+  struct StagingAllocation {
+    void* context = nullptr;
+    void* (*allocate)(void*, std::size_t) noexcept = nullptr;
+    void (*deallocate)(void*, void*) noexcept = nullptr;
+  };
+
   TranscriptWindow(flexUI::Box& box, flexUI::Element& viewport,
                    std::size_t max_visible,
-                   std::pmr::memory_resource* staging_resource =
-                       std::pmr::get_default_resource())
-      : box_(box), viewport_(viewport),
-        staging_resource_(staging_resource) {
-    if (!staging_resource || max_visible == 0u || max_visible > 64u ||
+                   StagingAllocation staging = {})
+      : box_(box), viewport_(viewport), staging_(staging) {
+    if (max_visible == 0u || max_visible > 64u ||
+        (bool(staging.allocate) != bool(staging.deallocate)) ||
         viewport.is_widget_owned()) {
       throw std::invalid_argument("invalid bounded transcript viewport");
     }
@@ -497,54 +502,83 @@ private:
       return Status::QueryRejected;
     }
 
-    // Preflight all source-string copies and bounded slot identities before
-    // touching the Box, widgets, height index, or Spacer geometry. This is
-    // the allocation-failure rollback boundary for presentation staging.
-    // A real std::pmr allocator rejection is converted into an explicit
-    // resource result; no borrowed C11 text escapes a successful preflight.
-    // Native retainer admission is independent and is NEVER rolled back by
-    // a UI presentation resource failure.
-    std::pmr::vector<Desired> desired(staging_resource_);
+    // Preflight native source copies and bounded slot identities before
+    // changing the Box, any UiHandle, height samples, or Spacer geometry.
+    // The two real malloc-backed blocks are checked for nullptr rather
+    // than relying on exception propagation through MSVC pmr virtual calls.
+    // All partially constructed strings are destroyed on early return.
+    struct DesiredScratch {
+      StagingAllocation staging;
+      Desired* items = nullptr;
+      std::size_t constructed = 0u;
+      ~DesiredScratch() {
+        for (std::size_t i = 0u; i < constructed; ++i)
+          items[i].~Desired();
+        if (items) {
+          if (staging.deallocate) staging.deallocate(staging.context, items);
+          else std::free(items);
+        }
+      }
+    } desired{staging_};
+    if (count) {
+      void* memory = staging_.allocate
+          ? staging_.allocate(staging_.context, count * sizeof(Desired))
+          : std::malloc(count * sizeof(Desired));
+      if (!memory) return Status::ResourceExhausted;
+      desired.items = static_cast<Desired*>(memory);
+    }
     try {
-      desired.reserve(count);
       for (std::size_t i = 0u; i < count; ++i) {
         const auto id = scratch_[i].message_id;
         std::size_t bytes = 0u;
         const char* text = tui_transcript_text(transcript, id, &bytes);
         if (!text) return Status::QueryRejected;
-        desired.push_back({
-            id, std::string(text, bytes), std::string("transcript-msg-") +
-            std::to_string(id)
-        });
+        new (static_cast<void*>(desired.items + i))
+            Desired{id, std::string(text, bytes),
+                    std::string("transcript-msg-") + std::to_string(id)};
+        ++desired.constructed;
       }
     } catch (const std::bad_alloc&) {
       return Status::ResourceExhausted;
     }
 
-    // Complete both bounded pointer planning and all vector allocations
-    // before syncing height records or changing any Box Spacer/UiHandle.
-    // A staging allocator failure leaves the last projected window intact.
-    std::pmr::vector<Slot*> next(staging_resource_);
-    try {
-      next.reserve(count);
-      for (const auto& item : desired) {
-        Slot* existing = nullptr;
-        for (auto& slot : slots_)
-          if (slot.message_id == item.id) { existing = &slot; break; }
-        next.push_back(existing);
-      }
-      for (std::size_t i = 0u; i < count; ++i) {
-        if (next[i]) continue;
-        for (auto& slot : slots_) {
-          if (std::find(next.begin(), next.end(), &slot) != next.end())
-            continue;
-          next[i] = &slot;
-          break;
+    struct SlotScratch {
+      StagingAllocation staging;
+      Slot** items = nullptr;
+      ~SlotScratch() {
+        if (items) {
+          if (staging.deallocate) staging.deallocate(staging.context, items);
+          else std::free(items);
         }
-        if (!next[i]) return Status::QueryRejected;
       }
-    } catch (const std::bad_alloc&) {
-      return Status::ResourceExhausted;
+    } planned{staging_};
+    // A one-element local sentinel gives empty projections valid begin/end
+    // iterators without requesting any resource allocation.
+    Slot* empty_plan = nullptr;
+    if (count) {
+      void* memory = staging_.allocate
+          ? staging_.allocate(staging_.context, count * sizeof(Slot*))
+          : std::malloc(count * sizeof(Slot*));
+      if (!memory) return Status::ResourceExhausted;
+      planned.items = static_cast<Slot**>(memory);
+    }
+    Slot** next = count ? planned.items : &empty_plan;
+    for (std::size_t i = 0u; i < count; ++i) {
+      const Desired& item = desired.items[i];
+      Slot* existing = nullptr;
+      for (auto& slot : slots_)
+        if (slot.message_id == item.id) { existing = &slot; break; }
+      next[i] = existing;
+    }
+    for (std::size_t i = 0u; i < count; ++i) {
+      if (next[i]) continue;
+      for (auto& slot : slots_) {
+        if (std::find(next, next + count, &slot) != next + count)
+          continue;
+        next[i] = &slot;
+        break;
+      }
+      if (!next[i]) return Status::QueryRejected;
     }
 
     bool different = count != visible_.size();
@@ -571,7 +605,8 @@ private:
       try {
         children.reserve(count + (leading_spacer_ ? 2u : 0u));
         if (leading_spacer_) children.push_back(leading_spacer_);
-        for (Slot* slot : next) children.push_back(slot->host);
+        for (std::size_t i = 0u; i < count; ++i)
+          children.push_back(next[i]->host);
         if (trailing_spacer_) children.push_back(trailing_spacer_);
       } catch (const std::bad_alloc&) {
         return Status::ResourceExhausted;
@@ -669,7 +704,7 @@ private:
     viewport_.replace_children(children);
     // Capacity was reserved in the constructor: this only copies bounded
     // Slot* values and cannot allocate on the live mutation path.
-    visible_.assign(next.begin(), next.end());
+    visible_.assign(next, next + count);
     box_.invalidate();
     box_.update();
     record_visible_heights();
@@ -752,8 +787,8 @@ private:
 
   flexUI::Box& box_;
   flexUI::Element& viewport_;
-  // Presentation-only, UI-owner allocator; not consulted by native streams.
-  std::pmr::memory_resource* staging_resource_;
+  // Presentation-only UI-owner allocator; not consulted by native streams.
+  StagingAllocation staging_;
   std::vector<Slot> slots_;
   std::vector<Slot*> visible_;
   std::vector<tui_transcript_message_t> scratch_;
