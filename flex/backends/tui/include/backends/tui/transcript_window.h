@@ -109,6 +109,11 @@ public:
   std::size_t in_message_scroll_fast_paths() const noexcept {
     return in_message_scroll_fast_paths_;
   }
+  // Private owner-only diagnostic: one pass means Box was updated and at
+  // least one valid visible message height was sampled afterwards.
+  std::size_t visible_height_sample_passes() const noexcept {
+    return visible_height_sample_passes_;
+  }
   std::uint64_t first_visible_message_id() const noexcept {
     return visible_.empty() ? 0u : visible_.front()->message_id;
   }
@@ -449,11 +454,13 @@ private:
 
   void record_visible_heights() noexcept {
     if (!heights_) return;
+    bool sampled = false;
     for (const Slot* slot : visible_) {
       if (!slot->message_id) continue;
-      (void)heights_->record_height(
-          slot->message_id, slot->host->height());
+      sampled = heights_->record_height(
+          slot->message_id, slot->host->height()) || sampled;
     }
+    if (sampled) ++visible_height_sample_passes_;
   }
 
   // Caller controls which bounded window is visible; this method merely
@@ -487,10 +494,15 @@ private:
         leading_spacer_->custom_property("--tui-virtual-height");
     const auto* old_trailing =
         trailing_spacer_->custom_property("--tui-virtual-height");
-    changed = !old_leading || !old_trailing ||
-              *old_leading != leading || *old_trailing != trailing;
-    leading_spacer_->set_custom_property("--tui-virtual-height", leading);
-    trailing_spacer_->set_custom_property("--tui-virtual-height", trailing);
+    const bool leading_changed = !old_leading || *old_leading != leading;
+    const bool trailing_changed = !old_trailing || *old_trailing != trailing;
+    changed = leading_changed || trailing_changed;
+    // An unchanged Owner turn must not republish identical CSS and dirty
+    // the retained virtual spacers. Unknown heights remain estimates.
+    if (leading_changed)
+      leading_spacer_->set_custom_property("--tui-virtual-height", leading);
+    if (trailing_changed)
+      trailing_spacer_->set_custom_property("--tui-virtual-height", trailing);
     return true;
   }
 
@@ -850,6 +862,7 @@ private:
   std::unique_ptr<TranscriptHeightIndex> heights_;
   std::uint64_t layout_revision_ = 0u;
   std::size_t in_message_scroll_fast_paths_ = 0u;
+  std::size_t visible_height_sample_passes_ = 0u;
   flexUI::Element* leading_spacer_ = nullptr;
   flexUI::Element* trailing_spacer_ = nullptr;
 };

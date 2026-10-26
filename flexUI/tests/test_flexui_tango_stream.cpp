@@ -2144,6 +2144,8 @@ spec("FlexUI MarkdownWidget through Tango async transport and cell renderer") {
         // armed. This does NOT bypass native generation/revision checks.
         const auto allocations_before_reuse = staging.allocations;
         const auto failures_before_reuse = staging.failure_count;
+        const auto samples_before_reuse =
+            window.visible_height_sample_passes();
         std::array<std::int64_t, 96u> reuse_latencies_us{};
         staging.fail_next = true;
         for (unsigned turn = 0u; turn < reuse_latencies_us.size(); ++turn) {
@@ -2160,13 +2162,26 @@ spec("FlexUI MarkdownWidget through Tango async transport and cell renderer") {
         check(staging.failure_count == failures_before_reuse);
         check(staging.fail_next);
         check(staging.live_allocations == 0u);
+        // An unchanged message must also avoid needless Box height sampling.
+        check(window.visible_height_sample_passes() == samples_before_reuse);
 
         // CANCEL does not change content bytes, but MUST still invalidate
         // height samples by native revision and update Box geometry. The
         // source-equal fast path must not mask this state transition.
+        const auto samples_before_cancel =
+            window.visible_height_sample_passes();
+        const auto sequence_before_cancel =
+            index && index->lookup(12u) ? index->lookup(12u)->last_sequence
+                                        : 0u;
         check(emit(12u, TUI_STREAM_CANCEL, {}) == TUI_TRANSCRIPT_OK);
         const auto after_cancel = window.show_tail(transcript);
-        check(after_cancel == Status::Updated);
+        const bool cancel_reflow =
+            after_cancel == Status::Updated &&
+            window.visible_height_sample_passes() > samples_before_cancel &&
+            index && index->lookup(12u) &&
+            index->lookup(12u)->measured &&
+            index->lookup(12u)->last_sequence > sequence_before_cancel;
+        check(cancel_reflow);
         check(staging.allocations == allocations_before_reuse);
         check(staging.failure_count == failures_before_reuse);
         check(staging.fail_next);
@@ -2189,9 +2204,10 @@ spec("FlexUI MarkdownWidget through Tango async transport and cell renderer") {
         // budget claim from this tiny, fixed native-source fixture.
         std::printf(
             "TUI_PROJECTION_REUSE turns=96 staging_mallocs=%zu "
-            "p50_reuse_us=%lld p95_reuse_us=%lld cancel_reflow=1\n",
+            "p50_reuse_us=%lld p95_reuse_us=%lld cancel_reflow=%u\n",
             staging_mallocs, static_cast<long long>(reuse_p50),
-            static_cast<long long>(reuse_p95));
+            static_cast<long long>(reuse_p95),
+            static_cast<unsigned>(cancel_reflow));
         trace("before-destroy");
         check(tui_transcript_destroy(transcript) == TUI_TRANSCRIPT_OK);
         trace("after-destroy");
