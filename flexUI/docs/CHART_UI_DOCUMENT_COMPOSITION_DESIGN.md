@@ -1,5 +1,13 @@
 # Chart DSL 与 Flex UI Document 组合设计
 
+## 2026-10-27 XML migration checkpoint (#275 / Draft PR #276)
+
+This document's earlier `.flex` `ui ChartFrame` snippets describe the **retired proposal**, not the supported future authoring syntax. The canonical UI shell authoring source is now `charts/ui/assets/chart_frame.ui.xml`, which CMake embeds into `chart_ui` with no runtime current-working-directory lookup. The compiled XML definition and the same `UiDocumentInstantiator`, `WidgetRegistry`, `StyleEngine`, and Tailwind utility compiler are used for ChartFrame instantiation.
+
+Current P0 candidate: three mount modes (Root, DetachedFragment, Child), scoped/local IDs, local `slot` index, and preflight before Box publication. A chart Plot Widget is **not** yet part of the same transaction as the shell: FlexChart and Infographic still call their original Flex Group/Plot APIs and must be migrated separately before claiming end-to-end chart creation atomicity. DOT node/edge/cluster Elements must remain individually styleable/hit-testable. Scoped TurboScript event/binding lowering remains unsupported in fragments and explicitly rejects rather than simulating global IDs.
+
+No BytesVM, browser DOM, hidden fallback, or second layout/render tree is introduced.
+
 - 状态：设计完成，待实施计划确认
 - 日期：2026-07-15
 - 范围：FlexChart、Infographic、DOT Graph 的 FlexUI 语义外壳、plot Widget 装配与事务提交
