@@ -1795,6 +1795,37 @@ spec("FlexUI MarkdownWidget through Tango async transport and cell renderer") {
         check(std::fabs(viewport->scroll_y() -
                         (host1->y() + anchor.within_message_y)) < 2.5f);
         check(viewport->child_count() == 4u);
+
+        // Width invalidation turns a previously MEASURED deep local offset
+        // into a too-short (24px) fallback. The owner must still preserve
+        // message #1 at +40px, not numerically roll across that provisional
+        // estimate into message #2 before Box measures the new width.
+        check(host1->height() > 44.0f);
+        const float deeper_y = host1->y() + 40.0f;
+        check(viewport->max_scroll_y() > deeper_y + 2.0f);
+        (void)viewport->set_scroll_offset(0.0f, deeper_y);
+        const auto deeper_anchor = window.capture_scroll_anchor();
+        check(!deeper_anchor.follow_tail &&
+              deeper_anchor.message_id == 1u &&
+              std::fabs(deeper_anchor.within_message_y - 40.0f) < 2.5f);
+        box.set_viewport(200.0f, 176.0f);
+        box.update();
+        flex::tui_backend::TranscriptScrollAnchor deep_rebased{};
+        const auto deep_result = window.scroll_from_anchor(
+            transcript, deeper_anchor, 0.0, &deep_rebased);
+        check(deep_result == Status::Updated ||
+              deep_result == Status::Unchanged);
+        check(deep_rebased.message_id == 1u &&
+              std::fabs(deep_rebased.within_message_y - 40.0f) < 2.5f);
+        check(window.visible_host(1u) == host1);
+        check(std::fabs(viewport->scroll_y() -
+                        (host1->y() + 40.0f)) < 2.5f);
+        check(heights->lookup(1u) && heights->lookup(1u)->measured);
+        check(std::fabs(heights->width() - viewport->width()) < 1.0f);
+        check(window.show_preserving_anchor(transcript, anchor) ==
+              Status::Updated ||
+              window.visible_host(1u) == host1);
+
         // A REAL retained-message eviction and viewport width change now
         // happen in one owner turn. The old GFM anchor (#1) must clamp to
         // the first still-retained message (#2) at local offset zero, NOT to
