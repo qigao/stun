@@ -73,8 +73,14 @@ UiDocumentError validate_node_fields(
                       "UI node contains conflicting property aliases: " + id);
   }
 
+  if (properties.count("slot") &&
+      (properties.count("attr.data-slot") || properties.count("data-slot"))) {
+    return make_error(UiDocumentErrorCode::InvalidProperty,
+                      "UI slot cannot be overridden by a data-slot attribute");
+  }
+
   for (const auto &[name, value] : properties) {
-    if (name.empty() || name == "id") {
+    if (name.empty() || name == "id" || name == "attr.id") {
       return make_error(UiDocumentErrorCode::InvalidProperty,
                         "invalid or reserved UI property on node: " + id);
     }
@@ -1006,7 +1012,7 @@ UiDocumentInstantiateResult UiDocumentInstantiator::instantiate_impl(
     }
   } else if (options.mode == UiMountMode::Child) {
     if (!options.parent || !box.owns_element(options.parent) ||
-        options.parent->is_widget_owned()) {
+        options.parent->is_widget_owned() || options.parent->widget != nullptr) {
       result.error = make_error(UiDocumentErrorCode::InvalidMountTarget,
                                 "child mount requires a Box-owned application parent");
       return result;
@@ -1016,9 +1022,17 @@ UiDocumentInstantiateResult UiDocumentInstantiator::instantiate_impl(
                               "unknown UI mount mode");
     return result;
   }
+  if (options.id_policy != UiIdPolicy::Global &&
+      options.id_policy != UiIdPolicy::LocalOnly &&
+      options.id_policy != UiIdPolicy::Scoped) {
+    result.error = make_error(UiDocumentErrorCode::InvalidIdScope,
+                              "unknown UI ID policy");
+    return result;
+  }
   if (options.id_policy == UiIdPolicy::Scoped) {
     if (options.id_scope.empty() ||
-        options.id_scope.size() > UiDocumentLimits{}.max_string_bytes / 2) {
+        options.id_scope.size() > UiDocumentLimits{}.max_string_bytes / 2 ||
+        options.id_scope.find("::") != std::string::npos) {
       result.error = make_error(UiDocumentErrorCode::InvalidIdScope,
                                 "scoped IDs require a bounded nonempty namespace");
       return result;
@@ -1037,6 +1051,16 @@ UiDocumentInstantiateResult UiDocumentInstantiator::instantiate_impl(
 
   result.error = validate_slots(definition.root);
   if (result.error) return result;
+  if (options.id_policy == UiIdPolicy::Scoped) {
+    for (const auto &id : ids) {
+      if (id.size() + options.id_scope.size() + 2 >
+          UiDocumentLimits{}.max_string_bytes) {
+        result.error = make_error(UiDocumentErrorCode::InvalidIdScope,
+                                  "qualified UI ID exceeds string limit");
+        return result;
+      }
+    }
+  }
   result.error = validate_target(box, definition, options);
   if (result.error) return result;
 
