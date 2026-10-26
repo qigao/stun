@@ -95,6 +95,14 @@ struct tui_terminal {
  * any view callback; terminal_render keeps it as an idempotent safeguard. */
 bool tui_terminal_prepare_frame(tui_terminal_t *term);
 
+#if defined(STUN_TUI_PTY_RENDER_TRACE_CI) && !defined(_WIN32)
+/* Private conformance-only hook: the demo arms exactly its most recent
+ * on_key epoch after the Box-owned back buffer is updated. The native C11
+ * terminal reports write/commit outcome independently after render(). */
+void tui_terminal_ci_arm_next_render(tui_terminal_t *term,
+                                     unsigned long long epoch);
+#endif
+
 #ifdef _WIN32
 /* Private deterministic translation of an actual Win32 input record. */
 bool tui_terminal_input_record(tui_terminal_t* term,
