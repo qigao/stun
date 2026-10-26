@@ -639,8 +639,9 @@ void producer(Demo& d, std::uint64_t first_id,
 #if defined(STUN_TUI_DEMO_HEADLESS_TEST)
 bool fake_write(tui_terminal_t*, const char*, size_t) { return true; }
 
-int headless_smoke() {
+int headless_smoke(bool experimental_virtual_spacers = false) {
     Demo d;
+    d.experimental_virtual_spacers = experimental_virtual_spacers;
     if (!initialize(d)) { shutdown(d); return 2; }
     auto* term = tui_app_terminal(d.app);
     term->width = 80;
@@ -839,8 +840,12 @@ int main(int argc, char** argv) {
         return 0;
     }
     if (argc > 1 && std::strcmp(argv[1], "--headless-smoke") == 0) {
+        const bool virtual_smoke =
+            argc == 3 && std::strcmp(
+                argv[2], "--experimental-virtual-spacers") == 0;
+        if (argc != 2 && !virtual_smoke) return 2;
 #if defined(STUN_TUI_DEMO_HEADLESS_TEST)
-        return headless_smoke();
+        return headless_smoke(virtual_smoke);
 #else
         std::fputs("headless smoke requires CI-only test build\n", stderr);
         return 2;
