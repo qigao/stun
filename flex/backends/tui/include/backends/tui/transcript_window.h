@@ -23,6 +23,8 @@
 #include <cstdint>
 #include <limits>
 #include <memory>
+#include <memory_resource>
+#include <new>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -47,16 +49,24 @@ public:
     Unchanged,
     Invalid,
     QueryRejected,
+    ResourceExhausted,
   };
 
   // max_visible bounds both the number of permanent Box-owned host/widget
   // pairs and the maximum number of projected messages in a frame.
   // All slots are id-less until assigned; no index entry is created by
   // construction. The application owns viewport, Box and registry lifetimes.
+  // The optional resource is private C++ staging storage, not a C11/Tango
+  // allocator or a shared runtime setting. A test may supply a bounded
+  // failure-injection memory_resource; production uses the default resource.
+  // The borrowed resource must outlive this TranscriptWindow.
   TranscriptWindow(flexUI::Box& box, flexUI::Element& viewport,
-                   std::size_t max_visible)
-      : box_(box), viewport_(viewport) {
-    if (max_visible == 0u || max_visible > 64u ||
+                   std::size_t max_visible,
+                   std::pmr::memory_resource* staging_resource =
+                       std::pmr::get_default_resource())
+      : box_(box), viewport_(viewport),
+        staging_resource_(staging_resource) {
+    if (!staging_resource || max_visible == 0u || max_visible > 64u ||
         viewport.is_widget_owned()) {
       throw std::invalid_argument("invalid bounded transcript viewport");
     }
@@ -463,19 +473,28 @@ private:
       return Status::QueryRejected;
     }
 
-    // Stage all owned source copies and identities before changing any live
-    // Box or Widget. Borrowed native stream text never survives this scope.
-    std::vector<Desired> desired;
-    desired.reserve(count);
-    for (std::size_t i = 0u; i < count; ++i) {
-      const auto id = scratch_[i].message_id;
-      std::size_t bytes = 0u;
-      const char* text = tui_transcript_text(transcript, id, &bytes);
-      if (!text) return Status::QueryRejected;
-      desired.push_back({
-          id, std::string(text, bytes), std::string("transcript-msg-") +
-          std::to_string(id)
-      });
+    // Preflight all source-string copies and bounded slot identities before
+    // touching the Box, widgets, height index, or Spacer geometry. This is
+    // the allocation-failure rollback boundary for presentation staging.
+    // A real std::pmr allocator rejection is converted into an explicit
+    // resource result; no borrowed C11 text escapes a successful preflight.
+    // Native retainer admission is independent and is NEVER rolled back by
+    // a UI presentation resource failure.
+    std::pmr::vector<Desired> desired(staging_resource_);
+    try {
+      desired.reserve(count);
+      for (std::size_t i = 0u; i < count; ++i) {
+        const auto id = scratch_[i].message_id;
+        std::size_t bytes = 0u;
+        const char* text = tui_transcript_text(transcript, id, &bytes);
+        if (!text) return Status::QueryRejected;
+        desired.push_back({
+            id, std::string(text, bytes), std::string("transcript-msg-") +
+            std::to_string(id)
+        });
+      }
+    } catch (const std::bad_alloc&) {
+      return Status::ResourceExhausted;
     }
 
     // Reject invalid or over-capacity geometry snapshots before modifying
@@ -684,6 +703,8 @@ private:
 
   flexUI::Box& box_;
   flexUI::Element& viewport_;
+  // Presentation-only, UI-owner allocator; not consulted by native streams.
+  std::pmr::memory_resource* staging_resource_;
   std::vector<Slot> slots_;
   std::vector<Slot*> visible_;
   std::vector<tui_transcript_message_t> scratch_;
