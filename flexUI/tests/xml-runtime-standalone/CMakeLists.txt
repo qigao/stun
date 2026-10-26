@@ -121,6 +121,16 @@ if(STUN_BUILD_TUI_STREAMING_DEMO)
         "$<TARGET_FILE:flexui_tui_streaming_demo>" --early-home)
     set_tests_properties(tui_streaming_demo_posix_pty_early_home
       PROPERTIES TIMEOUT 60)
+    # Independent active-producer input-admission gate: drive Home/End
+    # through real POSIX PTY, including fragmented Home CSI writes, while
+    # Markdown is still streaming. Keep the original 5-second visible-
+    # state deadlines and the normal PTY fixture untouched.
+    add_test(NAME tui_streaming_demo_posix_pty_home_burst
+      COMMAND "${Python3_EXECUTABLE}"
+        "${STUN_ROOT}/flexUI/tests/test_tui_streaming_pty.py"
+        "$<TARGET_FILE:flexui_tui_streaming_demo>" --home-burst)
+    set_tests_properties(tui_streaming_demo_posix_pty_home_burst
+      PROPERTIES TIMEOUT 60)
   elseif(WIN32)
     # Spawn the unchanged real interactive demo under a fresh OS Console.
     # Independent supervising process writes INPUT_RECORDs and reads native
