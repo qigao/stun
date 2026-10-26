@@ -1269,7 +1269,9 @@ spec("FlexUI MarkdownWidget through Tango async transport and cell renderer") {
             "flex-direction:column; } "
             "#height-window { width:180px; height:72px; overflow-y:scroll; "
             "display:flex; flex-direction:column; } "
-            ".transcript-message { width:180px; flex-shrink:0; }");
+            ".transcript-message { width:180px; flex-shrink:0; } "
+            ".tui-virtual-spacer { width:180px; flex-shrink:0; "
+            "height:var(--tui-virtual-height); }");
         auto* root = box.create("div", "root");
         auto* viewport = box.create("div", "height-window");
         check(root && viewport);
@@ -1279,6 +1281,8 @@ spec("FlexUI MarkdownWidget through Tango async transport and cell renderer") {
         flex::tui_backend::TranscriptWindow window(box, *viewport, 2u);
         box.update();
         window.enable_height_tracking(4u, 24.0f);
+        window.enable_virtual_spacers();
+        const auto initial_owned = box.owned_element_count();
         auto* transcript = tui_transcript_create(4u, 4096u, 128u);
         check(transcript != nullptr);
         if (!transcript) return;
@@ -1324,6 +1328,10 @@ spec("FlexUI MarkdownWidget through Tango async transport and cell renderer") {
         check(host11 && host12 && viewport->width() > 0.0f);
         const auto* live_index = window.tracked_heights();
         check(live_index != nullptr && live_index->size() == 4u);
+        check(window.virtual_spacers_enabled());
+        check(viewport->child_count() == 4u);
+        check(std::fabs(window.leading_spacer_height() - 24.0f) < 1.0f);
+        check(std::fabs(window.trailing_spacer_height() - 24.0f) < 1.0f);
         if (live_index && host11 && host12) {
             check(live_index->lookup(11u)->measured);
             check(live_index->lookup(12u)->measured);
@@ -1446,6 +1454,11 @@ spec("FlexUI MarkdownWidget through Tango async transport and cell renderer") {
         check(evicted_plan && std::fabs(evicted_plan->leading) < 0.01);
         check(window.show_tail(transcript) ==
               flex::tui_backend::TranscriptWindow::Status::Updated);
+        check(viewport->child_count() == 4u);
+        check(window.leading_spacer_height() > 24.0f);
+        check(window.trailing_spacer_height() < 1.0f);
+        check(box.owned_element_count() == initial_owned ||
+              box.owned_element_count() <= initial_owned + 40u);
         check(!live_index->lookup(10u));
         check(live_index->lookup(14u)->measured);
         // Offscreen retained ID 11 keeps a valid measured sample when its
