@@ -485,6 +485,15 @@ jobs:
               "turns", "elapsed_ms", "p50_scroll_us", "p95_scroll_us",
               "peak_elements", "visible_hosts", "fast_path_hits"
           )
+          reuse_expression = re.compile(
+              r"TUI_PROJECTION_REUSE turns=(\d+) staging_mallocs=(\d+) "
+              r"p50_reuse_us=(\d+) p95_reuse_us=(\d+) "
+              r"cancel_reflow=(\d+)"
+          )
+          reuse_names = (
+              "turns", "staging_mallocs", "p50_reuse_us",
+              "p95_reuse_us", "cancel_reflow"
+          )
           paths = {
               "asan_ubsan": Path("build/xml-runtime/Testing/Temporary/LastTest.log"),
               "lsan": Path("build/xml-runtime-lsan/Testing/Temporary/LastTest.log"),
@@ -497,6 +506,7 @@ jobs:
               "modes": {},
               "virtual_modes": {},
               "wheel_modes": {},
+              "reuse_modes": {},
           }
           for mode, path in paths.items():
               log = path.read_text(encoding="utf-8")
@@ -553,6 +563,26 @@ jobs:
                       f"{wheel_values}"
                   )
               evidence["wheel_modes"][mode] = wheel_values
+              reuse_matches = list(reuse_expression.finditer(log))
+              if len(reuse_matches) != 1:
+                  raise SystemExit(
+                      f"{mode}: expected exactly one TUI_PROJECTION_REUSE "
+                      f"result in {path}, got {len(reuse_matches)}"
+                  )
+              reuse_values = dict(zip(
+                  reuse_names, (int(x) for x in reuse_matches[0].groups())
+              ))
+              if (reuse_values["turns"] != 96 or
+                      reuse_values["staging_mallocs"] != 0 or
+                      reuse_values["cancel_reflow"] != 1 or
+                      reuse_values["p50_reuse_us"] >
+                          reuse_values["p95_reuse_us"] or
+                      reuse_values["p95_reuse_us"] > 100000):
+                  raise SystemExit(
+                      f"{mode}: invalid source-equal projection reuse "
+                      f"evidence {reuse_values}"
+                  )
+              evidence["reuse_modes"][mode] = reuse_values
           output = Path("build/tui-long-session-metrics.json")
           output.write_text(json.dumps(evidence, indent=2, sort_keys=True) + "\n",
                             encoding="utf-8")
@@ -588,6 +618,16 @@ jobs:
                                 f'{result["p95_scroll_us"]} | '
                                 f'{result["peak_elements"]} | '
                                 f'{result["fast_path_hits"]} |\n')
+                  out.write("\n### Unchanged Markdown projection reuse (opt-in)\n\n")
+                  out.write("| Mode | Turns | Staging mallocs | p50 us | "
+                            "p95 us | Cancel reflow |\n")
+                  out.write("|---|---:|---:|---:|---:|---:|\n")
+                  for mode, result in evidence["reuse_modes"].items():
+                      out.write(f'| {mode} | {result["turns"]} | '
+                                f'{result["staging_mallocs"]} | '
+                                f'{result["p50_reuse_us"]} | '
+                                f'{result["p95_reuse_us"]} | '
+                                f'{result["cancel_reflow"]} |\n')
           print(output.read_text(encoding="utf-8"))
           PY
 
