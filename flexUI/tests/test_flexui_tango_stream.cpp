@@ -1985,6 +1985,11 @@ spec("FlexUI MarkdownWidget through Tango async transport and cell renderer") {
                 return this == &other;
             }
         } staging;
+        const auto trace = [](const char* stage) {
+            std::fprintf(stderr, "TUI_ALLOC_FAULT_STAGE %s\n", stage);
+            std::fflush(stderr);
+        };
+        trace("start");
 
         flexUI::Box box(nullptr);
         box.set_viewport(320.0f, 160.0f);
@@ -2036,7 +2041,9 @@ spec("FlexUI MarkdownWidget through Tango async transport and cell renderer") {
               TUI_TRANSCRIPT_OK);
         check(emit(11u, TUI_STREAM_END, {}) == TUI_TRANSCRIPT_OK);
         using Status = flex::tui_backend::TranscriptWindow::Status;
+        trace("before-first-layout");
         check(window.show_tail(transcript) == Status::Updated);
+        trace("after-first-layout");
         auto* old_host = window.visible_host(11u);
         check(old_host != nullptr);
         if (!old_host) {
@@ -2061,8 +2068,10 @@ spec("FlexUI MarkdownWidget through Tango async transport and cell renderer") {
               TUI_TRANSCRIPT_OK);
         check(emit(12u, TUI_STREAM_END, {}) == TUI_TRANSCRIPT_OK);
         check(tui_transcript_count(transcript) == 2u);
+        trace("before-desired-rejection");
         staging.fail_next = true;
         check(window.show_tail(transcript) == Status::ResourceExhausted);
+        trace("after-desired-rejection");
         check(staging.failure_count == 1u);
         check(window.visible_host(11u) == old_host);
         check(window.visible_host(12u) == nullptr);
@@ -2077,11 +2086,13 @@ spec("FlexUI MarkdownWidget through Tango async transport and cell renderer") {
         // A second independent rejection happens during anchor-based
         // rewindowing; both failures return an explicit status, not an
         // uncaught exception or a half-recycled UiHandle.
+        trace("before-anchor-rejection");
         staging.fail_next = true;
         check(window.show_preserving_anchor(
                   transcript, {12u, 0.0f, false}) ==
               Status::ResourceExhausted);
         check(staging.failure_count == 2u);
+        trace("after-anchor-rejection");
         check(window.visible_host(11u) == old_host);
         check(box.resolve_handle(old_handle) == old_host);
         check(index && !index->lookup(12u));
@@ -2090,8 +2101,10 @@ spec("FlexUI MarkdownWidget through Tango async transport and cell renderer") {
         // desired source copies have succeeded: fail while reserving the
         // bounded Slot* plan. It must still preserve the Box/UiHandle and
         // not even change the admitted height-index or Spacer state.
+        trace("before-slot-plan-rejection");
         staging.successful_allocations_before_failure = 1;
         check(window.show_tail(transcript) == Status::ResourceExhausted);
+        trace("after-slot-plan-rejection");
         check(staging.failure_count == 3u);
         check(window.first_visible_message_id() == old_first);
         check(window.visible_host(11u) == old_host);
@@ -2104,7 +2117,9 @@ spec("FlexUI MarkdownWidget through Tango async transport and cell renderer") {
         check(box.cached_style_element_count() == styles);
 
         // Release the allocator fault: same exact C11 source now projects.
+        trace("before-recovery");
         check(window.show_tail(transcript) == Status::Updated);
+        trace("after-recovery");
         check(window.visible_host(11u) == nullptr);
         check(window.visible_host(12u) == old_host);
         check(box.resolve_handle(old_handle) == nullptr);
@@ -2112,7 +2127,9 @@ spec("FlexUI MarkdownWidget through Tango async transport and cell renderer") {
         check(viewport->child_count() == 3u);
         check(box.owned_element_count() <= owned + 48u);
         check(box.cached_style_element_count() <= styles + 48u);
+        trace("before-destroy");
         check(tui_transcript_destroy(transcript) == TUI_TRANSCRIPT_OK);
+        trace("after-destroy");
     }
 
     it("rebinds distinct retained message IDs even when GFM source is byte-identical") {
