@@ -1347,6 +1347,22 @@ spec("FlexUI MarkdownWidget through Tango async transport and cell renderer") {
         check(height11 > 0.0f && height12 > 0.0f);
         check(heights.record_height(11u, height11));
         check(heights.record_height(12u, height12));
+        const auto extents = heights.window_extent(11u, 2u);
+        check(extents.has_value());
+        if (extents) {
+            check(!extents->leading_exact && extents->visible_exact &&
+                  !extents->trailing_exact);
+            check(std::fabs(extents->leading - 24.0) < 0.01);
+            check(std::fabs(extents->visible -
+                            static_cast<double>(height11 + height12)) < 0.01);
+            check(std::fabs(extents->trailing - 24.0) < 0.01);
+            check(std::fabs(extents->total -
+                            (extents->leading + extents->visible +
+                             extents->trailing)) < 0.01);
+        }
+        check(!heights.window_extent(9u, 2u).has_value());
+        check(!heights.window_extent(13u, 2u).has_value());
+        check(!heights.window_extent(11u, 0u).has_value());
         const auto height_info12 = heights.lookup(12u);
         check(height_info12 && height_info12->measured);
         const auto before12 = heights.height_before(12u);
@@ -1368,6 +1384,12 @@ spec("FlexUI MarkdownWidget through Tango async transport and cell renderer") {
         check(heights.sync(transcript, width) == Index::Status::Updated);
         check(heights.lookup(11u)->measured);
         check(!heights.lookup(12u)->measured);
+        const auto after_delta = heights.window_extent(11u, 2u);
+        check(after_delta && !after_delta->visible_exact);
+        if (after_delta) {
+            check(std::fabs(after_delta->visible -
+                            (height11 + 24.0)) < 0.01);
+        }
         check(window.show(transcript, 1u) ==
               flex::tui_backend::TranscriptWindow::Status::Updated);
         box.update();
@@ -1419,6 +1441,9 @@ spec("FlexUI MarkdownWidget through Tango async transport and cell renderer") {
         check(heights.lookup(14u).has_value());
         check(!heights.height_before(10u));
         check(heights.height_before(11u).has_value());
+        check(!heights.window_extent(10u, 2u));
+        const auto evicted_plan = heights.window_extent(11u, 2u);
+        check(evicted_plan && std::fabs(evicted_plan->leading) < 0.01);
         check(window.show_tail(transcript) ==
               flex::tui_backend::TranscriptWindow::Status::Updated);
         check(!live_index->lookup(10u));
