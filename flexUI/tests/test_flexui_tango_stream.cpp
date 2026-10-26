@@ -2145,6 +2145,7 @@ spec("FlexUI MarkdownWidget through Tango async transport and cell renderer") {
         wheel_us.reserve(kWheelTurns);
         bool wheel_ok = qualified;
         std::size_t peak_wheel_elements = box.owned_element_count();
+        const auto fast_paths_before = window.in_message_scroll_fast_paths();
         const auto wheel_start = std::chrono::steady_clock::now();
         for (std::size_t turn = 0u; turn < kWheelTurns && wheel_ok; ++turn) {
             const bool backward = (turn & 1u) != 0u;
@@ -2175,6 +2176,11 @@ spec("FlexUI MarkdownWidget through Tango async transport and cell renderer") {
                 std::chrono::steady_clock::now() - wheel_start).count();
         check(wheel_ok);
         check(wheel_us.size() == kWheelTurns);
+        // All requests remain inside the same already measured Box host.
+        // They must take the fast path rather than reconstructing a second
+        // native snapshot and Markdown projection in every owner turn.
+        check(window.in_message_scroll_fast_paths() -
+              fast_paths_before == kWheelTurns);
         if (!wheel_us.empty()) {
             std::sort(wheel_us.begin(), wheel_us.end());
             const auto p50 = wheel_us[wheel_us.size() / 2u];
@@ -2183,11 +2189,12 @@ spec("FlexUI MarkdownWidget through Tango async transport and cell renderer") {
             std::printf(
                 "TUI_VIRTUAL_WHEEL turns=%zu elapsed_ms=%lld "
                 "p50_scroll_us=%lld p95_scroll_us=%lld "
-                "peak_elements=%zu visible_hosts=%zu\n",
+                "peak_elements=%zu visible_hosts=%zu fast_path_hits=%zu\n",
                 wheel_us.size(), static_cast<long long>(wheel_ms),
                 static_cast<long long>(p50),
                 static_cast<long long>(p95), peak_wheel_elements,
-                window.visible_count());
+                window.visible_count(),
+                window.in_message_scroll_fast_paths() - fast_paths_before);
             // Wide growth envelope, not a product frame-time SLA:
             // ASan, LSan, CI architecture and host load differ.
             check(wheel_ms <= 30000);
