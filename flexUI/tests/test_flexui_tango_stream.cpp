@@ -1972,7 +1972,12 @@ spec("FlexUI MarkdownWidget through Tango async transport and cell renderer") {
                         "failures=%zu\n",
                         bytes, alignment, failure_count);
                     std::fflush(stderr);
-                    throw std::bad_alloc();
+                    // The standard null resource is specified to throw
+                    // bad_alloc for every request. Forward only the
+                    // injected fault to that real library allocator;
+                    // do not return nullptr (which violates pmr contract).
+                    return std::pmr::null_memory_resource()->allocate(
+                        bytes, alignment);
                 }
                 if (successful_allocations_before_failure > 0)
                     --successful_allocations_before_failure;
@@ -2073,6 +2078,19 @@ spec("FlexUI MarkdownWidget through Tango async transport and cell renderer") {
               TUI_TRANSCRIPT_OK);
         check(emit(12u, TUI_STREAM_END, {}) == TUI_TRANSCRIPT_OK);
         check(tui_transcript_count(transcript) == 2u);
+        // Verify that the current MSVC/C++17 test binary has working
+        // ordinary exception propagation before exercising a virtual
+        // pmr allocator callback through std::pmr::vector.
+        trace("before-direct-bad-alloc");
+        bool direct_caught = false;
+        try {
+            throw std::bad_alloc();
+        } catch (const std::bad_alloc&) {
+            direct_caught = true;
+        }
+        check(direct_caught);
+        trace("after-direct-bad-alloc");
+
         trace("before-desired-rejection");
         staging.fail_next = true;
         Status desired_rejection = Status::Invalid;
