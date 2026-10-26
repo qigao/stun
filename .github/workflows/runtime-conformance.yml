@@ -484,6 +484,9 @@ jobs:
             build/xml-runtime/Testing/Temporary/LastTest.log
             build/xml-runtime/results.xml
             build/xml-runtime/compile_commands.json
+            build/xml-runtime-lsan/Testing/Temporary/LastTest.log
+            build/xml-runtime-lsan/results.xml
+            build/xml-runtime-lsan/lsan-dependencies.txt
             build/unicode/Testing/Temporary/LastTest.log
             build/mermaid-parsers/Testing/Temporary/LastTest.log
             build/mermaid-parsers/results.xml
