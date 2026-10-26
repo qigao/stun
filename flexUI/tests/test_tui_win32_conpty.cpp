@@ -568,7 +568,8 @@ public:
     }
     bool setup(const char* executable, bool probe = false,
                bool frame_diagnostic = true,
-               bool virtual_spacers = false) {
+               bool virtual_spacers = false,
+               bool legacy_message_scroll = false) {
         phase_ = "CreatePseudoConsole/child";
         HANDLE conpty_in = nullptr, conpty_out = nullptr;
         SECURITY_ATTRIBUTES attrs{sizeof(attrs), nullptr, TRUE};
@@ -635,6 +636,8 @@ public:
             }
             if (virtual_spacers)
                 command += L" --experimental-virtual-spacers";
+            if (legacy_message_scroll)
+                command += L" --legacy-message-scroll";
             std::vector<wchar_t> cmd(command.begin(), command.end());
             cmd.push_back(L'\0');
             STARTUPINFOEXW startup{};
@@ -697,9 +700,10 @@ public:
         return GetExitCodeProcess(process_.hProcess, &code) && code == 0;
     }
     bool run(const char *executable, bool frame_diagnostic = true,
-             bool virtual_spacers = false) {
+             bool virtual_spacers = false,
+             bool legacy_message_scroll = false) {
         if (!setup(executable, false, frame_diagnostic,
-                   virtual_spacers)) return false;
+                   virtual_spacers, legacy_message_scroll)) return false;
         if (!await("real 80x24 ConPTY terminal frame", 12000,
             [](const Screen &s) {return s.entered_alt() && s.header() &&
                                         s.vt_resize_commands() == 0u &&
@@ -889,21 +893,26 @@ int main(int argc, char** argv) {
         std::puts("Independent ConPTY host transport passed");
         return 0;
     }
-    // The plain test runs the exact ordinary demo invocation, with no
-    // diagnostic file writes that could mask owner/ConPTY scheduling bugs.
-    // The separate default mode retains bounded owner-cell evidence for
-    // diagnosing a failure. Both enforce the same real host resize and
-    // onscreen header/footer restoration predicates.
+    // The uninstrumented plain test now exercises DEFAULT virtual
+    // scrolling (no CLI mode flag) under a real ConPTY. A separate legacy
+    // flag preserves the previous message-step behavior for regressions.
+    // Both enforce the same host resize and physical display predicates.
     const bool plain = argc == 3 &&
         std::strcmp(argv[1], "--plain") == 0;
     const bool virtual_spacers = argc == 3 &&
         std::strcmp(argv[1], "--virtual-spacers") == 0;
-    if (argc != 2 && !plain && !virtual_spacers) return 2;
+    const bool legacy_message_scroll = argc == 3 &&
+        std::strcmp(argv[1], "--legacy-message-scroll") == 0;
+    if (argc != 2 && !plain && !virtual_spacers &&
+        !legacy_message_scroll) return 2;
     ConptyAcceptance harness;
-    // Virtual mode has its own real host-driven 52x16 test; keep it free
-    // of extra synchronous owner-frame writes just like plain ConPTY.
-    if (!harness.run(argv[plain || virtual_spacers ? 2 : 1],
-                     !plain && !virtual_spacers, virtual_spacers)) {
+    // Default and compatibility virtual paths exercise real host-driven
+    // 52x16 resize. Legacy mode is an independent explicit opt-out check;
+    // all uninstrumented paths avoid owner-side frame reporting.
+    if (!harness.run(argv[plain || virtual_spacers ||
+                           legacy_message_scroll ? 2 : 1],
+                     !plain && !virtual_spacers && !legacy_message_scroll,
+                     virtual_spacers, legacy_message_scroll)) {
         std::fprintf(stderr, "Win32 ConPTY resize acceptance failed at '%s', "
             "%s, error=%lu\n",
             harness.last_phase().c_str(), harness.diagnostic().c_str(),
