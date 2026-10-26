@@ -751,6 +751,38 @@ int headless_smoke(bool experimental_virtual_spacers = false) {
         tui_transcript_count(d.transcript) == kRetained &&
         d.accepted > 40u && d.rejected == 0u;
 
+    // In the optional mode, REAL UI-owner Older commands must move through
+    // Box scroll coordinates instead of jumping one message per input.
+    // Cross several estimated offscreen rows into a newly projected host;
+    // the fixed slots remain bounded and only End resumes tail following.
+    bool coordinate_scrolling = true;
+    if (experimental_virtual_spacers && d.window && d.viewport) {
+        const auto original_first = d.window->first_visible_message_id();
+        const float original_y = d.viewport->scroll_y();
+        (void)on_key(Older, &d);
+        on_view(&d, tui_terminal_buffer(term));
+        coordinate_scrolling = d.valid && !d.following &&
+            d.anchor != 0u &&
+            d.viewport->scroll_y() + 1.0f < original_y &&
+            d.window->virtual_spacers_enabled();
+        for (unsigned turn = 0u; turn < 24u && coordinate_scrolling; ++turn) {
+            (void)on_key(Older, &d);
+            on_view(&d, tui_terminal_buffer(term));
+            coordinate_scrolling = d.valid;
+        }
+        const auto scrolled_first = d.window->first_visible_message_id();
+        coordinate_scrolling = coordinate_scrolling && original_first &&
+            scrolled_first && scrolled_first < original_first &&
+            !d.following && d.window->visible_count() <= kVisible &&
+            d.viewport->child_count() <= kVisible + 2u;
+        (void)on_key(Tail, &d);
+        on_view(&d, tui_terminal_buffer(term));
+        coordinate_scrolling = coordinate_scrolling && d.following &&
+            d.window->visible_host(22u) != nullptr &&
+            std::abs(d.viewport->max_scroll_y() -
+                     d.viewport->scroll_y()) <= 2.0f;
+    }
+
     // Home must show the *start* of the oldest retained message even if the
     // previously visible window was at the end of the document.
     (void)on_key(Oldest, &d);
@@ -855,7 +887,7 @@ int headless_smoke(bool experimental_virtual_spacers = false) {
     term->initialized = false; // synthetic output never changed OS console
     shutdown(d);
     if (!okay || !pending_oldest || !bound_oldest_after_begin ||
-        !at_tail || !bounded || !browsed || !did_cancel ||
+        !at_tail || !bounded || !coordinate_scrolling || !browsed || !did_cancel ||
         !anchored || !returned || !returned_oldest || !resized ||
         !local_anchor_preserved || !single_row_status || frames < 3u)
         return 4;
