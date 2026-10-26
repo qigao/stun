@@ -62,7 +62,6 @@ endforeach()
 # Avoid a chart-specific implementation or mock Box in qualification.
 add_subdirectory("${STUN_ROOT}/charts/ui" chart_ui)
 add_dependencies(stun_xml_runtime_qualification chart_ui_test)
-set_tests_properties(ChartUiTest PROPERTIES TIMEOUT 120)
 
 # The MarkdownWidget streaming consumer contract must run in the focused
 # headless production-runtime gate; parser conformance alone does not exercise
