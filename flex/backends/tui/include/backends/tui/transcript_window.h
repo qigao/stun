@@ -125,6 +125,38 @@ public:
     return leading_spacer_ != nullptr;
   }
 
+  // Private opt-in value lookup. Unknown offscreen source heights retain
+  // prefix_exact=false/message_measured=false: never claim a pixel-exact
+  // anchor until this message has been projected and measured by Box.
+  std::optional<TranscriptHeightIndex::LocatedOffset> virtual_location(
+      double scroll_y) const noexcept {
+    return heights_ && leading_spacer_
+        ? heights_->locate_offset(scroll_y) : std::nullopt;
+  }
+
+  // Called only on the existing UI Owner after a real scroll action reaches
+  // an estimated spacer. Select the bounded host window for that retained
+  // message and restore a local scroll position after actual Box layout.
+  // No new input loop, actor, parser or application-owned offscreen nodes.
+  Status show_at_scroll_offset(const tui_transcript_t* transcript,
+                               double scroll_y) {
+    if (!transcript || !heights_ || !leading_spacer_ ||
+        !std::isfinite(scroll_y) || scroll_y < 0.0)
+      return Status::Invalid;
+    const auto status = heights_->sync(
+        transcript, viewport_.width(), layout_revision_);
+    if (status != TranscriptHeightIndex::Status::Updated &&
+        status != TranscriptHeightIndex::Status::Unchanged)
+      return Status::QueryRejected;
+    const auto located = heights_->locate_offset(scroll_y);
+    if (!located || !std::isfinite(located->local_y) ||
+        located->local_y > 10000000.0)
+      return Status::QueryRejected;
+    return show_preserving_anchor(
+        transcript, {located->message_id,
+                     static_cast<float>(located->local_y), false});
+  }
+
   float leading_spacer_height() const noexcept {
     return leading_spacer_ ? leading_spacer_->height() : 0.0f;
   }

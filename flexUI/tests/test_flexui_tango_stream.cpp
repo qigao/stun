@@ -1480,6 +1480,20 @@ spec("FlexUI MarkdownWidget through Tango async transport and cell renderer") {
               box.owned_element_count() <= initial_owned + 40u);
         check(!live_index->lookup(10u));
         check(live_index->lookup(14u)->measured);
+        const auto scroll_origin = window.virtual_location(0.0);
+        check(scroll_origin && scroll_origin->message_id == 11u &&
+              scroll_origin->prefix_exact);
+        check(!window.virtual_location(-1.0).has_value());
+        const auto scrolled = window.show_at_scroll_offset(transcript, 0.0);
+        check(scrolled ==
+                  flex::tui_backend::TranscriptWindow::Status::Updated ||
+              scrolled ==
+                  flex::tui_backend::TranscriptWindow::Status::Unchanged);
+        check(window.visible_host(11u) != nullptr);
+        check(window.visible_host(14u) == nullptr);
+        check(window.leading_spacer_height() < 1.0f);
+        check(viewport->child_count() == 4u);
+        check(std::fabs(viewport->scroll_y()) < 1.0f);
         // Offscreen retained ID 11 keeps a valid measured sample when its
         // generation, source revision and layout epoch have not changed.
         check(live_index->lookup(11u)->measured);
