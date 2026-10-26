@@ -21,6 +21,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <limits>
 #include <memory>
 #include <cstdlib>
@@ -493,6 +494,67 @@ private:
     return true;
   }
 
+  // No source or message-identity rebind is required. Preserve the same
+  // width/revision-sensitive height reconciliation, spacer geometry and
+  // follow/anchor policy without building temporary source/slot arrays.
+  // Native registry bytes are only inspected on this UI Owner turn.
+  Status refresh_unchanged_projection(const tui_transcript_t* transcript,
+                                      std::size_t count,
+                                      ScrollPolicy policy,
+                                      const TranscriptScrollAnchor* anchor) {
+    bool geometry_changed = false;
+    if (heights_) {
+      const auto result = heights_->sync(
+          transcript, viewport_.width(), layout_revision_);
+      if (result != TranscriptHeightIndex::Status::Updated &&
+          result != TranscriptHeightIndex::Status::Unchanged)
+        return Status::QueryRejected;
+      geometry_changed = result == TranscriptHeightIndex::Status::Updated;
+    }
+    bool spacers_changed = false;
+    if (!prepare_virtual_spacers(
+            count ? scratch_[0].message_id : 0u,
+            count, spacers_changed))
+      return Status::QueryRejected;
+      if (policy == ScrollPolicy::PreserveAnchor && anchor) {
+        // Reflow can change host geometry even when the Markdown source did
+        // not change (e.g. resize or CSS width change).
+        box_.update();
+        record_visible_heights();
+        const bool moved = restore_anchor(*anchor);
+        return moved || geometry_changed || spacers_changed
+            ? Status::Updated : Status::Unchanged;
+      }
+      if (policy == ScrollPolicy::FollowTail) {
+        // Offscreen retained history may change spacer geometry without
+        // changing a single visible Markdown byte. Reflow must precede
+        // reading max_scroll_y(), or a growing leading spacer strands the
+        // reader above the actual tail until another producer event.
+        if (geometry_changed || spacers_changed) {
+          box_.update();
+          record_visible_heights();
+          (void)viewport_.set_scroll_offset(
+              viewport_.scroll_x(), viewport_.max_scroll_y());
+          return Status::Updated;
+        }
+        if (viewport_.set_scroll_offset(
+                viewport_.scroll_x(), viewport_.max_scroll_y())) {
+          box_.update();
+          record_visible_heights();
+          return Status::Updated;
+        }
+      }
+      // Native revision/width/style changes can invalidate cached numeric
+      // heights even with identical visible Markdown. Re-measure only after
+      // an actual owner Box update; never stamp old layout as a new sample.
+      if (geometry_changed || spacers_changed) {
+        box_.update();
+        record_visible_heights();
+        return Status::Updated;
+      }
+      return Status::Unchanged;
+  }
+
   Status show_with_policy(const tui_transcript_t* transcript,
                           std::size_t first, ScrollPolicy policy,
                           const TranscriptScrollAnchor* anchor = nullptr) {
@@ -503,6 +565,35 @@ private:
                               scratch_.data(), scratch_.size(), &count) !=
         TUI_TRANSCRIPT_OK) {
       return Status::QueryRejected;
+    }
+
+    // Common wheel/resize case: same retained IDs in the same host order,
+    // and identical native GFM bytes. Compare borrowed C11 source only
+    // within this UI Owner turn; never store that pointer in a widget.
+    // Source generation/state may still have changed, so run the existing
+    // height-index/spacer reconciliation and scroll policy below.
+    // This skips BOTH malloc-backed staging allocations and source copies.
+    if (count == visible_.size()) {
+      bool same_source = true;
+      for (std::size_t i = 0u; i < count; ++i) {
+        if (visible_[i]->message_id != scratch_[i].message_id) {
+          same_source = false;
+          break;
+        }
+        std::size_t bytes = 0u;
+        const char* source = tui_transcript_text(
+            transcript, scratch_[i].message_id, &bytes);
+        if (!source) return Status::QueryRejected;
+        const auto& cached = visible_[i]->markdown->markdown();
+        if (cached.size() != bytes ||
+            (bytes && std::memcmp(cached.data(), source, bytes) != 0)) {
+          same_source = false;
+          break;
+        }
+      }
+      if (same_source)
+        return refresh_unchanged_projection(
+            transcript, count, policy, anchor);
     }
 
     // Preflight native source copies and bounded slot identities before
@@ -616,63 +707,24 @@ private:
       }
     }
 
+    if (!different)
+      return refresh_unchanged_projection(transcript, count, policy, anchor);
+
     // Reject invalid or over-capacity geometry snapshots before modifying
     // a live widget ID or publishing a new Box topology. Unlike a full DOM,
     // the optional cache stores at most native retainer capacity records.
-    bool geometry_changed = false;
     if (heights_) {
       const auto result = heights_->sync(
           transcript, viewport_.width(), layout_revision_);
       if (result != TranscriptHeightIndex::Status::Updated &&
           result != TranscriptHeightIndex::Status::Unchanged)
         return Status::QueryRejected;
-      geometry_changed = result == TranscriptHeightIndex::Status::Updated;
     }
 
     bool spacers_changed = false;
     if (!prepare_virtual_spacers(
             count ? desired.items[0].id : 0u, count, spacers_changed))
       return Status::QueryRejected;
-    if (!different) {
-      if (policy == ScrollPolicy::PreserveAnchor && anchor) {
-        // Reflow can change host geometry even when the Markdown source did
-        // not change (e.g. resize or CSS width change).
-        box_.update();
-        record_visible_heights();
-        const bool moved = restore_anchor(*anchor);
-        return moved || geometry_changed || spacers_changed
-            ? Status::Updated : Status::Unchanged;
-      }
-      if (policy == ScrollPolicy::FollowTail) {
-        // Offscreen retained history may change spacer geometry without
-        // changing a single visible Markdown byte. Reflow must precede
-        // reading max_scroll_y(), or a growing leading spacer strands the
-        // reader above the actual tail until another producer event.
-        if (geometry_changed || spacers_changed) {
-          box_.update();
-          record_visible_heights();
-          (void)viewport_.set_scroll_offset(
-              viewport_.scroll_x(), viewport_.max_scroll_y());
-          return Status::Updated;
-        }
-        if (viewport_.set_scroll_offset(
-                viewport_.scroll_x(), viewport_.max_scroll_y())) {
-          box_.update();
-          record_visible_heights();
-          return Status::Updated;
-        }
-      }
-      // Native revision/width/style changes can invalidate cached numeric
-      // heights even with identical visible Markdown. Re-measure only after
-      // an actual owner Box update; never stamp old layout as a new sample.
-      if (geometry_changed || spacers_changed) {
-        box_.update();
-        record_visible_heights();
-        return Status::Updated;
-      }
-      return Status::Unchanged;
-    }
-
     const auto follow = flexUI::StreamScrollFollow::before_content_update(
         viewport_);
 
