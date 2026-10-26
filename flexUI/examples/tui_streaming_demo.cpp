@@ -475,11 +475,19 @@ void on_view(const void* ptr, tui_buffer_t* back) {
         // adapter maps its absolute target through bounded retained
         // heights, materializes the matching window and reanchors after
         // Box measurement. No new loop, queue, parser or cross-thread UI.
+        const double requested_scroll_delta =
+            static_cast<double>(d.pending_virtual_scroll_steps) *
+                (3.0 * kCellHeight);
+        const bool rebase_history_scroll = has_virtual_scroll &&
+            !d.pending_virtual_started_following &&
+            prior_scroll.message_id != 0u && !prior_scroll.follow_tail;
         const auto status = has_virtual_scroll
-            ? d.window->scroll_by_offset(
-                d.transcript,
-                static_cast<double>(d.pending_virtual_scroll_steps) *
-                    (3.0 * kCellHeight), &mapped_scroll)
+            ? rebase_history_scroll
+                ? d.window->scroll_from_anchor(
+                    d.transcript, prior_scroll,
+                    requested_scroll_delta, &mapped_scroll)
+                : d.window->scroll_by_offset(
+                    d.transcript, requested_scroll_delta, &mapped_scroll)
             : d.following || d.anchor == 0u
                 ? d.window->show_tail(d.transcript)
                 : continuing_history
