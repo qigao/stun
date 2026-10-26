@@ -872,6 +872,29 @@ spec("FlexUI XML fragments stage local slots without a parallel UI tree") {
     check_equal(page->child_count(), 0U);
   }
 
+  it("rejects a missing required XML slot before owning any new nodes") {
+    const auto compiled = flexUI::compile_ui_xml(
+        "<ui name=\"Missing\"><div slot=\"frame\"><span slot=\"title\" /></div></ui>");
+    check(static_cast<bool>(compiled));
+    flexUI::Box box(nullptr);
+    auto *page = box.create("main", "existing");
+    box.set_root(page);
+    const auto before = box.owned_element_count();
+
+    flexUI::UiMountOptions opts;
+    opts.mode = flexUI::UiMountMode::Child;
+    opts.parent = page;
+    opts.required_slots = {"frame", "title", "plot"};
+    const auto failed = flexUI::UiDocumentInstantiator::instantiate(
+        box, *compiled.program, flexUI::WidgetRegistry::builtins(), opts);
+    check_false(static_cast<bool>(failed));
+    check(failed.error.code == UiDocumentErrorCode::MissingSlot);
+    check_equal(box.root(), page);
+    check_equal(page->child_count(), 0U);
+    check_equal(box.owned_element_count(), before);
+    check_null(box.get_by_id("plot"));
+  }
+
   it("rejects invalid parent, incomplete ID policy and controller exports") {
     auto registry = flexUI::WidgetRegistry::builtins();
     const auto ui = flexUI::compile_ui_xml(
