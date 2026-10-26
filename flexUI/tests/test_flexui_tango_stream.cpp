@@ -1855,6 +1855,28 @@ spec("FlexUI MarkdownWidget through Tango async transport and cell renderer") {
             check(viewport->child_count() == 4u);
             check(window.slot_capacity() == 2u);
 
+            // Resize and a user wheel step in the SAME owner turn after
+            // two real native evictions. Update Box viewport dimensions
+            // first (as on_view does), then map a layout scroll delta.
+            // No old ID may reappear, and the resolved anchor must refer
+            // to an actual retained/projection host, not an estimated
+            // coordinate masquerading as an exact character position.
+            box.set_viewport(152.0f, 176.0f);
+            box.update();
+            flex::tui_backend::TranscriptScrollAnchor wheel_anchor{};
+            const auto next_coordinate = window.scroll_by_offset(
+                transcript, 16.0, &wheel_anchor);
+            check(next_coordinate == Status::Updated ||
+                  next_coordinate == Status::Unchanged);
+            check(!wheel_anchor.follow_tail &&
+                  wheel_anchor.message_id >= 3u &&
+                  wheel_anchor.message_id <= 5u);
+            check(window.visible_host(wheel_anchor.message_id) != nullptr);
+            check(!heights->lookup(1u) && !heights->lookup(2u));
+            check(std::fabs(heights->width() - viewport->width()) < 1.0f);
+            check(viewport->child_count() == 4u);
+            check(window.visible_count() <= 2u);
+
             // Only an explicit End/tail policy may now follow the newest
             // message. The earlier evicted anchor cannot cause that jump.
             check(window.show_tail(transcript) == Status::Updated);
