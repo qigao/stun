@@ -187,7 +187,7 @@ def started_as_tty():
 
 
 def run_test(executable, early_home=False, home_burst=False,
-             virtual_spacers=False):
+             virtual_spacers=False, legacy_message_scroll=False):
     master, slave = started_as_tty()
     original_termios = termios.tcgetattr(slave)
     output = bytearray()
@@ -259,7 +259,10 @@ def run_test(executable, early_home=False, home_burst=False,
         cell_mode, cell_row = int(cell_match[1]), int(cell_match[2])
         require(cell_mode == (0 if following else 1) and cell_row >= 0,
                 "owner cell-buffer mode differs from navigation: %r" % last)
-        if virtual_spacers:
+        # Default demo mode now owns two virtual Spacer nodes. Validate
+        # their real owner/Box geometry even in ordinary-rate PTY sessions,
+        # not only in the rapid explicit virtual-history stress case.
+        if not legacy_message_scroll:
             geometry = [line for line in lines
                         if line.startswith(b"virtual_geometry epoch=")]
             require(geometry, "no virtual geometry owner-frame record")
@@ -319,12 +322,13 @@ def run_test(executable, early_home=False, home_burst=False,
         if early_home:
             environment["STUN_TUI_PTY_BEGIN_GATE_FD"] = str(gate_read)
         argv = [executable]
+        if legacy_message_scroll:
+            argv.append("--legacy-message-scroll")
         if virtual_spacers:
-            # Preserve all 48 normal C11 BEGIN/CHUNK/END transitions, but
-            # use the explicit test-only rapid worker for this additional
-            # settled-history coordinate gate. The ordinary PTY sessions
-            # still exercise the unchanged 28ms concurrent producer. Never
-            # extend the 5s physical Home/End visible-state deadlines.
+            # The default demo already uses virtual scrolling. Retain the
+            # explicit compatibility alias as an additional CLI admission
+            # check and add the CI-only rapid worker for deep wheel probes.
+            # Normal sessions still use the genuine 28ms concurrent worker.
             argv.extend(["--experimental-virtual-spacers",
                          "--ci-rapid-producer"])
         child = subprocess.Popen(
@@ -443,12 +447,13 @@ def run_test(executable, early_home=False, home_burst=False,
         until("SGR wheel-up changes visible scroll state",
               lambda: screen.mode() == "scrollback"
               and screen.status() != prior_status, 8.0)
-        if virtual_spacers:
-            # This is not a headless index-only acceptance: the wheel
-            # entered the real UI Owner and Box now contains bounded
-            # message hosts plus two physical Spacer elements.
+        if not legacy_message_scroll:
+            # Every default ordinary PTY session now verifies that a real
+            # wheel enters the virtual Box geometry path, not only changes
+            # the footer text.
             require_last_owner_frame(2, False)
 
+        if virtual_spacers:
             # This extra coordinate-to-window test uses the explicitly
             # CI-only rapid producer. Wait for ALL 48 settled messages so
             # the tail-first and wheel-first IDs belong to the SAME stable
@@ -544,9 +549,11 @@ def run_test(executable, early_home=False, home_burst=False,
                     "parent-observed termios mismatch after normal exit")
         print("native POSIX PTY chat passed: keyboard, SGR mouse, "
               "SIGWINCH 52x16 UI, termios restoration and terminal controls; "
-              "early_home=%d, home_burst=%d, virtual=%d, captured=%d bytes" %
+              "early_home=%d, home_burst=%d, default_virtual=%d, "
+              "rapid_virtual=%d, captured=%d bytes" %
               (int(early_home), int(home_burst),
-               int(virtual_spacers), len(output)))
+               int(not legacy_message_scroll), int(virtual_spacers),
+               len(output)))
     except Exception:
         print("PTY visible status: %r; retained=%d; mode=%r; "
               "geometry=%r; parser_state=%s" %
@@ -606,13 +613,18 @@ def main():
     parser.add_argument("--home-burst", action="store_true",
                         help="interleave strict real Home/End under active Markdown bursts")
     parser.add_argument("--virtual-spacers", action="store_true",
-                        help="run the ordinary PTY owner with opt-in bounded FlexUI spacers")
+                        help="run deep coordinate-to-window stress with a rapid producer")
+    parser.add_argument("--legacy-message-scroll", action="store_true",
+                        help="verify the explicit opt-out path under a real PTY")
     args = parser.parse_args()
     require(os.path.isfile(args.executable),
             "missing real streaming demo executable")
+    require(not (args.virtual_spacers and args.legacy_message_scroll),
+            "virtual stress and legacy opt-out are mutually exclusive")
     run_test(os.path.abspath(args.executable), early_home=args.early_home,
              home_burst=args.home_burst,
-             virtual_spacers=args.virtual_spacers)
+             virtual_spacers=args.virtual_spacers,
+             legacy_message_scroll=args.legacy_message_scroll)
 
 
 if __name__ == "__main__":

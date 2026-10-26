@@ -85,13 +85,14 @@ struct Demo {
     std::size_t rejected = 0u;
     bool following = true;
     bool valid = true;
-    // Explicit experimental terminal-app opt-in only. The ordinary chat
-    // remains a fixed-host window; native Tango event/owner APIs do not
-    // acquire any virtual-layout state.
-    bool experimental_virtual_spacers = false;
-    // UI-owner-only accumulated wheel/arrow intent for the optional
-    // pixel-coordinate window map. The ordinary demo still browses by
-    // message. No worker mutates this value or any Box-owned Element.
+    // Default for this Streaming demo: bounded virtual height indexing,
+    // five recyclable Markdown hosts and two measured/estimated Spacers.
+    // --legacy-message-scroll keeps the old one-message-at-a-time mode.
+    // Native Tango C11 event/owner APIs remain presentation-agnostic.
+    bool virtual_scrolling_enabled = true;
+    // UI-owner-only accumulated wheel/arrow intent for the default
+    // pixel-coordinate window map. Legacy mode browses by message.
+    // No worker mutates this value or any Box-owned Element.
     int pending_virtual_scroll_steps = 0;
     bool pending_virtual_scroll = false;
     bool pending_virtual_started_following = false;
@@ -308,9 +309,9 @@ bool on_key(int command, void* ptr) {
     }
     if (!count) return true;
     if (command != Older && command != Newer) return true;
-    if (d.experimental_virtual_spacers) {
-        // Real terminal wheel/arrow events become layout-coordinate deltas
-        // only in opt-in mode; a non-scrollable viewport is a legal no-op.
+    if (d.virtual_scrolling_enabled) {
+        // Default real terminal wheel/arrow events use layout-coordinate
+        // deltas. A non-scrollable viewport remains a legal no-op.
         // Accumulate multiple input events within one bounded Owner turn.
         if (!d.viewport || !d.viewport->can_scroll_y() ||
             d.viewport->max_scroll_y() <= 0.0f)
@@ -454,7 +455,7 @@ void on_view(const void* ptr, tui_buffer_t* back) {
             const bool resized = d.box->viewport_width() != width ||
                                  d.box->viewport_height() != height;
             d.box->set_viewport(width, height);
-            if (d.experimental_virtual_spacers &&
+            if (d.virtual_scrolling_enabled &&
                 (resized || d.viewport->width() <= 0.0f)) {
                 // A real 80x24 terminal matches the demo's provisional
                 // 640x384 viewport size on the FIRST frame. Equal sizes do
@@ -465,7 +466,7 @@ void on_view(const void* ptr, tui_buffer_t* back) {
                 d.box->update();
             }
         }
-        const bool has_virtual_scroll = d.experimental_virtual_spacers &&
+        const bool has_virtual_scroll = d.virtual_scrolling_enabled &&
             d.pending_virtual_scroll;
         const bool continuing_history = !d.following && d.anchor != 0u &&
             d.projected_anchor == d.anchor &&
@@ -494,7 +495,7 @@ void on_view(const void* ptr, tui_buffer_t* back) {
                     ? d.window->show_preserving_anchor(d.transcript, prior_scroll)
                     : d.window->show_from_id(d.transcript, d.anchor);
         using WindowStatus = flex::tui_backend::TranscriptWindow::Status;
-        // Allocation/resource refusal from the optional presentation stage
+        // Allocation/resource refusal from the bounded presentation stage
         // is terminal for this demo's current frame: do not continue
         // painting a stale Box after native C11 has admitted newer data.
         // The ordinary application still uses the same UI Owner and queue.
@@ -585,7 +586,7 @@ void on_view(const void* ptr, tui_buffer_t* back) {
                             "trailing=%.2f first=%llu\n",
                             static_cast<unsigned long long>(
                                 d.pty_command_epoch),
-                            d.experimental_virtual_spacers ? 1 : 0,
+                            d.virtual_scrolling_enabled ? 1 : 0,
                             d.window->visible_count(),
                             d.viewport->child_count(),
                             static_cast<double>(
@@ -653,7 +654,7 @@ bool initialize(Demo& d) {
     d.status = static_cast<flexUI::LabelWidget*>(footer->widget);
     d.window = std::make_unique<flex::tui_backend::TranscriptWindow>(
         *d.box, *viewport, kVisible);
-    if (d.experimental_virtual_spacers) {
+    if (d.virtual_scrolling_enabled) {
         // The application retainer remains authoritative and bounded to
         // kRetained. Only Box observes actual Markdown host heights. No
         // offscreen Element tree, C11 text pointer or UiHandle escapes.
@@ -745,9 +746,9 @@ void producer(Demo& d, std::uint64_t first_id,
 #if defined(STUN_TUI_DEMO_HEADLESS_TEST)
 bool fake_write(tui_terminal_t*, const char*, size_t) { return true; }
 
-int headless_smoke(bool experimental_virtual_spacers = false) {
+int headless_smoke(bool virtual_scrolling_enabled = true) {
     Demo d;
-    d.experimental_virtual_spacers = experimental_virtual_spacers;
+    d.virtual_scrolling_enabled = virtual_scrolling_enabled;
     if (!initialize(d)) { shutdown(d); return 2; }
     auto* term = tui_app_terminal(d.app);
     term->width = 80;
@@ -820,12 +821,12 @@ int headless_smoke(bool experimental_virtual_spacers = false) {
         tui_transcript_count(d.transcript) == kRetained &&
         d.accepted > 40u && d.rejected == 0u;
 
-    // In the optional mode, REAL UI-owner Older commands must move through
+    // In the default mode, REAL UI-owner Older commands must move through
     // Box scroll coordinates instead of jumping one message per input.
     // Cross several estimated offscreen rows into a newly projected host;
     // the fixed slots remain bounded and only End resumes tail following.
     bool coordinate_scrolling = true;
-    if (experimental_virtual_spacers && d.window && d.viewport) {
+    if (virtual_scrolling_enabled && d.window && d.viewport) {
         const auto original_first = d.window->first_visible_message_id();
         const float original_y = d.viewport->scroll_y();
         (void)on_key(Older, &d);
@@ -983,57 +984,81 @@ int headless_smoke(bool experimental_virtual_spacers = false) {
 
 int main(int argc, char** argv) {
     if (argc > 1 && std::strcmp(argv[1], "--help") == 0) {
-        std::puts("flexui_tui_streaming_demo [--headless-smoke | "
-                  "--experimental-virtual-spacers]\n"
-                  "q/Esc quit, c cancel, Up/Down or wheel browse, "
+        std::puts("flexui_tui_streaming_demo [--legacy-message-scroll]\n"
+                  "flexui_tui_streaming_demo --headless-smoke "
+                  "[--legacy-message-scroll]\n"
+                  "q/Esc quit, c cancel, Up/Down or wheel scroll, "
                   "Home oldest, End follow tail\n"
-                  "Experimental virtual spacers are opt-in, approximate for "
-                  "never-measured offscreen Markdown, and not the default.");
+                  "Virtual scrolling is ENABLED by default: a bounded "
+                  "height index, recyclable visible Markdown hosts and two "
+                  "Box Spacers. Unmeasured offscreen GFM heights remain "
+                  "estimates; --legacy-message-scroll opts out.\n"
+                  "The old --experimental-virtual-spacers flag is "
+                  "accepted as an alias for the new default.");
         return 0;
     }
     if (argc > 1 && std::strcmp(argv[1], "--headless-smoke") == 0) {
-        const bool virtual_smoke =
-            argc == 3 && std::strcmp(
-                argv[2], "--experimental-virtual-spacers") == 0;
-        if (argc != 2 && !virtual_smoke) return 2;
+        bool virtual_scrolling_enabled = true;
+        if (argc == 3) {
+            if (std::strcmp(argv[2], "--legacy-message-scroll") == 0)
+                virtual_scrolling_enabled = false;
+            else if (std::strcmp(argv[2],
+                                 "--experimental-virtual-spacers") != 0)
+                return 2;
+        } else if (argc != 2) {
+            return 2;
+        }
 #if defined(STUN_TUI_DEMO_HEADLESS_TEST)
-        return headless_smoke(virtual_smoke);
+        return headless_smoke(virtual_scrolling_enabled);
 #else
         std::fputs("headless smoke requires CI-only test build\n", stderr);
         return 2;
 #endif
     }
-    // Only the CI-built real POSIX PTY fixture may use a rapid scripted
-    // producer. It still publishes ALL 48 bounded messages via the same
-    // native mailbox and UI Owner. The ordinary physical demo and all
-    // default concurrency/real-terminal gates keep their 28ms chunk pace.
+
+    // Public example defaults to the *bounded* coordinate-window adapter.
+    // Explicit legacy selection remains available for rollout/repro tests.
+    // CI-only rapid production and frame trace are separate gated switches.
+    bool virtual_scrolling_enabled = true;
+    bool mode_selected = false;
     bool ci_rapid_virtual_producer = false;
-#if defined(STUN_TUI_DEMO_HEADLESS_TEST) && !defined(_WIN32)
-    ci_rapid_virtual_producer = argc == 3 &&
-        std::strcmp(argv[1], "--experimental-virtual-spacers") == 0 &&
-        std::strcmp(argv[2], "--ci-rapid-producer") == 0;
-#endif
-    // Keep the default real terminal path unchanged. CI may combine
-    // --frame-report with the opt-in, but unknown flags must fail closed.
-    const bool experimental_virtual_spacers = ci_rapid_virtual_producer ||
-        (argc == 2 &&
-         std::strcmp(argv[1], "--experimental-virtual-spacers") == 0) ||
-        (argc == 4 &&
-         std::strcmp(argv[1], "--frame-report") == 0 &&
-         std::strcmp(argv[3], "--experimental-virtual-spacers") == 0);
     bool frame_diagnostic = false;
-#if defined(STUN_TUI_DEMO_HEADLESS_TEST) && defined(_WIN32)
-    frame_diagnostic = (argc == 3 || argc == 4) &&
-        std::strcmp(argv[1], "--frame-report") == 0;
+    std::string frame_report_path;
+    for (int i = 1; i < argc; ++i) {
+        if (std::strcmp(argv[i], "--legacy-message-scroll") == 0 ||
+            std::strcmp(argv[i], "--experimental-virtual-spacers") == 0) {
+            if (mode_selected) return 2;
+            mode_selected = true;
+            virtual_scrolling_enabled =
+                std::strcmp(argv[i], "--legacy-message-scroll") != 0;
+        } else if (std::strcmp(argv[i], "--ci-rapid-producer") == 0) {
+#if defined(STUN_TUI_DEMO_HEADLESS_TEST) && !defined(_WIN32)
+            if (ci_rapid_virtual_producer) return 2;
+            ci_rapid_virtual_producer = true;
+#else
+            return 2;
 #endif
-    if (argc != 1 && !frame_diagnostic &&
-        !(argc == 2 && experimental_virtual_spacers) &&
-        !ci_rapid_virtual_producer) return 2;
-    if (argc == 4 && !experimental_virtual_spacers) return 2;
-    Demo d;
-    d.experimental_virtual_spacers = experimental_virtual_spacers;
+        } else if (std::strcmp(argv[i], "--frame-report") == 0) {
 #if defined(STUN_TUI_DEMO_HEADLESS_TEST) && defined(_WIN32)
-    if (frame_diagnostic) d.frame_report_path = argv[2];
+            if (frame_diagnostic || i + 1 >= argc || !argv[i + 1][0])
+                return 2;
+            frame_diagnostic = true;
+            frame_report_path = argv[++i];
+#else
+            return 2;
+#endif
+        } else {
+            return 2; // Unknown CLI switches fail closed.
+        }
+    }
+    if (ci_rapid_virtual_producer && !virtual_scrolling_enabled) return 2;
+    Demo d;
+    d.virtual_scrolling_enabled = virtual_scrolling_enabled;
+#if defined(STUN_TUI_DEMO_HEADLESS_TEST) && defined(_WIN32)
+    if (frame_diagnostic) d.frame_report_path = frame_report_path;
+#else
+    (void)frame_diagnostic;
+    (void)frame_report_path;
 #endif
     try {
         if (!initialize(d)) { shutdown(d); return 1; }
