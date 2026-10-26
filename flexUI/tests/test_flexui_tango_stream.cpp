@@ -1743,6 +1743,27 @@ spec("FlexUI MarkdownWidget through Tango async transport and cell renderer") {
         const auto resolved = window.virtual_location(8.0);
         check(resolved && resolved->message_id == 1u &&
               resolved->message_measured);
+        // Exercise the owner-facing relative scroll interface, not just a
+        // direct lookup. One step should remain within the measured GFM
+        // block, preserving its message ID; reversing it restores its
+        // message-local offset without rematerializing every history host.
+        flex::tui_backend::TranscriptScrollAnchor moved{};
+        const auto downward = window.scroll_by_offset(transcript, 16.0, &moved);
+        check(downward == Status::Updated || downward == Status::Unchanged);
+        check(moved.message_id == 1u && !moved.follow_tail);
+        check(std::fabs(viewport->scroll_y() -
+                        (host1->y() + 24.0f)) < 2.5f);
+        const auto upward = window.scroll_by_offset(transcript, -16.0, &moved);
+        check(upward == Status::Updated || upward == Status::Unchanged);
+        check(moved.message_id == 1u && !moved.follow_tail);
+        check(std::fabs(viewport->scroll_y() -
+                        (host1->y() + 8.0f)) < 2.5f);
+        const float before_invalid_delta = viewport->scroll_y();
+        check(window.scroll_by_offset(
+                  transcript, std::numeric_limits<double>::quiet_NaN()) ==
+              Status::Invalid);
+        check(std::fabs(viewport->scroll_y() - before_invalid_delta) < 0.01f);
+        check(viewport->child_count() == 4u);
         const auto anchor = window.capture_scroll_anchor();
         check(!anchor.follow_tail && anchor.message_id == 1u);
         check(std::fabs(anchor.within_message_y - 8.0f) < 2.5f);
