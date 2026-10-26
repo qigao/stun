@@ -2092,6 +2092,155 @@ spec("FlexUI MarkdownWidget through Tango async transport and cell renderer") {
         check(tui_transcript_destroy(transcript) == TUI_TRANSCRIPT_OK);
     }
 
+    it("keeps GFM scroll anchors bounded across 32 incremental reflows, cancels and resizes") {
+        // Exercise actual C11 source, MarkdownWidget, and Box over repeated
+        // UI Owner turns with GFM tables/code/CJK, source growth, cancellation
+        // and width changes. No offscreen native text or UI pointer escapes.
+        flexUI::Box box(nullptr);
+        box.set_viewport(320.0f, 176.0f);
+        box.load_css(
+            "#mixed-root {width:100%;height:100%;display:flex;"
+            "flex-direction:column;} "
+            "#mixed-window {width:75%;height:72px;overflow-y:scroll;"
+            "display:flex;flex-direction:column;} "
+            ".transcript-message {width:100%;flex-shrink:0;} "
+            ".tui-virtual-spacer {width:100%;flex-shrink:0;"
+            "height:var(--tui-virtual-height);}");
+        auto* root = box.create("div", "mixed-root");
+        auto* viewport = box.create("div", "mixed-window");
+        check(root && viewport);
+        if (!root || !viewport) return;
+        root->append(viewport);
+        box.set_root(root);
+        box.update();
+        flex::tui_backend::TranscriptWindow window(box, *viewport, 2u);
+        window.enable_height_tracking(4u, 24.0f);
+        window.enable_virtual_spacers();
+        const auto initial_nodes = box.owned_element_count();
+        auto* transcript = tui_transcript_create(4u, 4096u, 64u);
+        check(transcript != nullptr);
+        if (!transcript) return;
+        std::uint64_t sequence = 0u;
+        const auto emit = [&](std::uint64_t id, std::uint32_t type,
+                              std::string_view text) {
+            if (text.size() > 64u) return TUI_TRANSCRIPT_INVALID;
+            std::array<unsigned char,
+                       sizeof(tui_stream_packet_header_t) + 64u> packet{};
+            const tui_stream_packet_header_t header{id};
+            std::memcpy(packet.data(), &header, sizeof(header));
+            if (!text.empty())
+                std::memcpy(packet.data() + sizeof(header),
+                            text.data(), text.size());
+            const tui_async_event_t event{
+                type, 1u, ++sequence, sizeof(header) + text.size()
+            };
+            return tui_transcript_apply(
+                transcript, &event, packet.data(), nullptr);
+        };
+        const auto append = [&](std::uint64_t id, std::string_view text) {
+            for (std::size_t offset = 0u; offset < text.size();
+                 offset += 48u) {
+                if (emit(id, TUI_STREAM_CHUNK,
+                         text.substr(offset, 48u)) != TUI_TRANSCRIPT_OK)
+                    return false;
+            }
+            return true;
+        };
+        using Status = flex::tui_backend::TranscriptWindow::Status;
+        constexpr std::size_t kTurns = 32u;
+        const std::array<float, 4u> widths{{320.0f, 216.0f, 176.0f, 280.0f}};
+        bool accepted = true;
+        std::size_t peak_nodes = initial_nodes;
+        std::size_t cancellations = 0u;
+        for (std::uint64_t id = 1u; id <= kTurns && accepted; ++id) {
+            std::uint64_t evicted = 99u;
+            accepted = tui_transcript_open(transcript, id, &evicted) ==
+                TUI_TRANSCRIPT_OK &&
+                evicted == (id > 4u ? id - 4u : 0u) &&
+                emit(id, TUI_STREAM_BEGIN, {}) == TUI_TRANSCRIPT_OK;
+            if (!accepted) break;
+            const std::string first =
+                "| 名称 | 值 |\n| --- | --- |\n"
+                "| 中文 😀 | **GFM** |\n\n"
+                "```c\nint sample(void) {\n  return 42;\n}\n```\n\n";
+            accepted = append(id, first);
+            if (!accepted) break;
+            box.set_viewport(widths[static_cast<std::size_t>(id % 4u)],
+                             176.0f);
+            box.update();
+            const auto partial = window.show_tail(transcript);
+            accepted = partial == Status::Updated ||
+                       partial == Status::Unchanged;
+            if (!accepted) break;
+            // Another source revision increases actual height while the
+            // message retains its original permanent Markdown host.
+            auto* current = window.visible_host(id);
+            accepted = current &&
+                append(id, "More long text with wrapping and 中 😀.\n\n"
+                           "Another paragraph for viewport scroll.\n\n");
+            if (!accepted) break;
+            const bool cancelled = id % 6u == 0u;
+            accepted = emit(id, cancelled ? TUI_STREAM_CANCEL :
+                                           TUI_STREAM_END, {}) ==
+                       TUI_TRANSCRIPT_OK;
+            if (!accepted) break;
+            if (cancelled) {
+                ++cancellations;
+                accepted = emit(id, TUI_STREAM_CHUNK, "late") ==
+                           TUI_TRANSCRIPT_STALE;
+                if (!accepted) break;
+            }
+            const auto updated = window.show_tail(transcript);
+            accepted = (updated == Status::Updated ||
+                        updated == Status::Unchanged) &&
+                       window.visible_host(id) == current;
+            if (!accepted) break;
+            const std::uint64_t oldest = id > 4u ? id - 3u : 1u;
+            flex::tui_backend::TranscriptScrollAnchor mapped{};
+            const auto seek = window.scroll_from_anchor(
+                transcript, {oldest, 4.0f, false}, 8.0, &mapped);
+            accepted = (seek == Status::Updated ||
+                        seek == Status::Unchanged) &&
+                       mapped.message_id == oldest &&
+                       std::fabs(mapped.within_message_y - 12.0f) < 2.5f &&
+                       window.visible_host(oldest) != nullptr;
+            if (!accepted) break;
+            // Resize again, invalidating the measured prefix. Preserve the
+            // semantic anchor rather than reducing it to a fallback height.
+            box.set_viewport(widths[static_cast<std::size_t>((id + 1u) % 4u)],
+                             176.0f);
+            box.update();
+            const auto reflowed = window.scroll_from_anchor(
+                transcript, mapped, -4.0, &mapped);
+            accepted = (reflowed == Status::Updated ||
+                        reflowed == Status::Unchanged) &&
+                       mapped.message_id == oldest &&
+                       std::fabs(mapped.within_message_y - 8.0f) < 2.5f &&
+                       window.visible_host(oldest) != nullptr;
+            if (!accepted) break;
+            const auto* index = window.tracked_heights();
+            accepted = window.slot_capacity() == 2u &&
+                window.visible_count() <= 2u &&
+                viewport->child_count() == window.visible_count() + 2u &&
+                index && index->size() ==
+                    std::min<std::size_t>(4u, static_cast<std::size_t>(id)) &&
+                index->lookup(id).has_value() &&
+                (id <= 4u || !index->lookup(id - 4u));
+            if (!accepted) break;
+            peak_nodes = std::max(peak_nodes, box.owned_element_count());
+            check(box.owned_element_count() <= initial_nodes + 256u);
+            check(box.cached_style_element_count() <= initial_nodes + 256u);
+        }
+        check(accepted);
+        check(cancellations == 5u);
+        check(tui_transcript_count(transcript) == 4u);
+        if (accepted) std::printf(
+            "TUI_GFM_REFLOW turns=%zu cancels=%zu peak_elements=%zu "
+            "visible_hosts=%zu\n", kTurns, cancellations, peak_nodes,
+            window.visible_count());
+        check(tui_transcript_destroy(transcript) == TUI_TRANSCRIPT_OK);
+    }
+
     it("keeps mixed GFM history stable through capacity refusal, cancel, resize and eviction") {
         // One retained ACTIVE stream: refused admission must leave both C11
         // bytes and Box projection unchanged. Cancellation makes the same
