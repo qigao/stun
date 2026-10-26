@@ -48,7 +48,8 @@ bool has_non_whitespace(std::string_view text) {
 
 bool is_string_property(std::string_view name) {
   return name == "class" || name == "classes" || name == "utility" || name == "utilities" ||
-         name == "text" || name == "content" || name.rfind("on.", 0) == 0 ||
+         name == "text" || name == "content" || name == "slot" ||
+         name.rfind("on.", 0) == 0 ||
          name.rfind("bind.", 0) == 0 || name.rfind("attr.", 0) == 0;
 }
 
