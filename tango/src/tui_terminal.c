@@ -763,7 +763,7 @@ bool tui_terminal_render(tui_terminal_t* term) {
     if (!tui_buffer_is_dirty(back)) {
 #if defined(STUN_TUI_PTY_RENDER_TRACE_CI) && !defined(_WIN32)
         /* No physical diff for this armed input is not success evidence. */
-        ci_render_receipt(term, false, 0u, 0u, "", /* no bytes */);
+        ci_render_receipt(term, false, 0u, 0u, ""); /* no VT bytes */
 #endif
         return true;
     }
