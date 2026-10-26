@@ -170,6 +170,14 @@ if(STUN_BUILD_TUI_STREAMING_DEMO)
         "$<TARGET_FILE:flexui_tui_streaming_demo>")
     set_tests_properties(tui_streaming_demo_win32_conpty_plain
       PROPERTIES TIMEOUT 85)
+    # Separate opt-in experiment: the ordinary Tango owner and real ConPTY
+    # host still perform ResizePseudoConsole and inspect actual output.
+    # No synthetic console replaces the default plain/native tests.
+    add_test(NAME tui_streaming_demo_win32_conpty_virtual_spacers
+      COMMAND test_tui_win32_conpty --virtual-spacers
+        "$<TARGET_FILE:flexui_tui_streaming_demo>")
+    set_tests_properties(tui_streaming_demo_win32_conpty_virtual_spacers
+      PROPERTIES TIMEOUT 85)
     add_dependencies(stun_xml_runtime_qualification test_tui_win32_conpty)
   endif()
 endif()
