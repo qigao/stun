@@ -802,7 +802,7 @@ spec("FlexUI XML fragments stage local slots without a parallel UI tree") {
     check_equal(page->child_count(), 2U);
     check(first.tree.root->computed_style != nullptr);
     check(second.tree.root->computed_style != nullptr);
-    check_equal(first.tree.root->computed_style->display, flexUI::Display::Flex);
+    check(first.tree.root->computed_style->display == flexUI::Display::Flex);
   }
 
   it("atomically mounts a scoped fragment under an existing Box-owned parent") {
