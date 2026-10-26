@@ -26,7 +26,7 @@
 #include <cstring>
 #include <limits>
 #include <memory>
-#include <memory_resource>
+#include <cstdlib>
 #include <new>
 #include <string>
 #include <string_view>
@@ -1949,57 +1949,50 @@ spec("FlexUI MarkdownWidget through Tango async transport and cell renderer") {
     }
 
     it("rolls back real allocator failure before mutating virtual Markdown projection") {
-        // The projection stage uses a real C++17 memory_resource; deliberately
-        // reject its next allocation. This tests std::bad_alloc from the
-        // staging allocator (not merely a mocked return/status code) while
-        // the C11 native retainer and the previously projected Box remain
-        // intact. Reusing the same resource must allow clean recovery.
-        struct FailOnceResource final : std::pmr::memory_resource {
+        // Real malloc/free-backed source and Slot* scratch buffers. Inject
+        // two explicit allocation failures by returning nullptr from the
+        // same allocation callback that otherwise calls native malloc.
+        // This portable OS allocation contract needs no PMR exception
+        // propagation and still proves cleanup of actually used buffers.
+        struct FailOnceResource {
             bool fail_next = false;
-            // -1 disables the one-shot fault; 0 rejects this allocation;
-            // 1 allows desired.reserve() but rejects next.reserve().
             int successful_allocations_before_failure = -1;
             std::size_t failure_count = 0u;
-        protected:
-            void* do_allocate(std::size_t bytes,
-                              std::size_t alignment) override {
-                if (fail_next || successful_allocations_before_failure == 0) {
-                    fail_next = false;
-                    successful_allocations_before_failure = -1;
-                    ++failure_count;
-                    std::fprintf(stderr,
-                        "TUI_ALLOC_RESOURCE before-throw bytes=%zu alignment=%zu "
-                        "failures=%zu\n",
-                        bytes, alignment, failure_count);
-                    std::fflush(stderr);
-                    // The standard null resource is specified to throw
-                    // bad_alloc for every request. Forward only the
-                    // injected fault to that real library allocator;
-                    // do not return nullptr (which violates pmr contract).
-                    return std::pmr::null_memory_resource()->allocate(
-                        bytes, alignment);
-                }
-                if (successful_allocations_before_failure > 0)
-                    --successful_allocations_before_failure;
-                return std::pmr::new_delete_resource()->allocate(
-                    bytes, alignment);
-            }
-            void do_deallocate(void* ptr, std::size_t bytes,
-                               std::size_t alignment) override {
-                std::pmr::new_delete_resource()->deallocate(
-                    ptr, bytes, alignment);
-            }
-            bool do_is_equal(
-                const std::pmr::memory_resource& other) const
-                noexcept override {
-                return this == &other;
-            }
+            std::size_t live_allocations = 0u;
+            std::size_t allocations = 0u;
+            std::size_t frees = 0u;
         } staging;
+        const auto allocate = +[](void* context, std::size_t bytes)
+            noexcept -> void* {
+            auto& state = *static_cast<FailOnceResource*>(context);
+            if (state.fail_next ||
+                state.successful_allocations_before_failure == 0) {
+                state.fail_next = false;
+                state.successful_allocations_before_failure = -1;
+                ++state.failure_count;
+                return nullptr;
+            }
+            if (state.successful_allocations_before_failure > 0)
+                --state.successful_allocations_before_failure;
+            void* memory = std::malloc(bytes);
+            if (memory) {
+                ++state.live_allocations;
+                ++state.allocations;
+            }
+            return memory;
+        };
+        const auto release = +[](void* context, void* memory) noexcept {
+            auto& state = *static_cast<FailOnceResource*>(context);
+            if (memory) {
+                --state.live_allocations;
+                ++state.frees;
+                std::free(memory);
+            }
+        };
         const auto trace = [](const char* stage) {
-            std::fprintf(stderr, "TUI_ALLOC_FAULT_STAGE %s\n", stage);
+            std::fprintf(stderr, "TUI_ALLOC_STAGE %s\n", stage);
             std::fflush(stderr);
         };
-        trace("start");
 
         flexUI::Box box(nullptr);
         box.set_viewport(320.0f, 160.0f);
@@ -2019,7 +2012,8 @@ spec("FlexUI MarkdownWidget through Tango async transport and cell renderer") {
         box.set_root(root);
         box.update();
         flex::tui_backend::TranscriptWindow window(
-            box, *viewport, 1u, &staging);
+            box, *viewport, 1u,
+            {&staging, allocate, release});
         window.enable_height_tracking(2u, 24.0f);
         window.enable_virtual_spacers();
         auto* transcript = tui_transcript_create(2u, 4096u, 64u);
@@ -2078,34 +2072,12 @@ spec("FlexUI MarkdownWidget through Tango async transport and cell renderer") {
               TUI_TRANSCRIPT_OK);
         check(emit(12u, TUI_STREAM_END, {}) == TUI_TRANSCRIPT_OK);
         check(tui_transcript_count(transcript) == 2u);
-        // Verify that the current MSVC/C++17 test binary has working
-        // ordinary exception propagation before exercising a virtual
-        // pmr allocator callback through std::pmr::vector.
-        trace("before-direct-bad-alloc");
-        bool direct_caught = false;
-        try {
-            throw std::bad_alloc();
-        } catch (const std::bad_alloc&) {
-            direct_caught = true;
-        }
-        check(direct_caught);
-        trace("after-direct-bad-alloc");
-
-        trace("before-desired-rejection");
+        // A NULL allocation result is the actual resource failure.
+        // The projection returns without changing the live window.
         staging.fail_next = true;
-        Status desired_rejection = Status::Invalid;
-        try {
-            desired_rejection = window.show_tail(transcript);
-            trace("desired-call-returned");
-        } catch (const std::exception& e) {
-            std::fprintf(stderr, "TUI_ALLOC_RESOURCE escaped-exception %s\n",
-                         e.what());
-            std::fflush(stderr);
-            throw;
-        }
-        check(desired_rejection == Status::ResourceExhausted);
-        trace("after-desired-rejection");
+        check(window.show_tail(transcript) == Status::ResourceExhausted);
         check(staging.failure_count == 1u);
+        check(staging.live_allocations == 0u);
         check(window.visible_host(11u) == old_host);
         check(window.visible_host(12u) == nullptr);
         check(window.first_visible_message_id() == old_first);
@@ -2125,6 +2097,7 @@ spec("FlexUI MarkdownWidget through Tango async transport and cell renderer") {
                   transcript, {12u, 0.0f, false}) ==
               Status::ResourceExhausted);
         check(staging.failure_count == 2u);
+        check(staging.live_allocations == 0u);
         trace("after-anchor-rejection");
         check(window.visible_host(11u) == old_host);
         check(box.resolve_handle(old_handle) == old_host);
@@ -2139,6 +2112,7 @@ spec("FlexUI MarkdownWidget through Tango async transport and cell renderer") {
         check(window.show_tail(transcript) == Status::ResourceExhausted);
         trace("after-slot-plan-rejection");
         check(staging.failure_count == 3u);
+        check(staging.live_allocations == 0u);
         check(window.first_visible_message_id() == old_first);
         check(window.visible_host(11u) == old_host);
         check(window.visible_host(12u) == nullptr);
@@ -2160,6 +2134,8 @@ spec("FlexUI MarkdownWidget through Tango async transport and cell renderer") {
         check(viewport->child_count() == 3u);
         check(box.owned_element_count() <= owned + 48u);
         check(box.cached_style_element_count() <= styles + 48u);
+        check(staging.live_allocations == 0u);
+        check(staging.allocations == staging.frees);
         trace("before-destroy");
         check(tui_transcript_destroy(transcript) == TUI_TRANSCRIPT_OK);
         trace("after-destroy");
