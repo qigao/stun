@@ -495,8 +495,8 @@ jobs:
               "p95_reuse_us", "cancel_reflow"
           )
           height_expression = re.compile(
-              r"TUI_HEIGHT_INDEX_SYNC turns=(\\d+) retained=(\\d+) "
-              r"p50_sync_us=(\\d+) p95_sync_us=(\\d+)"
+              r"TUI_HEIGHT_INDEX_SYNC turns=(\d+) retained=(\d+) "
+              r"p50_sync_us=(\d+) p95_sync_us=(\d+)"
           )
           height_names = ("turns", "retained", "p50_sync_us", "p95_sync_us")
           paths = {
