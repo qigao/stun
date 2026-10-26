@@ -44,10 +44,19 @@ events; there is no second queue, parser, event loop, or public Tango ABI.
 - When resizing a physical terminal, the app updates Box viewport geometry
   **before** the height index checks width-based sample validity. A native
   `SIGWINCH` or ConPTY host resize cannot qualify against the old width.
-- Home/End, wheel, cancellation, tail-follow and eviction keep their original
-  message-level navigation semantics. This stage does **not** implement
-  arbitrary pixel-scroll-to-message admission or complete variable-height
-  production transcript virtualization.
+- Home/End and cancellation keep their existing message-level semantics.
+  In the **experimental** mode only, real Up/Down/Page and wheel inputs
+  instead add or subtract three terminal-cell rows in Box layout coordinates.
+  The existing UI Owner batches these deltas, maps the absolute viewport
+  coordinate through the bounded retained-message height index, rebinds
+  at most five hosts, then restores the message-local offset after real
+  Box measurement. Two opposite moves within one Owner turn cancel without
+  switching the user's original tail/history intent.
+- Estimated offscreen heights are explicitly approximate. This is a
+  private, fixed-step coordinate-to-window experiment, **not** a general
+  touchpad precision-delta or scrollbar drag API, a character-accurate
+  unseen-message locator, nor a complete production variable-height
+  transcript virtualization implementation.
 - The flag does not persist or change any user/default setting. It is intended
   for qualification and can be discarded without affecting normal users.
 
@@ -57,7 +66,12 @@ kernel POSIX PTY with `--virtual-spacers` and Windows ConPTY with
 visible cell assertions, 80×24 → 52×16 host resize and complete terminal
 restoration. The POSIX fixture additionally checks a bounded out-of-band
 post-Box owner frame for the expected host count and exactly two Spacers.
-A green experimental test does not permit enabling virtualization by default.
+The experimental POSIX PTY also sends 24 real SGR wheel-up events after a
+settled 12-message history and requires the first projected retained message
+ID to move backwards, rather than accepting a `tail`→`scrollback` label alone.
+An independent headless owner smoke checks the coordinate crossing and the
+balanced Up/Down coalescing contract. A green experimental test does not
+permit enabling virtualization by default.
 
 The focused installed-SDK headless project offers the same executable with
 `STUN_BUILD_TUI_STREAMING_DEMO=ON` (the default for that project). Its
@@ -78,8 +92,8 @@ establish physical console/IME behavior.
 
 | Input | Action |
 |---|---|
-| Up / Page Up / mouse wheel up | Browse one older retained message |
-| Down / Page Down / mouse wheel down | Browse one newer retained message |
+| Up / Page Up / mouse wheel up | Default: browse one older retained message; experiment: scroll three terminal text rows towards history |
+| Down / Page Down / mouse wheel down | Default: browse one newer retained message; experiment: scroll three terminal text rows towards newer content |
 | Home | View the oldest retained message |
 | End | Follow the newest messages |
 | c | Cancel the current scripted response |
