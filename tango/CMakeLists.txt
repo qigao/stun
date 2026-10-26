@@ -22,6 +22,7 @@ set(TUI_SOURCES
     src/tui_app.c
     src/tui_async.c
     src/tui_stream.c
+    src/tui_transcript.c
     src/tui_widgets.c
     src/tui_layout.c
     src/tui_advanced.c 
@@ -62,7 +63,8 @@ endif()
 
 set_target_properties(${TARGET_NAME}  PROPERTIES FOLDER "tango")
 
-# C++ is a test-only consumer: installed Tango remains a native C11 library.
+# Optional C++17 application consumer; never changes Tango's C11-only
+# compilation or imposes a C++ runtime on installed C clients.
 option(TANGO_BUILD_CPP_INTEROP_TESTS
        "Build the C++17 owner/wakeup consumer test" OFF)
 if(BUILD_TESTING)

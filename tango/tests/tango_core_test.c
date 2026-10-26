@@ -186,6 +186,40 @@ static int test_terminal_input_is_incremental(void) {
     CHECK(tui_terminal_input_next(terminal, &event));
     CHECK(event.type == TUI_EVENT_KEY && event.key == TUI_KEY_UP);
 
+    /* Home is used by the real POSIX PTY acceptance. Preserve one exact
+     * event under every split of ESC [ H, not just when the PTY provides
+     * all three bytes in one read. Also cover coalesced Home + End and
+     * common tilde-key aliases without merging the commands. */
+    const char home[] = "\033[H";
+    for (size_t split = 1u; split < sizeof(home) - 1u; ++split) {
+        CHECK(tui_terminal_input_push(terminal, home, split));
+        CHECK(!tui_terminal_input_next(terminal, &event));
+        CHECK(tui_terminal_input_push(
+            terminal, home + split, sizeof(home) - 1u - split));
+        CHECK(tui_terminal_input_next(terminal, &event));
+        CHECK(event.type == TUI_EVENT_KEY && event.key == TUI_KEY_HOME);
+        CHECK(!tui_terminal_input_next(terminal, &event));
+    }
+    CHECK(tui_terminal_input_push(terminal, "\033[H\033[F", 6u));
+    CHECK(tui_terminal_input_next(terminal, &event));
+    CHECK(event.type == TUI_EVENT_KEY && event.key == TUI_KEY_HOME);
+    CHECK(tui_terminal_input_next(terminal, &event));
+    CHECK(event.type == TUI_EVENT_KEY && event.key == TUI_KEY_END);
+    CHECK(!tui_terminal_input_next(terminal, &event));
+    CHECK(tui_terminal_input_push(terminal, "\033[1~\033[4~", 8u));
+    CHECK(tui_terminal_input_next(terminal, &event));
+    CHECK(event.type == TUI_EVENT_KEY && event.key == TUI_KEY_HOME);
+    CHECK(tui_terminal_input_next(terminal, &event));
+    CHECK(event.type == TUI_EVENT_KEY && event.key == TUI_KEY_END);
+    CHECK(!tui_terminal_input_next(terminal, &event));
+
+    /* Unknown CSI ahead of Home is consumed, not replayed or allowed to
+     * swallow the later valid Home while the owner processes a burst. */
+    CHECK(tui_terminal_input_push(terminal, "\033[?25l\033[H", 9u));
+    CHECK(tui_terminal_input_next(terminal, &event));
+    CHECK(event.type == TUI_EVENT_KEY && event.key == TUI_KEY_HOME);
+    CHECK(!tui_terminal_input_next(terminal, &event));
+
     /* Bytes following the first event remain queued for later polls. */
     CHECK(tui_terminal_input_push(terminal, "bc", 2u));
     CHECK(tui_terminal_input_next(terminal, &event));
@@ -313,6 +347,7 @@ static int test_terminal_input_is_incremental(void) {
     tui_terminal_destroy(terminal);
     return 0;
 }
+
 static int test_eintr_preserves_fragmented_home(void) {
     tui_terminal_t *terminal = tui_terminal_create();
     tui_event_t event = {0};

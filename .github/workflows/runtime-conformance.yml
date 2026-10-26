@@ -88,12 +88,14 @@ jobs:
             'flex/tests/test_gcanvas_renderer.cpp' 'flex/tests/gcanvas-standalone/*' \
             'flex/include/flex/core/renderer.h' 'flexUI/include/flexUI/renderer.h'
 
-      - name: Detect headless XML runtime changes
+      - name: Detect headless XML and Streaming UI runtime changes
         id: xml_scope
         shell: bash
         run: |
           bash .github/scripts/ci-affected.sh \
             'flexUI/*' 'flex/*' 'shared/markdown/*' 'shared/gcanvas/*' \
+            'tango/*' 'tango/src/*' 'tango/include/*' 'tango/tests/*' \
+            '.github/workflows/tango-core.yml' \
             'vendor/mir/*' 'vendor/miniblas/*' 'vendor/tinyfsm/*' \
             'tools/lemon/*' 'cmake/Sanitizers.cmake' \
             '.github/scripts/restore-flowchart-sdk.py' '.github/scripts/ci-affected.sh' '.github/workflows/salts-sdk-releases.yml' '.github/workflows/runtime-conformance.yml'
@@ -408,6 +410,345 @@ jobs:
             --timeout 120 --output-junit build/xml-runtime/results.xml
           git diff --exit-code
 
+      # LSan must be a separate *real-source* installed-SDK build, not a
+      # relabelled ASan success. Keep ASan/UBSan above independently enabled;
+      # inspect liblsan in the executable so this gate cannot silently run
+      # an uninstrumented test after future CMake refactors.
+      - name: Qualify full headless XML and Streaming runtime under LSan
+        if: needs.changes.outputs.xml_runtime == 'true'
+        shell: bash
+        env:
+          LSAN_OPTIONS: detect_leaks=1:exitcode=23:report_objects=1
+        run: |
+          set -euo pipefail
+          cmake -S flexUI/tests/xml-runtime-standalone \
+            -B build/xml-runtime-lsan -G Ninja \
+            -DCMAKE_BUILD_TYPE=Debug \
+            "-DCMAKE_PREFIX_PATH=$SALTS_ROOT;$RUNNER_TEMP/stun-xml-runtime-deps" \
+            -DSTB_INCLUDE_DIRS=/usr/include/stb \
+            -DENABLE_SANITIZER_ADDRESS=OFF \
+            -DENABLE_SANITIZER_UNDEFINED=OFF \
+            -DENABLE_SANITIZER_LEAK=ON \
+            -DCMAKE_FIND_USE_PACKAGE_REGISTRY=OFF \
+            -DCMAKE_FIND_USE_SYSTEM_PACKAGE_REGISTRY=OFF
+          cmake --build build/xml-runtime-lsan \
+            --target stun_xml_runtime_qualification --parallel 2
+          ldd build/xml-runtime-lsan/test_flexui_tango_stream \
+            | tee build/xml-runtime-lsan/lsan-dependencies.txt
+          grep -q 'liblsan[.]so' \
+            build/xml-runtime-lsan/lsan-dependencies.txt
+          ! grep -q 'not found' \
+            build/xml-runtime-lsan/lsan-dependencies.txt
+          ctest --test-dir build/xml-runtime-lsan \
+            --no-tests=error --verbose --output-on-failure --timeout 120 \
+            --output-junit build/xml-runtime-lsan/results.xml
+          git diff --exit-code
+
+      # Preserve comparable measurements from two independently instrumented
+      # builds. These are regression observations, not a product latency SLA.
+      - name: Record bounded Streaming TUI long-session metrics
+        if: needs.changes.outputs.xml_runtime == 'true'
+        shell: bash
+        env:
+          STUN_SOURCE_SHA: ${{ needs.changes.outputs.source_sha }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          import re
+
+          expression = re.compile(
+              r"TUI_LONG_SESSION iterations=(\d+) elapsed_ms=(\d+) "
+              r"p50_update_us=(\d+) p95_update_us=(\d+) "
+              r"peak_box_elements=(\d+) peak_style_baselines=(\d+)"
+          )
+          names = (
+              "iterations", "elapsed_ms", "p50_update_us", "p95_update_us",
+              "peak_box_elements", "peak_style_baselines"
+          )
+          virtual_expression = re.compile(
+              r"TUI_VIRTUAL_STRESS turns=(\d+) peak_elements=(\d+) "
+              r"peak_styles=(\d+) visible_hosts=(\d+)"
+          )
+          virtual_names = (
+              "turns", "peak_elements", "peak_styles", "visible_hosts"
+          )
+          wheel_expression = re.compile(
+              r"TUI_VIRTUAL_WHEEL turns=(\d+) elapsed_ms=(\d+) "
+              r"p50_scroll_us=(\d+) p95_scroll_us=(\d+) "
+              r"peak_elements=(\d+) visible_hosts=(\d+) "
+              r"fast_path_hits=(\d+)"
+          )
+          wheel_names = (
+              "turns", "elapsed_ms", "p50_scroll_us", "p95_scroll_us",
+              "peak_elements", "visible_hosts", "fast_path_hits"
+          )
+          reuse_expression = re.compile(
+              r"TUI_PROJECTION_REUSE turns=(\d+) staging_mallocs=(\d+) "
+              r"p50_reuse_us=(\d+) p95_reuse_us=(\d+) "
+              r"cancel_reflow=(\d+)"
+          )
+          reuse_names = (
+              "turns", "staging_mallocs", "p50_reuse_us",
+              "p95_reuse_us", "cancel_reflow"
+          )
+          height_expression = re.compile(
+              r"TUI_HEIGHT_INDEX_SYNC turns=(\d+) retained=(\d+) "
+              r"p50_sync_us=(\d+) p95_sync_us=(\d+)"
+          )
+          height_names = ("turns", "retained", "p50_sync_us", "p95_sync_us")
+          gfm_expression = re.compile(
+              r"TUI_GFM_REFLOW turns=(\d+) cancels=(\d+) crossings=(\d+) "
+              r"peak_elements=(\d+) visible_hosts=(\d+)"
+          )
+          gfm_names = (
+              "turns", "cancels", "crossings", "peak_elements",
+              "visible_hosts"
+          )
+          gfm_height_expression = re.compile(
+              r"TUI_GFM_HEIGHT initial_px=([0-9]+(?:\.[0-9]+)?) "
+              r"content_px=([0-9]+(?:\.[0-9]+)?) "
+              r"narrow_px=([0-9]+(?:\.[0-9]+)?) "
+              r"restored_px=([0-9]+(?:\.[0-9]+)?) "
+              r"source_delta_px=([0-9]+(?:\.[0-9]+)?) "
+              r"wrap_delta_px=([0-9]+(?:\.[0-9]+)?) "
+              r"unwrap_delta_px=([0-9]+(?:\.[0-9]+)?) "
+              r"anchor_preserved=(\d+)"
+          )
+          gfm_height_names = (
+              "initial_px", "content_px", "narrow_px", "restored_px",
+              "source_delta_px", "wrap_delta_px", "unwrap_delta_px",
+              "anchor_preserved"
+          )
+          paths = {
+              "asan_ubsan": Path("build/xml-runtime/Testing/Temporary/LastTest.log"),
+              "lsan": Path("build/xml-runtime-lsan/Testing/Temporary/LastTest.log"),
+          }
+          evidence = {
+              "schema_version": 2,
+              "source_sha": os.environ["STUN_SOURCE_SHA"],
+              "units": {"elapsed_ms": "ms", "p50_update_us": "us",
+                        "p95_update_us": "us"},
+              "modes": {},
+              "virtual_modes": {},
+              "wheel_modes": {},
+              "reuse_modes": {},
+              "height_modes": {},
+              "gfm_modes": {},
+              "gfm_height_modes": {},
+          }
+          for mode, path in paths.items():
+              log = path.read_text(encoding="utf-8")
+              matches = list(expression.finditer(log))
+              if len(matches) != 1:
+                  raise SystemExit(
+                      f"{mode}: expected exactly one TUI_LONG_SESSION result "
+                      f"in {path}, got {len(matches)}"
+                  )
+              values = dict(zip(names, (int(x) for x in matches[0].groups())))
+              if (values["iterations"] != 512 or
+                      values["elapsed_ms"] > 30000 or
+                      values["p95_update_us"] > 50000 or
+                      values["p50_update_us"] > values["p95_update_us"]):
+                  raise SystemExit(f"{mode}: invalid resource/CPU evidence {values}")
+              evidence["modes"][mode] = values
+              virtual = list(virtual_expression.finditer(log))
+              if len(virtual) != 1:
+                  raise SystemExit(
+                      f"{mode}: expected exactly one TUI_VIRTUAL_STRESS "
+                      f"result in {path}, got {len(virtual)}"
+                  )
+              virtual_values = dict(zip(
+                  virtual_names, (int(x) for x in virtual[0].groups())
+              ))
+              if (virtual_values["turns"] != 128 or
+                      virtual_values["visible_hosts"] != 2 or
+                      virtual_values["peak_elements"] > 96 or
+                      virtual_values["peak_styles"] > 96):
+                  raise SystemExit(
+                      f"{mode}: invalid virtual scrolling ownership evidence "
+                      f"{virtual_values}"
+                  )
+              evidence["virtual_modes"][mode] = virtual_values
+              wheel_matches = list(wheel_expression.finditer(log))
+              if len(wheel_matches) != 1:
+                  raise SystemExit(
+                      f"{mode}: expected exactly one TUI_VIRTUAL_WHEEL "
+                      f"result in {path}, got {len(wheel_matches)}"
+                  )
+              wheel_values = dict(zip(
+                  wheel_names, (int(x) for x in wheel_matches[0].groups())
+              ))
+              if (wheel_values["turns"] != 96 or
+                  wheel_values["fast_path_hits"] != 96 or
+                  wheel_values["visible_hosts"] != 2 or
+                  wheel_values["peak_elements"] > 96 or
+                  wheel_values["elapsed_ms"] > 30000 or
+                  wheel_values["p95_scroll_us"] > 100000 or
+                  wheel_values["p50_scroll_us"] >
+                      wheel_values["p95_scroll_us"]):
+                  raise SystemExit(
+                      f"{mode}: invalid bounded semantic-wheel evidence "
+                      f"{wheel_values}"
+                  )
+              evidence["wheel_modes"][mode] = wheel_values
+              reuse_matches = list(reuse_expression.finditer(log))
+              if len(reuse_matches) != 1:
+                  raise SystemExit(
+                      f"{mode}: expected exactly one TUI_PROJECTION_REUSE "
+                      f"result in {path}, got {len(reuse_matches)}"
+                  )
+              reuse_values = dict(zip(
+                  reuse_names, (int(x) for x in reuse_matches[0].groups())
+              ))
+              if (reuse_values["turns"] != 96 or
+                      reuse_values["staging_mallocs"] != 0 or
+                      reuse_values["cancel_reflow"] != 1 or
+                      reuse_values["p50_reuse_us"] >
+                          reuse_values["p95_reuse_us"] or
+                      reuse_values["p95_reuse_us"] > 100000):
+                  raise SystemExit(
+                      f"{mode}: invalid source-equal projection reuse "
+                      f"evidence {reuse_values}"
+                  )
+              evidence["reuse_modes"][mode] = reuse_values
+              height_matches = list(height_expression.finditer(log))
+              if len(height_matches) != 1:
+                  raise SystemExit(
+                      f"{mode}: expected exactly one TUI_HEIGHT_INDEX_SYNC "
+                      f"result in {path}, got {len(height_matches)}"
+                  )
+              height_values = dict(zip(
+                  height_names, (int(x) for x in height_matches[0].groups())
+              ))
+              if (height_values["turns"] != 96 or
+                  height_values["retained"] != 256 or
+                  height_values["p50_sync_us"] >
+                      height_values["p95_sync_us"] or
+                  height_values["p95_sync_us"] > 100000):
+                  raise SystemExit(
+                      f"{mode}: invalid 256-message bounded height sync "
+                      f"evidence {height_values}"
+                  )
+              evidence["height_modes"][mode] = height_values
+              gfm_matches = list(gfm_expression.finditer(log))
+              if len(gfm_matches) != 1:
+                  raise SystemExit(
+                      f"{mode}: expected exactly one TUI_GFM_REFLOW "
+                      f"result in {path}, got {len(gfm_matches)}"
+                  )
+              gfm_values = dict(zip(
+                  gfm_names, (int(x) for x in gfm_matches[0].groups())
+              ))
+              if (gfm_values["turns"] != 32 or
+                  gfm_values["cancels"] != 5 or
+                  gfm_values["crossings"] != 30 or
+                  gfm_values["visible_hosts"] != 2 or
+                  gfm_values["peak_elements"] > 300):
+                  raise SystemExit(
+                      f"{mode}: invalid GFM cross-window anchor evidence "
+                      f"{gfm_values}"
+                  )
+              evidence["gfm_modes"][mode] = gfm_values
+              height_matches = list(gfm_height_expression.finditer(log))
+              if len(height_matches) != 1:
+                  raise SystemExit(
+                      f"{mode}: expected one TUI_GFM_HEIGHT actual-Box "
+                      f"geometry result in {path}, got {len(height_matches)}"
+                  )
+              actual = {
+                  name: (int(value) if name == "anchor_preserved" else
+                         float(value))
+                  for name, value in zip(
+                      gfm_height_names, height_matches[0].groups())
+              }
+              if (actual["initial_px"] <= 72.0 or
+                  actual["source_delta_px"] <= 1.0 or
+                  actual["wrap_delta_px"] <= 1.0 or
+                  actual["unwrap_delta_px"] <= 1.0 or
+                  actual["content_px"] <= actual["initial_px"] + 1.0 or
+                  actual["narrow_px"] <= actual["content_px"] + 1.0 or
+                  actual["restored_px"] >= actual["narrow_px"] - 1.0 or
+                  abs(actual["restored_px"] -
+                      actual["content_px"]) >= 2.0 or
+                  actual["anchor_preserved"] != 1):
+                  raise SystemExit(
+                      f"{mode}: invalid real GFM grow/shrink evidence {actual}"
+                  )
+              evidence["gfm_height_modes"][mode] = actual
+          output = Path("build/tui-long-session-metrics.json")
+          output.write_text(json.dumps(evidence, indent=2, sort_keys=True) + "\n",
+                            encoding="utf-8")
+          summary = os.environ.get("GITHUB_STEP_SUMMARY")
+          if summary:
+              with open(summary, "a", encoding="utf-8") as out:
+                  out.write("### 512-message TUI owner-loop resource baseline\n\n")
+                  out.write("| Mode | Total ms | p50 us | p95 us | "
+                            "Peak Box nodes | Peak style baselines |\n")
+                  out.write("|---|---:|---:|---:|---:|---:|\n")
+                  for mode, result in evidence["modes"].items():
+                      out.write(f'| {mode} | {result["elapsed_ms"]} | '
+                                f'{result["p50_update_us"]} | '
+                                f'{result["p95_update_us"]} | '
+                                f'{result["peak_box_elements"]} | '
+                                f'{result["peak_style_baselines"]} |\n')
+                  out.write("\n### 128-message opt-in virtual window ownership\n\n")
+                  out.write("| Mode | Turns | Peak Box nodes | "
+                            "Peak style baselines | Visible hosts |\n")
+                  out.write("|---|---:|---:|---:|---:|\n")
+                  for mode, result in evidence["virtual_modes"].items():
+                      out.write(f'| {mode} | {result["turns"]} | '
+                                f'{result["peak_elements"]} | '
+                                f'{result["peak_styles"]} | '
+                                f'{result["visible_hosts"]} |\n')
+                  out.write("\n### 96-turn semantic wheel baseline (opt-in)\n\n")
+                  out.write("| Mode | Total ms | p50 us | p95 us | "
+                            "Peak Box nodes | Fast path hits |\n")
+                  out.write("|---|---:|---:|---:|---:|---:|\n")
+                  for mode, result in evidence["wheel_modes"].items():
+                      out.write(f'| {mode} | {result["elapsed_ms"]} | '
+                                f'{result["p50_scroll_us"]} | '
+                                f'{result["p95_scroll_us"]} | '
+                                f'{result["peak_elements"]} | '
+                                f'{result["fast_path_hits"]} |\n')
+                  out.write("\n### Unchanged Markdown projection reuse (opt-in)\n\n")
+                  out.write("| Mode | Turns | Staging mallocs | p50 us | "
+                            "p95 us | Cancel reflow |\n")
+                  out.write("|---|---:|---:|---:|---:|---:|\n")
+                  for mode, result in evidence["reuse_modes"].items():
+                      out.write(f'| {mode} | {result["turns"]} | '
+                                f'{result["staging_mallocs"]} | '
+                                f'{result["p50_reuse_us"]} | '
+                                f'{result["p95_reuse_us"]} | '
+                                f'{result["cancel_reflow"]} |\n')
+                  out.write("\n### 32-turn variable-height GFM cross-window regression\n\n")
+                  out.write("| Mode | Turns | Cancels | Bidirectional boundaries | "
+                            "Peak Box nodes | Visible hosts |\n")
+                  out.write("|---|---:|---:|---:|---:|---:|\n")
+                  for mode, result in evidence["gfm_modes"].items():
+                      out.write(f'| {mode} | {result["turns"]} | '
+                                f'{result["cancels"]} | '
+                                f'{result["crossings"]} | '
+                                f'{result["peak_elements"]} | '
+                                f'{result["visible_hosts"]} |\n')
+                  out.write("\n### Real GFM source/viewport height changes\n\n")
+                  out.write("| Mode | Baseline px | Content px | Narrow px | "
+                            "Restored px | Source growth px | Wrap growth px | "
+                            "Unwrap shrink px |\n")
+                  out.write("|---|---:|---:|---:|---:|---:|---:|---:|\n")
+                  for mode, result in evidence["gfm_height_modes"].items():
+                      out.write(f'| {mode} | {result["initial_px"]:.2f} | '
+                                f'{result["content_px"]:.2f} | '
+                                f'{result["narrow_px"]:.2f} | '
+                                f'{result["restored_px"]:.2f} | '
+                                f'{result["source_delta_px"]:.2f} | '
+                                f'{result["wrap_delta_px"]:.2f} | '
+                                f'{result["unwrap_delta_px"]:.2f} |\n')
+          print(output.read_text(encoding="utf-8"))
+          PY
+
       - name: Compile Unicode consumers and run original strict text suite
         if: needs.changes.outputs.unicode == 'true'
         shell: bash
@@ -448,6 +789,10 @@ jobs:
             build/xml-runtime/Testing/Temporary/LastTest.log
             build/xml-runtime/results.xml
             build/xml-runtime/compile_commands.json
+            build/xml-runtime-lsan/Testing/Temporary/LastTest.log
+            build/xml-runtime-lsan/results.xml
+            build/xml-runtime-lsan/lsan-dependencies.txt
+            build/tui-long-session-metrics.json
             build/unicode/Testing/Temporary/LastTest.log
             build/mermaid-parsers/Testing/Temporary/LastTest.log
             build/mermaid-parsers/results.xml

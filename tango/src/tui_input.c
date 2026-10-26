@@ -56,31 +56,44 @@ bool tui_terminal_disable_mouse(tui_terminal_t* term) {
 
 #ifdef _WIN32
 
-bool tui_terminal_poll(tui_terminal_t* term, tui_event_t* event) {
-    if (!term || !event) return false;
-    
+/* Private deterministic decoder shared by the actual ReadConsoleInputW
+ * path and a C11 conformance test. The lifetime of a pending UTF-16 lead
+ * surrogate belongs to this terminal, never to a process-global static.
+ * Surrogate KEYUP records are intentionally ignored without clearing it:
+ * Windows emoji/Unicode injection may interleave down/up for each unit.
+ */
+bool tui_terminal_input_record(tui_terminal_t* term,
+                               const INPUT_RECORD* record,
+                               tui_event_t* event) {
+    if (!term || !record || !event) return false;
     memset(event, 0, sizeof(*event));
-    
-    DWORD num_events = 0;
-    GetNumberOfConsoleInputEvents(term->h_in, &num_events);
-    if (num_events == 0) return false;
-    
-    INPUT_RECORD rec;
-    DWORD read_count;
-    if (!ReadConsoleInputW(term->h_in, &rec, 1, &read_count) || read_count == 0) {
-        return false;
-    }
-    
-    if (rec.EventType == KEY_EVENT && rec.Event.KeyEvent.bKeyDown) {
+
+    if (record->EventType == KEY_EVENT) {
+        const KEY_EVENT_RECORD* key = &record->Event.KeyEvent;
+        if (!key->bKeyDown) return false;
+        const uint32_t unit = (uint32_t)key->uChar.UnicodeChar;
+        if (unit >= 0xd800u && unit <= 0xdbffu) {
+            term->pending_utf16_high = (uint16_t)unit;
+            return false;
+        }
+        if (unit >= 0xdc00u && unit <= 0xdfffu) {
+            const uint32_t high = term->pending_utf16_high;
+            term->pending_utf16_high = 0u;
+            if (high < 0xd800u || high > 0xdbffu) return false;
+            event->ch = 0x10000u +
+                ((high - 0xd800u) << 10) + (unit - 0xdc00u);
+        } else {
+            term->pending_utf16_high = 0u;
+            event->ch = unit;
+        }
+        if (event->ch == 0u && key->wVirtualKeyCode == 0u) return false;
         event->type = TUI_EVENT_KEY;
-        event->ch = rec.Event.KeyEvent.uChar.UnicodeChar;
-        
-        DWORD state = rec.Event.KeyEvent.dwControlKeyState;
+        const DWORD state = key->dwControlKeyState;
         if (state & SHIFT_PRESSED) event->mod |= TUI_MOD_SHIFT;
         if (state & (LEFT_CTRL_PRESSED | RIGHT_CTRL_PRESSED)) event->mod |= TUI_MOD_CTRL;
         if (state & (LEFT_ALT_PRESSED | RIGHT_ALT_PRESSED)) event->mod |= TUI_MOD_ALT;
         
-        switch (rec.Event.KeyEvent.wVirtualKeyCode) {
+        switch (key->wVirtualKeyCode) {
             case VK_UP: event->key = TUI_KEY_UP; break;
             case VK_DOWN: event->key = TUI_KEY_DOWN; break;
             case VK_LEFT: event->key = TUI_KEY_LEFT; break;
@@ -116,19 +129,19 @@ bool tui_terminal_poll(tui_terminal_t* term, tui_event_t* event) {
         return true;
     }
     
-    if (rec.EventType == MOUSE_EVENT && term->mouse_enabled) {
-        MOUSE_EVENT_RECORD* me = &rec.Event.MouseEvent;
+    if (record->EventType == MOUSE_EVENT && term->mouse_enabled) {
+        const MOUSE_EVENT_RECORD* me = &record->Event.MouseEvent;
         event->x = me->dwMousePosition.X;
         event->y = me->dwMousePosition.Y;
         
         /* Track button state for press/release detection */
-        static DWORD last_button_state = 0;
+        DWORD* last_button_state = &term->last_mouse_button_state;
         
         if (me->dwEventFlags == 0) {
             /* Button state changed */
-            DWORD pressed = me->dwButtonState & ~last_button_state;
-            DWORD released = last_button_state & ~me->dwButtonState;
-            last_button_state = me->dwButtonState;
+            DWORD pressed = me->dwButtonState & ~(*last_button_state);
+            DWORD released = (*last_button_state) & ~me->dwButtonState;
+            *last_button_state = me->dwButtonState;
             
             if (pressed & FROM_LEFT_1ST_BUTTON_PRESSED) {
                 event->type = TUI_EVENT_MOUSE_PRESS;
@@ -159,12 +172,26 @@ bool tui_terminal_poll(tui_terminal_t* term, tui_event_t* event) {
         }
     }
     
-    if (rec.EventType == WINDOW_BUFFER_SIZE_EVENT) {
+    if (record->EventType == WINDOW_BUFFER_SIZE_EVENT) {
         event->type = TUI_EVENT_RESIZE;
         return true;
     }
     
     return false;
+}
+
+
+bool tui_terminal_poll(tui_terminal_t* term, tui_event_t* event) {
+    if (!term || !event) return false;
+    DWORD num_events = 0u;
+    if (!GetNumberOfConsoleInputEvents(term->h_in, &num_events) ||
+        num_events == 0u) return false;
+
+    INPUT_RECORD record;
+    DWORD read_count = 0u;
+    if (!ReadConsoleInputW(term->h_in, &record, 1u, &read_count) ||
+        read_count != 1u) return false;
+    return tui_terminal_input_record(term, &record, event);
 }
 
 #else /* Unix */

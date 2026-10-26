@@ -49,10 +49,21 @@ struct tui_terminal {
 #ifdef _WIN32
     HANDLE h_out;
     HANDLE h_in;
+    /* Owned read/write handle to the actual active VT screen buffer.
+     * GetStdHandle(STD_OUTPUT_HANDLE) may still reference the original
+     * screen after ?1049h. Both dimensions and glyph output must target
+     * the SAME buffer. Private state; no public ABI or second UI owner. */
+    HANDLE h_active_out;
+    DWORD orig_active_out_mode;
     DWORD orig_out_mode;
     DWORD orig_in_mode;
+    /* Owner-local Win32 INPUT_RECORD decode state. Never shared across
+     * independent terminals or producer threads. */
+    uint16_t pending_utf16_high;
+    DWORD last_mouse_button_state;
     UINT orig_output_cp;
     UINT orig_input_cp;
+    bool active_out_mode_changed;
     bool out_mode_changed;
     bool in_mode_changed;
     bool output_cp_changed;
@@ -73,7 +84,16 @@ struct tui_terminal {
 #endif
 };
 
-#ifndef _WIN32
+/* Private pre-frame resize and invalidation. UI Owner invokes this before
+ * any view callback; terminal_render keeps it as an idempotent safeguard. */
+bool tui_terminal_prepare_frame(tui_terminal_t *term);
+
+#ifdef _WIN32
+/* Private deterministic translation of an actual Win32 input record. */
+bool tui_terminal_input_record(tui_terminal_t* term,
+                               const INPUT_RECORD* record,
+                               tui_event_t* event);
+#else
 /* Consume a pending SIGWINCH notification on the terminal owner thread. */
 bool tui_terminal_consume_resize_pending(void);
 

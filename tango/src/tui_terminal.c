@@ -185,7 +185,14 @@ static bool write_raw(tui_terminal_t* term, const char* data, size_t len) {
     while (offset < len) {
         DWORD written = 0u;
         const DWORD chunk = (DWORD)(len - offset);
-        if (!WriteConsoleA(term->h_out, data + offset, chunk, &written, NULL) ||
+        /* The process STDOUT handle does not follow an active-buffer switch.
+         * After entering the VT alternate screen, use its owned CONOUT$
+         * handle for the same cell updates we query for dimensions. The
+         * original h_out remains responsible for initial enter/fallback
+         * and exact platform mode restoration. */
+        const HANDLE out = term->h_active_out ?
+            term->h_active_out : term->h_out;
+        if (!WriteConsoleA(out, data + offset, chunk, &written, NULL) ||
             written == 0u) return false;
         offset += (size_t)written;
     }
@@ -244,6 +251,17 @@ static int quantize_256(tui_color_t c) {
  * ============================================================================ */
 
 #ifdef _WIN32
+/* Each Win32 console screen buffer owns its own output mode; a VT alternate
+ * buffer must not inherit assumptions made about the original h_out. */
+static bool restore_active_output_mode(tui_terminal_t* term) {
+    if (!term->active_out_mode_changed) return true;
+    if (!term->h_active_out ||
+        !SetConsoleMode(term->h_active_out, term->orig_active_out_mode))
+        return false;
+    term->active_out_mode_changed = false;
+    return true;
+}
+
 static bool platform_leave(tui_terminal_t* term) {
     bool ok = true;
     if (term->in_mode_changed) {
@@ -298,8 +316,16 @@ static bool platform_enter(tui_terminal_t* term) {
         term->input_cp_changed = true;
     }
 
-    const DWORD out_mode = term->orig_out_mode |
-        ENABLE_VIRTUAL_TERMINAL_PROCESSING | DISABLE_NEWLINE_AUTO_RETURN;
+    /* Tango uses explicit cursor-addressed cell coordinates, including the
+     * bottom/right edges of the alternate buffer. Automatic end-of-line
+     * wrapping would scroll ConPTY's viewport independently of Tango's
+     * front buffer, losing fixed header/footer cells on long transcripts.
+     * Preserve all original mode flags except auto-wrap and restore the
+     * exact original mode on cleanup. */
+    const DWORD out_mode = (term->orig_out_mode |
+        ENABLE_PROCESSED_OUTPUT | ENABLE_VIRTUAL_TERMINAL_PROCESSING |
+        DISABLE_NEWLINE_AUTO_RETURN) &
+        ~ENABLE_WRAP_AT_EOL_OUTPUT;
     const DWORD in_mode = (term->orig_in_mode | ENABLE_MOUSE_INPUT |
         ENABLE_WINDOW_INPUT | ENABLE_EXTENDED_FLAGS) & ~ENABLE_QUICK_EDIT_MODE;
     if (!SetConsoleMode(term->h_out, out_mode)) goto failed;
@@ -440,6 +466,10 @@ bool tui_terminal_init(tui_terminal_t* term) {
     /* Enter alternate screen and hide cursor.  Unix input enables bracketed
      * paste so pasted ESC/CSI bytes stay outside the key decoder. */
 #ifdef _WIN32
+    /* Keep the terminal's DECAWM (?7) state undisturbed. The apparent
+     * ConPTY footer corruption came from bare-LF handling in a test oracle,
+     * not a requirement to toggle user terminal wrap mode on entry/exit.
+     * Native Win32 active-screen-buffer output modes remain qualified. */
     const char* enter_sequence = "\033[?1049h\033[?25l\033[2J";
     const char* rollback_sequence = "\033[?25h\033[?1049l\033[0m";
 #else
@@ -457,6 +487,53 @@ bool tui_terminal_init(tui_terminal_t* term) {
             TUI_TERMINAL_ERROR_PLATFORM;
         return false;
     }
+
+#ifdef _WIN32
+    /* ?1049h switches screen buffers. Output mode belongs to the buffer,
+     * not to the inherited h_out handle on which we enabled VT processing.
+     * The currently ACTIVE CONOUT$ must reject EOL wrapping as well, or
+     * repeated ConPTY frames can scroll over the fixed footer while the
+     * owner's cell diff still believes that row is unchanged. */
+    HANDLE active = CreateFileW(L"CONOUT$",
+                                GENERIC_READ | GENERIC_WRITE,
+                                FILE_SHARE_READ | FILE_SHARE_WRITE,
+                                NULL, OPEN_EXISTING, 0, NULL);
+    DWORD active_mode = 0u;
+    bool active_ready = false;
+    if (active != INVALID_HANDLE_VALUE) {
+        term->h_active_out = active;
+        if (GetConsoleMode(active, &active_mode)) {
+            term->orig_active_out_mode = active_mode;
+            const DWORD required = ENABLE_PROCESSED_OUTPUT |
+                ENABLE_VIRTUAL_TERMINAL_PROCESSING |
+                DISABLE_NEWLINE_AUTO_RETURN;
+            const DWORD desired = (active_mode | required) &
+                ~ENABLE_WRAP_AT_EOL_OUTPUT;
+            if (desired == active_mode || SetConsoleMode(active, desired)) {
+                term->active_out_mode_changed = desired != active_mode;
+                DWORD confirmed = 0u;
+                active_ready = GetConsoleMode(active, &confirmed) &&
+                    (confirmed & required) == required &&
+                    (confirmed & ENABLE_WRAP_AT_EOL_OUTPUT) == 0u;
+            }
+        }
+    }
+    if (!active_ready) {
+        /* Fail closed: do not silently draw to the old screen. Return to
+         * the original console and release our two uncommitted buffers. */
+        (void)restore_active_output_mode(term);
+        if (term->h_active_out) {
+            CloseHandle(term->h_active_out);
+            term->h_active_out = NULL;
+        }
+        (void)write_raw_str(term, rollback_sequence);
+        if (term->platform_leave(term)) term->platform_active = false;
+        tui_buffer_destroy(front);
+        tui_buffer_destroy(back);
+        term->last_error = TUI_TERMINAL_ERROR_PLATFORM;
+        return false;
+    }
+#endif
 
     tui_buffer_destroy(term->front);
     tui_buffer_destroy(term->back);
@@ -483,12 +560,24 @@ bool tui_terminal_cleanup(tui_terminal_t* term) {
         term->last_error = TUI_TERMINAL_ERROR_OUTPUT_IO;
         ok = false;
     }
+#ifdef _WIN32
+    if (!restore_active_output_mode(term)) {
+        term->last_error = TUI_TERMINAL_ERROR_PLATFORM;
+        ok = false;
+    }
+#endif
     if (!term->platform_leave(term)) {
         term->last_error = TUI_TERMINAL_ERROR_PLATFORM;
         ok = false;
     } else {
         term->platform_active = false;
     }
+#ifdef _WIN32
+    if (term->h_active_out) {
+        CloseHandle(term->h_active_out);
+        term->h_active_out = NULL;
+    }
+#endif
 
     if (ok) {
         term->initialized = false;
@@ -521,7 +610,11 @@ tui_color_mode_t tui_terminal_get_color_mode(const tui_terminal_t* term) {
 void tui_terminal_query_size(tui_terminal_t* term) {
 #ifdef _WIN32
     CONSOLE_SCREEN_BUFFER_INFO csbi;
-    if (GetConsoleScreenBufferInfo(term->h_out, &csbi)) {
+    const HANDLE current = term->h_active_out ?
+        term->h_active_out : term->h_out;
+    if (GetConsoleScreenBufferInfo(current, &csbi) ||
+        (current != term->h_out &&
+         GetConsoleScreenBufferInfo(term->h_out, &csbi))) {
         term->width = csbi.srWindow.Right - csbi.srWindow.Left + 1;
         term->height = csbi.srWindow.Bottom - csbi.srWindow.Top + 1;
     }
@@ -548,29 +641,48 @@ tui_buffer_t* tui_terminal_buffer(tui_terminal_t* term) {
  * Rendering
  * ============================================================================ */
 
-bool tui_terminal_render(tui_terminal_t* term) {
-    if (!term || !term->initialized || !term->front || !term->back) {
+/* A UI Owner frame must be laid out and drawn against the final native
+ * terminal dimensions. Resizing here, BEFORE view(), avoids discarding
+ * the just-rendered cells in tui_terminal_render(). This is private runtime
+ * state, not a new public Tango API or a second event loop. */
+bool tui_terminal_prepare_frame(tui_terminal_t* term) {
+    if (!term || !term->initialized || !term->front || !term->back ||
+        term->width <= 0 || term->height <= 0) {
         if (term) term->last_error = TUI_TERMINAL_ERROR_INVALID_STATE;
         return false;
     }
-    term->last_error = TUI_TERMINAL_ERROR_NONE;
-    
     tui_buffer_t* back = term->back;
     tui_buffer_t* front = term->front;
-    
-    /* Resize if needed */
-    if (back->width != term->width || back->height != term->height) {
-        tui_buffer_resize(back, term->width, term->height);
-        tui_buffer_resize(front, term->width, term->height);
-        if (back->width != term->width || back->height != term->height ||
-            front->width != term->width || front->height != term->height) {
-            term->last_error = TUI_TERMINAL_ERROR_OUTPUT_ALLOCATION;
-            return false;
-        }
-        /* Force full redraw */
-        tui_buffer_clear(front);
-        tui_buffer_mark_all_dirty(back);
+    if (back->width == term->width && back->height == term->height &&
+        front->width == term->width && front->height == term->height)
+        return true;
+
+    tui_buffer_resize(back, term->width, term->height);
+    tui_buffer_resize(front, term->width, term->height);
+    if (back->width != term->width || back->height != term->height ||
+        front->width != term->width || front->height != term->height) {
+        term->last_error = TUI_TERMINAL_ERROR_OUTPUT_ALLOCATION;
+        return false;
     }
+
+    /* The physical console can preserve cells when its viewport changes.
+     * All new cells must compare unequal to the previous committed frame,
+     * even if the back buffer starts blank. Fail closed on a subsequent
+     * write: do not commit this front buffer until output succeeds. */
+    const tui_cell_t invalid = tui_cell_styled(
+        0xffffffffu, TUI_WHITE, TUI_WHITE, 0xffu);
+    const size_t count = (size_t)term->width * (size_t)term->height;
+    for (size_t i = 0u; i < count; ++i) front->cells[i] = invalid;
+    tui_buffer_mark_all_dirty(back);
+    return true;
+}
+
+bool tui_terminal_render(tui_terminal_t* term) {
+    if (!tui_terminal_prepare_frame(term)) return false;
+    term->last_error = TUI_TERMINAL_ERROR_NONE;
+
+    tui_buffer_t* back = term->back;
+    tui_buffer_t* front = term->front;
     
     if (!tui_buffer_is_dirty(back)) return true;
     

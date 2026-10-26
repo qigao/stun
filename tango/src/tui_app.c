@@ -131,6 +131,12 @@ bool tui_app_dispatch_once(tui_app_t *app) {
 
     /* Exactly one render for this batch of input + async updates. */
     if (app->needs_redraw) {
+        // A resize can replace and clear both native cell buffers. Prepare
+        // them before owner view/render, never after Box has painted a frame.
+        if (!tui_terminal_prepare_frame(app->terminal)) {
+            app->running = false;
+            return false;
+        }
         tui_buffer_t* back = tui_terminal_buffer(app->terminal);
         app->view(app->model, back);
         if (!tui_terminal_render(app->terminal)) {
