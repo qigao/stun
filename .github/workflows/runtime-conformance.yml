@@ -444,6 +444,74 @@ jobs:
             --output-junit build/xml-runtime-lsan/results.xml
           git diff --exit-code
 
+      # Preserve comparable measurements from two independently instrumented
+      # builds. These are regression observations, not a product latency SLA.
+      - name: Record bounded Streaming TUI long-session metrics
+        if: needs.changes.outputs.xml_runtime == 'true'
+        shell: bash
+        env:
+          STUN_SOURCE_SHA: ${{ needs.changes.outputs.source_sha }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          import re
+
+          expression = re.compile(
+              r"TUI_LONG_SESSION iterations=(\d+) elapsed_ms=(\d+) "
+              r"p50_update_us=(\d+) p95_update_us=(\d+) "
+              r"peak_box_elements=(\d+) peak_style_baselines=(\d+)"
+          )
+          names = (
+              "iterations", "elapsed_ms", "p50_update_us", "p95_update_us",
+              "peak_box_elements", "peak_style_baselines"
+          )
+          paths = {
+              "asan_ubsan": Path("build/xml-runtime/Testing/Temporary/LastTest.log"),
+              "lsan": Path("build/xml-runtime-lsan/Testing/Temporary/LastTest.log"),
+          }
+          evidence = {
+              "schema_version": 1,
+              "source_sha": os.environ["STUN_SOURCE_SHA"],
+              "units": {"elapsed_ms": "ms", "p50_update_us": "us",
+                        "p95_update_us": "us"},
+              "modes": {},
+          }
+          for mode, path in paths.items():
+              matches = list(expression.finditer(path.read_text(encoding="utf-8")))
+              if len(matches) != 1:
+                  raise SystemExit(
+                      f"{mode}: expected exactly one TUI_LONG_SESSION result "
+                      f"in {path}, got {len(matches)}"
+                  )
+              values = dict(zip(names, (int(x) for x in matches[0].groups())))
+              if (values["iterations"] != 512 or
+                      values["elapsed_ms"] > 30000 or
+                      values["p95_update_us"] > 50000 or
+                      values["p50_update_us"] > values["p95_update_us"]):
+                  raise SystemExit(f"{mode}: invalid resource/CPU evidence {values}")
+              evidence["modes"][mode] = values
+          output = Path("build/tui-long-session-metrics.json")
+          output.write_text(json.dumps(evidence, indent=2, sort_keys=True) + "\n",
+                            encoding="utf-8")
+          summary = os.environ.get("GITHUB_STEP_SUMMARY")
+          if summary:
+              with open(summary, "a", encoding="utf-8") as out:
+                  out.write("### 512-message TUI owner-loop resource baseline\n\n")
+                  out.write("| Mode | Total ms | p50 us | p95 us | "
+                            "Peak Box nodes | Peak style baselines |\n")
+                  out.write("|---|---:|---:|---:|---:|---:|\n")
+                  for mode, result in evidence["modes"].items():
+                      out.write(f'| {mode} | {result["elapsed_ms"]} | '
+                                f'{result["p50_update_us"]} | '
+                                f'{result["p95_update_us"]} | '
+                                f'{result["peak_box_elements"]} | '
+                                f'{result["peak_style_baselines"]} |\n')
+          print(output.read_text(encoding="utf-8"))
+          PY
+
       - name: Compile Unicode consumers and run original strict text suite
         if: needs.changes.outputs.unicode == 'true'
         shell: bash
@@ -487,6 +555,7 @@ jobs:
             build/xml-runtime-lsan/Testing/Temporary/LastTest.log
             build/xml-runtime-lsan/results.xml
             build/xml-runtime-lsan/lsan-dependencies.txt
+            build/tui-long-session-metrics.json
             build/unicode/Testing/Temporary/LastTest.log
             build/mermaid-parsers/Testing/Temporary/LastTest.log
             build/mermaid-parsers/results.xml
