@@ -960,10 +960,19 @@ int main(int argc, char** argv) {
         return 2;
 #endif
     }
-    // Keep the default real terminal path byte-for-byte unchanged. CI may
-    // combine --frame-report with the opt-in, but other unknown options
-    // fail closed instead of silently enabling a production behavior.
-    const bool experimental_virtual_spacers =
+    // Only the CI-built real POSIX PTY fixture may use a rapid scripted
+    // producer. It still publishes ALL 48 bounded messages via the same
+    // native mailbox and UI Owner. The ordinary physical demo and all
+    // default concurrency/real-terminal gates keep their 28ms chunk pace.
+    bool ci_rapid_virtual_producer = false;
+#if defined(STUN_TUI_DEMO_HEADLESS_TEST) && !defined(_WIN32)
+    ci_rapid_virtual_producer = argc == 3 &&
+        std::strcmp(argv[1], "--experimental-virtual-spacers") == 0 &&
+        std::strcmp(argv[2], "--ci-rapid-producer") == 0;
+#endif
+    // Keep the default real terminal path unchanged. CI may combine
+    // --frame-report with the opt-in, but unknown flags must fail closed.
+    const bool experimental_virtual_spacers = ci_rapid_virtual_producer ||
         (argc == 2 &&
          std::strcmp(argv[1], "--experimental-virtual-spacers") == 0) ||
         (argc == 4 &&
@@ -975,7 +984,8 @@ int main(int argc, char** argv) {
         std::strcmp(argv[1], "--frame-report") == 0;
 #endif
     if (argc != 1 && !frame_diagnostic &&
-        !(argc == 2 && experimental_virtual_spacers)) return 2;
+        !(argc == 2 && experimental_virtual_spacers) &&
+        !ci_rapid_virtual_producer) return 2;
     if (argc == 4 && !experimental_virtual_spacers) return 2;
     Demo d;
     d.experimental_virtual_spacers = experimental_virtual_spacers;
@@ -993,7 +1003,7 @@ int main(int argc, char** argv) {
             return 1;
         }
 #endif
-        std::thread worker([&d] {
+        std::thread worker([&d, ci_rapid_virtual_producer] {
 #if defined(STUN_TUI_DEMO_HEADLESS_TEST) && !defined(_WIN32)
             // Test-only synchronization with a REAL PTY owner. The child
             // runs the ordinary application and input loop; only the first
@@ -1018,7 +1028,8 @@ int main(int argc, char** argv) {
                 }
             }
 #endif
-            producer(d, 1u, 48u, std::chrono::milliseconds(28));
+            producer(d, 1u, 48u, std::chrono::milliseconds(
+                ci_rapid_virtual_producer ? 1 : 28));
         });
         tui_app_run(d.app);
         d.stop.store(true, std::memory_order_release);
