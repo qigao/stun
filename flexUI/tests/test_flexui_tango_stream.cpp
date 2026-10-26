@@ -1576,6 +1576,114 @@ spec("FlexUI MarkdownWidget through Tango async transport and cell renderer") {
         check(tui_transcript_destroy(transcript) == TUI_TRANSCRIPT_OK);
     }
 
+    it("keeps 256 retained C11 geometry samples linear and revision-safe") {
+        // Maximum private geometry-index capacity, with a real 256-message
+        // native transcript. This rejects quadratic old-ID lookup growth
+        // without requiring Box nodes for the 255 offscreen messages.
+        using Index = flex::tui_backend::TranscriptHeightIndex;
+        auto* transcript = tui_transcript_create(256u, 4096u, 64u);
+        check(transcript != nullptr);
+        if (!transcript) return;
+        std::uint64_t sequence = 0u;
+        const auto emit = [&](std::uint64_t id, std::uint32_t type) {
+            std::array<unsigned char, sizeof(tui_stream_packet_header_t)> data{};
+            const tui_stream_packet_header_t header{id};
+            std::memcpy(data.data(), &header, sizeof(header));
+            const tui_async_event_t event{
+                type, 1u, ++sequence, sizeof(header)
+            };
+            return tui_transcript_apply(
+                transcript, &event, data.data(), nullptr) ==
+                TUI_TRANSCRIPT_OK;
+        };
+        bool admitted = true;
+        for (std::uint64_t id = 1u; id <= 256u && admitted; ++id) {
+            std::uint64_t evicted = 99u;
+            admitted =
+                tui_transcript_open(transcript, id, &evicted) ==
+                    TUI_TRANSCRIPT_OK && evicted == 0u &&
+                emit(id, TUI_STREAM_BEGIN) &&
+                (id == 256u || emit(id, TUI_STREAM_END));
+        }
+        check(admitted);
+        if (!admitted) {
+            check(tui_transcript_destroy(transcript) == TUI_TRANSCRIPT_OK);
+            return;
+        }
+
+        Index heights(256u, 24.0f);
+        check(heights.sync(transcript, 180.0f, 7u) ==
+              Index::Status::Updated);
+        check(heights.size() == 256u);
+        for (std::uint64_t id = 1u; id <= 256u; ++id)
+            check(heights.record_height(
+                id, static_cast<float>(24u + id % 11u)));
+        check(heights.lookup(1u) && heights.lookup(1u)->measured);
+        check(heights.lookup(128u) && heights.lookup(128u)->measured);
+        check(heights.lookup(256u) && heights.lookup(256u)->measured);
+
+        std::array<std::int64_t, 96u> latencies_us{};
+        bool all_reused = true;
+        for (std::size_t turn = 0u; turn < latencies_us.size(); ++turn) {
+            const auto start = std::chrono::steady_clock::now();
+            const auto mapped =
+                heights.preview_locate_offset(transcript, 180.0f, 7u, 0.0);
+            const auto result = heights.sync(transcript, 180.0f, 7u);
+            latencies_us[turn] =
+                std::chrono::duration_cast<std::chrono::microseconds>(
+                    std::chrono::steady_clock::now() - start).count();
+            all_reused = all_reused &&
+                mapped && mapped->message_id == 1u &&
+                mapped->message_measured &&
+                result == Index::Status::Unchanged &&
+                heights.lookup(1u) && heights.lookup(1u)->measured &&
+                heights.lookup(128u) && heights.lookup(128u)->measured &&
+                heights.lookup(256u) && heights.lookup(256u)->measured;
+        }
+        check(all_reused);
+        const auto original_256 = heights.lookup(256u);
+        check(original_256 && original_256->measured);
+        check(emit(256u, TUI_STREAM_CANCEL));
+        const auto prospective = heights.preview_locate_offset(
+            transcript, 180.0f, 7u, 100000.0);
+        check(prospective && prospective->message_id == 256u &&
+              !prospective->message_measured);
+        // An unpublished preview must preserve the committed sample.
+        check(heights.lookup(256u) && heights.lookup(256u)->measured);
+        check(heights.sync(transcript, 180.0f, 7u) ==
+              Index::Status::Updated);
+        check(!heights.lookup(256u)->measured);
+        check(heights.lookup(128u) && heights.lookup(128u)->measured);
+
+        // Evict a settled prefix, preserving all surviving measurements.
+        std::uint64_t evicted = 0u;
+        check(tui_transcript_open(transcript, 257u, &evicted) ==
+              TUI_TRANSCRIPT_OK && evicted == 1u);
+        check(emit(257u, TUI_STREAM_BEGIN));
+        check(emit(257u, TUI_STREAM_END));
+        const auto preview = heights.preview_locate_offset(
+            transcript, 180.0f, 7u, 0.0);
+        check(preview && preview->message_id == 2u);
+        check(heights.lookup(1u) && heights.lookup(1u)->measured);
+        check(heights.sync(transcript, 180.0f, 7u) ==
+              Index::Status::Updated);
+        check(heights.size() == 256u && !heights.lookup(1u) &&
+              heights.lookup(2u) && heights.lookup(2u)->measured &&
+              heights.lookup(128u) && heights.lookup(128u)->measured &&
+              heights.lookup(257u) && !heights.lookup(257u)->measured);
+        std::sort(latencies_us.begin(), latencies_us.end());
+        const auto p50 = latencies_us[latencies_us.size() / 2u];
+        const auto p95 =
+            latencies_us[(latencies_us.size() - 1u) * 95u / 100u];
+        check(p50 <= p95);
+        std::printf(
+            "TUI_HEIGHT_INDEX_SYNC turns=96 retained=256 "
+            "p50_sync_us=%lld p95_sync_us=%lld\n",
+            static_cast<long long>(p50),
+            static_cast<long long>(p95));
+        check(tui_transcript_destroy(transcript) == TUI_TRANSCRIPT_OK);
+    }
+
     it("resolves value-only virtual spacer heights through real FlexUI CSS") {
         // Stage-test native CSS custom-property height rendering before any
         // private transcript virtualization is enabled in the live demo.

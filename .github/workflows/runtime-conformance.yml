@@ -494,6 +494,11 @@ jobs:
               "turns", "staging_mallocs", "p50_reuse_us",
               "p95_reuse_us", "cancel_reflow"
           )
+          height_expression = re.compile(
+              r"TUI_HEIGHT_INDEX_SYNC turns=(\\d+) retained=(\\d+) "
+              r"p50_sync_us=(\\d+) p95_sync_us=(\\d+)"
+          )
+          height_names = ("turns", "retained", "p50_sync_us", "p95_sync_us")
           paths = {
               "asan_ubsan": Path("build/xml-runtime/Testing/Temporary/LastTest.log"),
               "lsan": Path("build/xml-runtime-lsan/Testing/Temporary/LastTest.log"),
@@ -507,6 +512,7 @@ jobs:
               "virtual_modes": {},
               "wheel_modes": {},
               "reuse_modes": {},
+              "height_modes": {},
           }
           for mode, path in paths.items():
               log = path.read_text(encoding="utf-8")
@@ -583,6 +589,25 @@ jobs:
                       f"evidence {reuse_values}"
                   )
               evidence["reuse_modes"][mode] = reuse_values
+              height_matches = list(height_expression.finditer(log))
+              if len(height_matches) != 1:
+                  raise SystemExit(
+                      f"{mode}: expected exactly one TUI_HEIGHT_INDEX_SYNC "
+                      f"result in {path}, got {len(height_matches)}"
+                  )
+              height_values = dict(zip(
+                  height_names, (int(x) for x in height_matches[0].groups())
+              ))
+              if (height_values["turns"] != 96 or
+                  height_values["retained"] != 256 or
+                  height_values["p50_sync_us"] >
+                      height_values["p95_sync_us"] or
+                  height_values["p95_sync_us"] > 100000):
+                  raise SystemExit(
+                      f"{mode}: invalid 256-message bounded height sync "
+                      f"evidence {height_values}"
+                  )
+              evidence["height_modes"][mode] = height_values
           output = Path("build/tui-long-session-metrics.json")
           output.write_text(json.dumps(evidence, indent=2, sort_keys=True) + "\n",
                             encoding="utf-8")

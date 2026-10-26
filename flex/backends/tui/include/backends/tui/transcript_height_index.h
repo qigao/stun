@@ -268,6 +268,11 @@ private:
     bool changed = !same_layout || count != entries_.size();
     staged_.clear();
     std::uint64_t previous_id = 0u;
+    // Both the old committed index and the native snapshot have strictly
+    // increasing IDs. Merge them monotonically: a linear O(N) walk rather
+    // than find_if over all N old samples for every retained message.
+    // No intermediate allocation or uncommitted sample becomes visible.
+    std::size_t old_cursor = 0u;
     for (std::size_t i = 0u; i < count; ++i) {
       const tui_transcript_message_t& message = scratch_[i];
       if (!message.message_id || message.message_id <= previous_id ||
@@ -278,11 +283,14 @@ private:
       current.message_id = message.message_id;
       current.generation = message.stream.generation;
       current.last_sequence = message.stream.last_sequence;
-      const auto found = std::find_if(
-          entries_.begin(), entries_.end(), [&](const Entry& old) {
-            return old.message_id == current.message_id;
-          });
-      if (same_layout && found != entries_.end() &&
+      while (old_cursor < entries_.size() &&
+             entries_[old_cursor].message_id < current.message_id)
+        ++old_cursor;
+      const Entry* found = old_cursor < entries_.size() &&
+                           entries_[old_cursor].message_id ==
+                               current.message_id
+                               ? &entries_[old_cursor] : nullptr;
+      if (same_layout && found &&
           found->generation == current.generation &&
           found->last_sequence == current.last_sequence) {
         current.measured = found->measured;
