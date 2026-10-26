@@ -1946,6 +1946,176 @@ spec("FlexUI MarkdownWidget through Tango async transport and cell renderer") {
         check(tui_transcript_destroy(transcript) == TUI_TRANSCRIPT_OK);
     }
 
+    it("keeps mixed GFM history stable through capacity refusal, cancel, resize and eviction") {
+        // One retained ACTIVE stream: refused admission must leave both C11
+        // bytes and Box projection unchanged. Cancellation makes the same
+        // capacity reusable; late chunks must never change MarkdownWidget.
+        flexUI::Box box(nullptr);
+        box.set_viewport(240.0f, 160.0f);
+        box.load_css(
+            "#cancel-root {width:100%;height:100%;display:flex;"
+            "flex-direction:column;} "
+            "#cancel-window {width:75%;height:68px;overflow-y:scroll;"
+            "display:flex;flex-direction:column;} "
+            ".transcript-message {width:100%;flex-shrink:0;} "
+            ".tui-virtual-spacer {width:100%;flex-shrink:0;"
+            "height:var(--tui-virtual-height);}");
+        auto* root = box.create("div", "cancel-root");
+        auto* viewport = box.create("div", "cancel-window");
+        check(root && viewport);
+        if (!root || !viewport) return;
+        root->append(viewport);
+        box.set_root(root);
+        box.update();
+
+        flex::tui_backend::TranscriptWindow window(box, *viewport, 1u);
+        window.enable_height_tracking(1u, 24.0f);
+        window.enable_virtual_spacers();
+        auto* transcript = tui_transcript_create(1u, 4096u, 64u);
+        check(transcript != nullptr);
+        if (!transcript) return;
+
+        std::uint64_t sequence = 0u;
+        const auto apply = [&](std::uint64_t id, std::uint32_t type,
+                               std::string_view text) {
+            if (text.size() > 64u) return TUI_TRANSCRIPT_INVALID;
+            std::array<unsigned char,
+                       sizeof(tui_stream_packet_header_t) + 64u> packet{};
+            const tui_stream_packet_header_t header{id};
+            std::memcpy(packet.data(), &header, sizeof(header));
+            if (!text.empty())
+                std::memcpy(packet.data() + sizeof(header),
+                            text.data(), text.size());
+            const tui_async_event_t event{
+                type, 1u, ++sequence, sizeof(header) + text.size()
+            };
+            return tui_transcript_apply(
+                transcript, &event, packet.data(), nullptr);
+        };
+        const auto append = [&](std::uint64_t id, std::string_view text) {
+            for (std::size_t offset = 0u; offset < text.size();
+                 offset += 48u) {
+                if (apply(id, TUI_STREAM_CHUNK,
+                          text.substr(offset, 48u)) != TUI_TRANSCRIPT_OK)
+                    return false;
+            }
+            return true;
+        };
+        std::uint64_t evicted = 99u;
+        check(tui_transcript_open(transcript, 1u, &evicted) ==
+              TUI_TRANSCRIPT_OK && evicted == 0u);
+        check(apply(1u, TUI_STREAM_BEGIN, {}) == TUI_TRANSCRIPT_OK);
+        const std::string gfm =
+            "| 名称 | 渲染 |\n| --- | --- |\n"
+            "| 中文 😀 | 宽字符 |\n| long text | 代码 |\n\n"
+            "```c\nint value(void) {\n  return 42;\n}\n```\n\n"
+            "First paragraph with 中文 and emoji 😀.\n\n"
+            "Second paragraph with a longer wrapped GFM line.\n\n"
+            "Third paragraph for scrollable height.\n\n";
+        check(append(1u, gfm));
+        using Status = flex::tui_backend::TranscriptWindow::Status;
+        check(window.show_tail(transcript) == Status::Updated);
+        auto* host1 = window.visible_host(1u);
+        check(host1 != nullptr);
+        if (!host1) {
+            check(tui_transcript_destroy(transcript) == TUI_TRANSCRIPT_OK);
+            return;
+        }
+        check(host1->height() > 36.0f);
+        check(viewport->can_scroll_y());
+        check(viewport->child_count() == 3u);
+        const auto old_handle = box.handle_for(*host1);
+        const auto owned = box.owned_element_count();
+        const auto styles = box.cached_style_element_count();
+
+        // Capacity failure is transactional: an ACTIVE stream is never
+        // evicted just to admit a newer ID; a bad frame also cannot mutate
+        // its retained source or measured geometry.
+        check(tui_transcript_open(transcript, 2u, &evicted) ==
+              TUI_TRANSCRIPT_FULL);
+        check(evicted == 0u);
+        tui_transcript_message_t before{};
+        check(tui_transcript_get(transcript, 1u, &before) ==
+              TUI_TRANSCRIPT_OK &&
+              before.stream.state == TUI_STREAM_ACTIVE);
+        const tui_stream_packet_header_t header{1u};
+        const tui_async_event_t malformed{
+            TUI_STREAM_CHUNK, 1u, ++sequence,
+            sizeof(tui_stream_packet_header_t) - 1u};
+        check(tui_transcript_apply(
+                  transcript, &malformed, &header, nullptr) ==
+              TUI_TRANSCRIPT_INVALID);
+        const auto unchanged = window.show_tail(transcript);
+        check(unchanged == Status::Unchanged ||
+              unchanged == Status::Updated);
+        check(window.visible_host(1u) == host1);
+        check(box.resolve_handle(old_handle) == host1);
+        check(tui_transcript_count(transcript) == 1u);
+        check(viewport->child_count() == 3u);
+        std::size_t source_bytes = 0u;
+        const char* source = tui_transcript_text(
+            transcript, 1u, &source_bytes);
+        check(source && std::string_view(source, source_bytes) == gfm);
+
+        // Capture a genuine message-local coordinate, then cancel an
+        // in-flight producer while GFM remains visible. A late CHUNK is
+        // rejected, and the source is identical to the original bytes.
+        check(viewport->set_scroll_offset(0.0f, 12.0f));
+        const auto anchor = window.capture_scroll_anchor();
+        check(!anchor.follow_tail && anchor.message_id == 1u &&
+              std::fabs(anchor.within_message_y - 12.0f) < 2.5f);
+        check(apply(1u, TUI_STREAM_CANCEL, {}) == TUI_TRANSCRIPT_OK);
+        tui_transcript_message_t cancelled{};
+        check(tui_transcript_get(transcript, 1u, &cancelled) ==
+              TUI_TRANSCRIPT_OK &&
+              cancelled.stream.state == TUI_STREAM_CANCELLED);
+        check(apply(1u, TUI_STREAM_CHUNK, "late fragment") ==
+              TUI_TRANSCRIPT_STALE);
+        source = tui_transcript_text(transcript, 1u, &source_bytes);
+        check(source && std::string_view(source, source_bytes) == gfm);
+
+        // The same owner turn changes width and applies wheel movement;
+        // the cancel revision invalidates the cached height, so remeasure
+        // the retained GFM host before moving +8px within that message.
+        box.set_viewport(184.0f, 160.0f);
+        box.update();
+        flex::tui_backend::TranscriptScrollAnchor resolved{};
+        const auto moved = window.scroll_from_anchor(
+            transcript, anchor, 8.0, &resolved);
+        check(moved == Status::Updated || moved == Status::Unchanged);
+        check(resolved.message_id == 1u && !resolved.follow_tail &&
+              std::fabs(resolved.within_message_y - 20.0f) < 2.5f);
+        check(window.visible_host(1u) == host1);
+        check(std::fabs(viewport->scroll_y() -
+                        (host1->y() + 20.0f)) < 2.5f);
+        check(window.tracked_heights()->lookup(1u) &&
+              window.tracked_heights()->lookup(1u)->measured);
+        check(box.resolve_handle(old_handle) == host1);
+
+        // Native cancellation now permits eviction. The recycled host
+        // changes its generational UiHandle; no old payload or old height
+        // is permitted to leak into the newly admitted C11 message.
+        check(tui_transcript_open(transcript, 2u, &evicted) ==
+              TUI_TRANSCRIPT_OK && evicted == 1u);
+        check(apply(1u, TUI_STREAM_CHUNK, "after eviction") ==
+              TUI_TRANSCRIPT_STALE);
+        check(apply(2u, TUI_STREAM_BEGIN, {}) == TUI_TRANSCRIPT_OK);
+        check(append(2u, "## Fresh response\n\nA new settled message.\n"));
+        check(apply(2u, TUI_STREAM_END, {}) == TUI_TRANSCRIPT_OK);
+        check(window.show_tail(transcript) == Status::Updated);
+        check(window.visible_host(1u) == nullptr);
+        check(window.visible_host(2u) == host1);
+        check(box.resolve_handle(old_handle) == nullptr);
+        check(!window.tracked_heights()->lookup(1u));
+        check(window.tracked_heights()->lookup(2u) &&
+              window.tracked_heights()->lookup(2u)->measured);
+        check(viewport->child_count() == 3u);
+        check(box.owned_element_count() <= owned + 48u);
+        check(box.cached_style_element_count() <= styles + 48u);
+        check(tui_transcript_count(transcript) == 1u);
+        check(tui_transcript_destroy(transcript) == TUI_TRANSCRIPT_OK);
+    }
+
     it("follows the new tail after a hidden message invalidates measured spacer height") {
         // A hidden ACTIVE message changes its generation/sequence revision.
         // Its *previously measured* short height becomes an estimated 400px
