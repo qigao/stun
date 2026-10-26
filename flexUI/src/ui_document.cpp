@@ -34,7 +34,8 @@ UiDocumentError make_error(UiDocumentErrorCode code, std::string message, int li
 
 bool is_string_property(const std::string &name) {
   return name == "class" || name == "classes" || name == "utility" || name == "utilities" ||
-         name == "text" || name == "content" || name.rfind("on.", 0) == 0 ||
+         name == "text" || name == "content" || name == "slot" ||
+         name.rfind("on.", 0) == 0 ||
          name.rfind("bind.", 0) == 0;
 }
 
@@ -498,8 +499,41 @@ std::string value_to_string(const UiDocumentValue &value) {
   return output.str();
 }
 
-UiDocumentError validate_target(Box &box, const UiDocumentDefinition &definition) {
-  if (box.root()) {
+// Slots belong to one component instance, not the Box-global ID namespace.
+// Check the entire tree before any factory invocation or Box modification.
+UiDocumentError validate_slots(const UiNodeDefinition &root) {
+  std::unordered_set<std::string> names;
+  std::vector<const UiNodeDefinition *> pending{&root};
+  while (!pending.empty()) {
+    const auto *node = pending.back();
+    pending.pop_back();
+    const auto it = node->properties.find("slot");
+    if (it != node->properties.end()) {
+      const auto *slot = std::get_if<std::string>(&it->second);
+      if (!slot || slot->empty() || !names.emplace(*slot).second) {
+        const auto location = node->property_spans.find("slot");
+        const auto span = location == node->property_spans.end()
+                              ? node->source : location->second;
+        return make_error(UiDocumentErrorCode::DuplicateSlot,
+                          "UI slot must be a unique non-empty string",
+                          span.line, span.column);
+      }
+    }
+    for (const auto &child : node->children) pending.push_back(&child);
+  }
+  return {};
+}
+
+std::string scoped_id(std::string_view local, const UiMountOptions &options) {
+  if (options.id_policy == UiIdPolicy::Scoped) {
+    return options.id_scope + "::" + std::string(local);
+  }
+  return std::string(local);
+}
+
+UiDocumentError validate_target(Box &box, const UiDocumentDefinition &definition,
+                                const UiMountOptions &options) {
+  if (options.mode == UiMountMode::Root && box.root()) {
     return make_error(UiDocumentErrorCode::BoxAlreadyHasRoot,
                       "UI document requires a Box without an installed root");
   }
@@ -508,9 +542,11 @@ UiDocumentError validate_target(Box &box, const UiDocumentDefinition &definition
   while (!pending.empty()) {
     const UiNodeDefinition *node = pending.back();
     pending.pop_back();
-    if (!node->id.empty() && box.get_by_id(node->id)) {
+    if (!node->id.empty() && options.id_policy != UiIdPolicy::LocalOnly &&
+        box.get_by_id(scoped_id(node->id, options))) {
       return make_error(UiDocumentErrorCode::ElementIdConflict,
-                        "Box already contains element id: " + node->id);
+                        "Box already contains element id: " +
+                            scoped_id(node->id, options));
     }
     for (const auto &[name, value] : node->properties) {
       if (name != "utility" && name != "utilities") {
@@ -527,9 +563,7 @@ UiDocumentError validate_target(Box &box, const UiDocumentDefinition &definition
         }
       }
     }
-    for (const auto &child : node->children) {
-      pending.push_back(&child);
-    }
+    for (const auto &child : node->children) pending.push_back(&child);
   }
   return {};
 }
@@ -538,6 +572,7 @@ struct DetachedTree {
   Element *root = nullptr;
   std::vector<std::unique_ptr<Element>> elements;
   std::unordered_map<std::string, Element *> elements_by_id;
+  std::unordered_map<std::string, Element *> slots_by_name;
   struct DetachedWidget {
     Element *host = nullptr;
     std::unique_ptr<Widget> widget;
@@ -571,6 +606,9 @@ void apply_properties(Element &element, const UiNodeDefinition &definition,
   if (const auto *text = find_property("text", "content")) {
     element.set_text(std::get<std::string>(*text));
   }
+  if (const auto *slot = find_property("slot")) {
+    element.set_attribute("data-slot", std::get<std::string>(*slot));
+  }
   if (const auto *focusable = find_property("focusable")) {
     element.focusable = std::get<bool>(*focusable);
   }
@@ -580,7 +618,8 @@ void apply_properties(Element &element, const UiNodeDefinition &definition,
 
   for (const auto &[name, value] : definition.properties) {
     if (name == "class" || name == "classes" || name == "utility" || name == "utilities" ||
-        name == "text" || name == "content" || name == "focusable" || name == "tab_index") {
+        name == "text" || name == "content" || name == "slot" ||
+        name == "focusable" || name == "tab_index") {
       continue;
     }
     if (name.rfind("attr.", 0) == 0) {
@@ -635,6 +674,10 @@ Element *build_node(const UiNodeDefinition &definition, DetachedTree &tree,
     tree.elements_by_id.emplace(definition.id, raw);
   }
   tree.elements.push_back(std::move(element));
+  if (const auto found = definition.properties.find("slot");
+      found != definition.properties.end()) {
+    tree.slots_by_name.emplace(std::get<std::string>(found->second), raw);
+  }
   if (widget) {
     tree.widgets.push_back({raw, std::move(widget)});
   }
@@ -909,12 +952,13 @@ UiDocumentCompileResult compile_ui_definition(
 
 UiDocumentInstantiateResult
 UiDocumentInstantiator::instantiate(Box &box, const UiDocumentDefinition &definition) {
-  return instantiate_impl(box, definition, nullptr, nullptr);
+  return instantiate_impl(box, definition, nullptr, nullptr, {});
 }
 
 UiDocumentInstantiateResult UiDocumentInstantiator::instantiate_impl(
     Box &box, const UiDocumentDefinition &definition,
-    const CompiledUiProgram *program, const WidgetRegistry *registry) {
+    const CompiledUiProgram *program, const WidgetRegistry *registry,
+    const UiMountOptions &options) {
   UiDocumentInstantiateResult result;
   if (definition.name.empty()) {
     result.error =
@@ -941,10 +985,54 @@ UiDocumentInstantiateResult UiDocumentInstantiator::instantiate_impl(
     }
   }
 
-  result.error = validate_target(box, definition);
-  if (result.error) {
+  if (options.mode == UiMountMode::Root) {
+    if (options.parent || options.id_policy != UiIdPolicy::Global ||
+        !options.id_scope.empty()) {
+      result.error = make_error(UiDocumentErrorCode::InvalidMountTarget,
+                                "root mount requires global IDs and no parent");
+      return result;
+    }
+  } else if (options.mode == UiMountMode::DetachedFragment) {
+    if (options.parent) {
+      result.error = make_error(UiDocumentErrorCode::InvalidMountTarget,
+                                "detached fragment must not have a parent");
+      return result;
+    }
+  } else if (options.mode == UiMountMode::Child) {
+    if (!options.parent || !box.owns_element(options.parent) ||
+        options.parent->is_widget_owned()) {
+      result.error = make_error(UiDocumentErrorCode::InvalidMountTarget,
+                                "child mount requires a Box-owned application parent");
+      return result;
+    }
+  } else {
+    result.error = make_error(UiDocumentErrorCode::InvalidMountTarget,
+                              "unknown UI mount mode");
     return result;
   }
+  if (options.id_policy == UiIdPolicy::Scoped) {
+    if (options.id_scope.empty() ||
+        options.id_scope.size() > UiDocumentLimits{}.max_string_bytes / 2) {
+      result.error = make_error(UiDocumentErrorCode::InvalidIdScope,
+                                "scoped IDs require a bounded nonempty namespace");
+      return result;
+    }
+  } else if (!options.id_scope.empty()) {
+    result.error = make_error(UiDocumentErrorCode::InvalidIdScope,
+                              "ID namespace supplied without scoped policy");
+    return result;
+  }
+  if (options.mode != UiMountMode::Root && program &&
+      (!program->event_bindings().empty() || !program->bindings().empty())) {
+    result.error = make_error(UiDocumentErrorCode::UnsupportedFragmentBindings,
+                              "compiled fragment controller bindings require scoped resolution");
+    return result;
+  }
+
+  result.error = validate_slots(definition.root);
+  if (result.error) return result;
+  result.error = validate_target(box, definition, options);
+  if (result.error) return result;
 
   DetachedTree detached;
   std::optional<UiBindingRuntime::TransactionCheckpoint> binding_transaction;
@@ -955,6 +1043,8 @@ UiDocumentInstantiateResult UiDocumentInstantiator::instantiate_impl(
   const std::uint64_t original_element_generation =
       box.next_element_generation_;
   bool index_committed = false;
+  bool child_attached = false;
+  std::vector<Element *> original_children;
   const auto *bindings = program ? &program->impl_->bindings : nullptr;
   try {
     UiDocumentError build_error;
@@ -979,8 +1069,9 @@ UiDocumentInstantiateResult UiDocumentInstantiator::instantiate_impl(
             event_binding.handler);
       }
     }
-    detached.root->set_attribute("data-flexui-theme-root");
-    switch (box.theme_mode()) {
+    if (options.mode == UiMountMode::Root) {
+      detached.root->set_attribute("data-flexui-theme-root");
+      switch (box.theme_mode()) {
     case ThemeMode::System:
       detached.root->remove_attribute("data-theme");
       break;
@@ -990,16 +1081,36 @@ UiDocumentInstantiateResult UiDocumentInstantiator::instantiate_impl(
     case ThemeMode::Dark:
       detached.root->set_attribute("data-theme", "dark");
       break;
+      }
     }
 
     auto next_index = box.elements_by_id_;
     std::uint64_t next_generation = box.next_element_generation_;
     for (const auto &[id, element] : detached.elements_by_id) {
+      if (options.id_policy == UiIdPolicy::LocalOnly) continue;
+      const auto global_id = scoped_id(id, options);
+      if (options.id_policy == UiIdPolicy::Scoped) {
+        element->set_element_id(global_id);
+      }
       if (next_generation == 0) {
         throw std::overflow_error(
             "FlexUI element handle generation exhausted");
       }
-      next_index[id] = {element, next_generation++};
+      next_index[global_id] = {element, next_generation++};
+    }
+    // Stage the Child parent's target list before adopting anything into Box.
+    // Element::replace_children does all allocation before its pointer swap.
+    std::vector<Element *> next_children;
+    if (options.mode == UiMountMode::Child) {
+      const auto &children = options.parent->children();
+      original_children.reserve(children.size());
+      next_children.reserve(children.size() + 1);
+      for (auto *child : children) {
+        auto *entry = static_cast<Element *>(child);
+        original_children.push_back(entry);
+        next_children.push_back(entry);
+      }
+      next_children.push_back(detached.root);
     }
     box.elements_.reserve(box.elements_.size() + detached.elements.size());
     box.widgets_.reserve(box.widgets_.size() + detached.widgets.size());
@@ -1059,11 +1170,20 @@ UiDocumentInstantiateResult UiDocumentInstantiator::instantiate_impl(
     box.elements_by_id_.swap(next_index);
     box.next_element_generation_ = next_generation;
     index_committed = true;
-    box.set_root(detached.root);
+    if (options.mode == UiMountMode::Root) {
+      box.set_root(detached.root);
+    } else if (options.mode == UiMountMode::Child) {
+      options.parent->replace_children(next_children);
+      child_attached = true;
+    }
     if (binding_transaction) {
       box.bindings_.commit_transaction(*binding_transaction);
     }
   } catch (const std::exception &exception) {
+    if (child_attached) {
+      try { options.parent->replace_children(original_children); }
+      catch (...) { /* commit path must be no-throw after child publication */ }
+    }
     if (binding_transaction) {
       box.bindings_.rollback_transaction(*binding_transaction);
     }
@@ -1073,7 +1193,8 @@ UiDocumentInstantiateResult UiDocumentInstantiator::instantiate_impl(
     box.widgets_.resize(original_widget_count);
     if (index_committed) {
       for (const auto &[id, element] : detached.elements_by_id) {
-        auto found = box.elements_by_id_.find(id);
+        if (options.id_policy == UiIdPolicy::LocalOnly) continue;
+        auto found = box.elements_by_id_.find(scoped_id(id, options));
         if (found != box.elements_by_id_.end() &&
             found->second.element == element) {
           box.elements_by_id_.erase(found);
@@ -1095,24 +1216,37 @@ UiDocumentInstantiateResult UiDocumentInstantiator::instantiate_impl(
 
   result.tree.root = detached.root;
   result.tree.elements_by_id = std::move(detached.elements_by_id);
+  result.tree.slots_by_name = std::move(detached.slots_by_name);
   return result;
 }
 
 UiDocumentInstantiateResult
 UiDocumentInstantiator::instantiate(Box &box, const CompiledUiProgram &program) {
-  return instantiate_impl(box, program.definition(), &program, nullptr);
+  return instantiate_impl(box, program.definition(), &program, nullptr, {});
 }
 
 UiDocumentInstantiateResult UiDocumentInstantiator::instantiate(
     Box &box, const UiDocumentDefinition &definition,
     const WidgetRegistry &registry) {
-  return instantiate_impl(box, definition, nullptr, &registry);
+  return instantiate_impl(box, definition, nullptr, &registry, {});
 }
 
 UiDocumentInstantiateResult UiDocumentInstantiator::instantiate(
     Box &box, const CompiledUiProgram &program,
     const WidgetRegistry &registry) {
-  return instantiate_impl(box, program.definition(), &program, &registry);
+  return instantiate_impl(box, program.definition(), &program, &registry, {});
+}
+
+UiDocumentInstantiateResult UiDocumentInstantiator::instantiate(
+    Box &box, const CompiledUiProgram &program, const WidgetRegistry &registry,
+    const UiMountOptions &options) {
+  return instantiate_impl(box, program.definition(), &program, &registry, options);
+}
+
+UiDocumentInstantiateResult UiDocumentInstantiator::instantiate(
+    Box &box, const UiDocumentDefinition &definition,
+    const WidgetRegistry &registry, const UiMountOptions &options) {
+  return instantiate_impl(box, definition, nullptr, &registry, options);
 }
 
 } // namespace flexUI
