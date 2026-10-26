@@ -94,9 +94,12 @@ if(STUN_BUILD_TUI_STREAMING_DEMO)
     STUN_TUI_DEMO_HEADLESS_TEST=1)
   target_include_directories(flexui_tui_streaming_demo PRIVATE
     "${STUN_ROOT}/tango/src")
+  # No mode switch: the default smoke MUST exercise bounded coordinate
+  # virtual scrolling with live Box height measurement and scroll anchors.
   add_test(NAME tui_streaming_demo_smoke
     COMMAND flexui_tui_streaming_demo --headless-smoke)
   set_tests_properties(tui_streaming_demo_smoke PROPERTIES TIMEOUT 90)
+  # Compatibility alias for applications still passing the old mode flag.
   # Same 80x24 synthetic-owner/front-buffer fixture with virtual geometry.
   # In particular, 80x24 equals the provisional Box size: the FIRST owner
   # turn must lay out root/viewport before height-index sync is admitted.
@@ -104,6 +107,12 @@ if(STUN_BUILD_TUI_STREAMING_DEMO)
     COMMAND flexui_tui_streaming_demo --headless-smoke
       --experimental-virtual-spacers)
   set_tests_properties(tui_streaming_demo_smoke_virtual_spacers
+    PROPERTIES TIMEOUT 90)
+  # An explicit opt-out must preserve the old fixed-host message-step mode.
+  add_test(NAME tui_streaming_demo_smoke_legacy
+    COMMAND flexui_tui_streaming_demo --headless-smoke
+      --legacy-message-scroll)
+  set_tests_properties(tui_streaming_demo_smoke_legacy
     PROPERTIES TIMEOUT 90)
   add_dependencies(stun_xml_runtime_qualification flexui_tui_streaming_demo)
 
@@ -139,10 +148,18 @@ if(STUN_BUILD_TUI_STREAMING_DEMO)
         "$<TARGET_FILE:flexui_tui_streaming_demo>" --home-burst)
     set_tests_properties(tui_streaming_demo_posix_pty_home_burst
       PROPERTIES TIMEOUT 60)
-    # Explicit experimental application switch: real OS PTY input, worker
-    # streaming, retained-message eviction, native Box spacer geometry,
-    # SIGWINCH 80x24 -> 52x16, and terminal state restoration.
-    # The default PTY and strict macOS Home regression remain separate.
+    # Explicit opt-out under a real PTY preserves the old message-step
+    # browse behavior and the same strict screen/termios restoration gate.
+    add_test(NAME tui_streaming_demo_posix_pty_legacy
+      COMMAND "${Python3_EXECUTABLE}"
+        "${STUN_ROOT}/flexUI/tests/test_tui_streaming_pty.py"
+        "$<TARGET_FILE:flexui_tui_streaming_demo>" --legacy-message-scroll)
+    set_tests_properties(tui_streaming_demo_posix_pty_legacy
+      PROPERTIES TIMEOUT 60)
+    # Additional stress of the *default* virtual mode with a CI-only rapid
+    # producer: real OS PTY input, history eviction, native Spacer geometry,
+    # SIGWINCH 80x24 -> 52x16, and terminal restoration.
+    # The ordinary-rate default PTY / strict macOS Home gates remain.
     add_test(NAME tui_streaming_demo_posix_pty_virtual_spacers
       COMMAND "${Python3_EXECUTABLE}"
         "${STUN_ROOT}/flexUI/tests/test_tui_streaming_pty.py"
@@ -178,13 +195,18 @@ if(STUN_BUILD_TUI_STREAMING_DEMO)
         "$<TARGET_FILE:flexui_tui_streaming_demo>")
     set_tests_properties(tui_streaming_demo_win32_conpty_plain
       PROPERTIES TIMEOUT 85)
-    # Separate opt-in experiment: the ordinary Tango owner and real ConPTY
-    # host still perform ResizePseudoConsole and inspect actual output.
+    # Compatibility alias on the default virtual path; both the ordinary
+    # no-argument and alias tests use the same real ConPTY host/resizer.
     # No synthetic console replaces the default plain/native tests.
     add_test(NAME tui_streaming_demo_win32_conpty_virtual_spacers
       COMMAND test_tui_win32_conpty --virtual-spacers
         "$<TARGET_FILE:flexui_tui_streaming_demo>")
     set_tests_properties(tui_streaming_demo_win32_conpty_virtual_spacers
+      PROPERTIES TIMEOUT 85)
+    add_test(NAME tui_streaming_demo_win32_conpty_legacy
+      COMMAND test_tui_win32_conpty --legacy-message-scroll
+        "$<TARGET_FILE:flexui_tui_streaming_demo>")
+    set_tests_properties(tui_streaming_demo_win32_conpty_legacy
       PROPERTIES TIMEOUT 85)
     add_dependencies(stun_xml_runtime_qualification test_tui_win32_conpty)
   endif()
