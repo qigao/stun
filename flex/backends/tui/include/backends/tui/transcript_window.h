@@ -547,6 +547,19 @@ private:
       return Status::ResourceExhausted;
     }
 
+    // Preallocate the Box child list before the height-index sync or the
+    // first Spacer/UiHandle mutation. Even on a global new failure, the
+    // previously projected window, styling, scroll and geometry stay intact.
+    std::vector<flexUI::Element*> children;
+    try {
+      children.reserve(count + (leading_spacer_ ? 2u : 0u));
+      if (leading_spacer_) children.push_back(leading_spacer_);
+      for (Slot* slot : next) children.push_back(slot->host);
+      if (trailing_spacer_) children.push_back(trailing_spacer_);
+    } catch (const std::bad_alloc&) {
+      return Status::ResourceExhausted;
+    }
+
     // Reject invalid or over-capacity geometry snapshots before modifying
     // a live widget ID or publishing a new Box topology. Unlike a full DOM,
     // the optional cache stores at most native retainer capacity records.
@@ -580,19 +593,6 @@ private:
     // anchor retains its numeric scroll position across streaming reflow.
     const bool different_anchor = count != 0u &&
         (visible_.empty() || visible_[0]->message_id != desired[0].id);
-    // Preallocate children before the first identity/Box mutation. Failure
-    // cannot leave half a recycled host or an incomplete replacement list.
-    std::vector<flexUI::Element*> children;
-    if (different) {
-      try {
-        children.reserve(count + (leading_spacer_ ? 2u : 0u));
-        if (leading_spacer_) children.push_back(leading_spacer_);
-        for (Slot* slot : next) children.push_back(slot->host);
-        if (trailing_spacer_) children.push_back(trailing_spacer_);
-      } catch (const std::bad_alloc&) {
-        return Status::ResourceExhausted;
-      }
-    }
     if (!different) {
       if (policy == ScrollPolicy::PreserveAnchor && anchor) {
         // Reflow can change host geometry even when the Markdown source did
