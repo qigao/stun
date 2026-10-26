@@ -261,12 +261,16 @@ bool on_key(int command, void* ptr) {
         return true;
     }
     const std::size_t count = tui_transcript_count(d.transcript);
-    if (!count) return true;
     if (command == Oldest) {
+        // Home is an intent, even before the first asynchronous BEGIN has
+        // been admitted. Keep a pending oldest anchor (zero) until the
+        // owner receives its first retained message; never turn this into
+        // a follow-tail request just because the transcript was empty.
         d.following = false;
-        d.anchor = id_at(d.transcript, 0u);
+        d.anchor = count ? id_at(d.transcript, 0u) : 0u;
         return true;
     }
+    if (!count) return true;
     if (command != Older && command != Newer) return true;
     const std::size_t tail_start = count > kVisible ? count - kVisible : 0u;
     std::size_t first = tail_start;
@@ -372,6 +376,12 @@ void on_view(const void* ptr, tui_buffer_t* back) {
             return;
         }
 #endif
+        // Resolve an early Home request when the first BEGIN arrives.
+        // A value-only zero anchor is pending intent, not an invalid query
+        // and not permission to resume following a streaming producer.
+        if (!d.following && !d.anchor &&
+            tui_transcript_count(d.transcript) != 0u)
+            d.anchor = id_at(d.transcript, 0u);
         // Snapshot BEFORE a viewport resize changes Box layout geometry.
         // The value contains no borrowed Element or C11 text pointer.
         const auto prior_scroll = d.window->capture_scroll_anchor();
@@ -382,7 +392,7 @@ void on_view(const void* ptr, tui_buffer_t* back) {
         const bool continuing_history = !d.following && d.anchor != 0u &&
             d.projected_anchor == d.anchor &&
             prior_scroll.message_id != 0u && !prior_scroll.follow_tail;
-        const auto status = d.following
+        const auto status = d.following || d.anchor == 0u
             ? d.window->show_tail(d.transcript)
             : continuing_history
                 ? d.window->show_preserving_anchor(d.transcript, prior_scroll)
@@ -542,13 +552,34 @@ int headless_smoke() {
     term->color_mode = TUI_COLOR_TRUECOLOR;
     term->write_output = fake_write;
 
+    // Home can be delivered after the first visible tail frame yet before
+    // the worker has admitted any BEGIN. Its owner state must persist; it
+    // must not be discarded as a legal empty-history navigation no-op.
+    const bool empty_at_home = tui_transcript_count(d.transcript) == 0u;
+    const bool home_before_begin = on_key(Oldest, &d);
+    on_view(&d, tui_terminal_buffer(term));
+    const bool pending_oldest = home_before_begin && empty_at_home &&
+        d.valid && !d.following && d.anchor == 0u &&
+        format_status(d, 80, 24).find(" | scrollback | ") !=
+            std::string::npos;
+
     std::thread worker(producer, std::ref(d), 1u, 22u,
                        std::chrono::milliseconds(1));
     bool okay = true;
+    bool bound_oldest_after_begin = false;
     std::size_t frames = 0u;
     for (std::size_t attempt = 0u; attempt < 8000u; ++attempt) {
         if (!tui_app_dispatch_once(d.app)) { okay = false; break; }
         ++frames;
+        if (!bound_oldest_after_begin && !d.following && d.anchor &&
+            d.window->visible_host(d.anchor) != nullptr) {
+            bound_oldest_after_begin =
+                d.anchor == id_at(d.transcript, 0u);
+            // Re-enable tail following only after the pending Home was
+            // exercised against a real owner-published message window.
+            (void)on_key(Tail, &d);
+            on_view(&d, tui_terminal_buffer(term));
+        }
         tui_async_queue_stats_t stats{};
         if (tui_async_queue_get_stats(tui_app_async_queue(d.app),
                                       &stats) != TUI_ASYNC_OK) {
@@ -685,7 +716,8 @@ int headless_smoke() {
         tui_terminal_render(term) && rendered();
     term->initialized = false; // synthetic output never changed OS console
     shutdown(d);
-    if (!okay || !at_tail || !bounded || !browsed || !did_cancel ||
+    if (!okay || !pending_oldest || !bound_oldest_after_begin ||
+        !at_tail || !bounded || !browsed || !did_cancel ||
         !anchored || !returned || !returned_oldest || !resized ||
         !local_anchor_preserved || !single_row_status || frames < 3u)
         return 4;
