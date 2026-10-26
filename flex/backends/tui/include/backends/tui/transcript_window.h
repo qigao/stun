@@ -71,6 +71,10 @@ public:
       throw std::invalid_argument("invalid bounded transcript viewport");
     }
     slots_.reserve(max_visible);
+    // The public visible slot list is permanently bounded by max_visible.
+    // Reserve before any live projection so pointer assignment cannot
+    // allocate after the first host identity is mutated.
+    visible_.reserve(max_visible);
     scratch_.resize(max_visible);
     for (std::size_t i = 0u; i < max_visible; ++i) {
       auto* host = box_.create_widget<flexUI::MarkdownWidget>(
@@ -517,6 +521,32 @@ private:
       return Status::ResourceExhausted;
     }
 
+    // Complete both bounded pointer planning and all vector allocations
+    // before syncing height records or changing any Box Spacer/UiHandle.
+    // A staging allocator failure leaves the last projected window intact.
+    std::pmr::vector<Slot*> next(staging_resource_);
+    try {
+      next.reserve(count);
+    for (const auto& item : desired) {
+      Slot* existing = nullptr;
+      for (auto& slot : slots_)
+        if (slot.message_id == item.id) { existing = &slot; break; }
+      next.push_back(existing);
+    }
+    for (std::size_t i = 0u; i < count; ++i) {
+      if (next[i]) continue;
+      for (auto& slot : slots_) {
+        if (std::find(next.begin(), next.end(), &slot) != next.end())
+          continue;
+        next[i] = &slot;
+        break;
+      }
+      if (!next[i]) return Status::QueryRejected;
+    }
+    } catch (const std::bad_alloc&) {
+      return Status::ResourceExhausted;
+    }
+
     // Reject invalid or over-capacity geometry snapshots before modifying
     // a live widget ID or publishing a new Box topology. Unlike a full DOM,
     // the optional cache stores at most native retainer capacity records.
@@ -534,25 +564,6 @@ private:
     if (!prepare_virtual_spacers(
             count ? desired[0].id : 0u, count, spacers_changed))
       return Status::QueryRejected;
-    std::vector<Slot*> next;
-    next.reserve(count);
-    for (const auto& item : desired) {
-      Slot* existing = nullptr;
-      for (auto& slot : slots_)
-        if (slot.message_id == item.id) { existing = &slot; break; }
-      next.push_back(existing);
-    }
-    for (std::size_t i = 0u; i < count; ++i) {
-      if (next[i]) continue;
-      for (auto& slot : slots_) {
-        if (std::find(next.begin(), next.end(), &slot) != next.end())
-          continue;
-        next[i] = &slot;
-        break;
-      }
-      if (!next[i]) return Status::QueryRejected;
-    }
-
     bool different = count != visible_.size();
     for (std::size_t i = 0u; i < count && !different; ++i)
       // Fixed Box slots can be recycled for a different message with
@@ -569,6 +580,19 @@ private:
     // anchor retains its numeric scroll position across streaming reflow.
     const bool different_anchor = count != 0u &&
         (visible_.empty() || visible_[0]->message_id != desired[0].id);
+    // Preallocate children before the first identity/Box mutation. Failure
+    // cannot leave half a recycled host or an incomplete replacement list.
+    std::vector<flexUI::Element*> children;
+    if (different) {
+      try {
+        children.reserve(count + (leading_spacer_ ? 2u : 0u));
+        if (leading_spacer_) children.push_back(leading_spacer_);
+        for (Slot* slot : next) children.push_back(slot->host);
+        if (trailing_spacer_) children.push_back(trailing_spacer_);
+      } catch (const std::bad_alloc&) {
+        return Status::ResourceExhausted;
+      }
+    }
     if (!different) {
       if (policy == ScrollPolicy::PreserveAnchor && anchor) {
         // Reflow can change host geometry even when the Markdown source did
@@ -635,18 +659,15 @@ private:
       }
     }
 
-    std::vector<flexUI::Element*> children;
-    children.reserve(count + (leading_spacer_ ? 2u : 0u));
-    if (leading_spacer_) children.push_back(leading_spacer_);
     for (std::size_t i = 0u; i < count; ++i) {
       auto* slot = next[i];
       slot->markdown->set_markdown(desired[i].text);
       slot->markdown->update(0.0f, *slot->host);
-      children.push_back(slot->host);
     }
-    if (trailing_spacer_) children.push_back(trailing_spacer_);
     viewport_.replace_children(children);
-    visible_ = std::move(next);
+    // Capacity was reserved in the constructor: this only copies bounded
+    // Slot* values and cannot allocate on the live mutation path.
+    visible_.assign(next.begin(), next.end());
     box_.invalidate();
     box_.update();
     record_visible_heights();
