@@ -419,11 +419,14 @@ void on_view(const void* ptr, tui_buffer_t* back) {
             const bool resized = d.box->viewport_width() != width ||
                                  d.box->viewport_height() != height;
             d.box->set_viewport(width, height);
-            if (resized && d.experimental_virtual_spacers) {
-                // Height sync() reads viewport.width(); force the newly
-                // sized Box geometry BEFORE it decides which samples to
-                // invalidate. Without this the first SIGWINCH frame can
-                // reuse a previous-width offscreen height estimate.
+            if (d.experimental_virtual_spacers &&
+                (resized || d.viewport->width() <= 0.0f)) {
+                // A real 80x24 terminal matches the demo's provisional
+                // 640x384 viewport size on the FIRST frame. Equal sizes do
+                // not imply Box has ever laid out its root: sync() would
+                // otherwise reject zero viewport width before any cells
+                // are published. Also reflow BEFORE invalidating cached
+                // heights after a real SIGWINCH/ConPTY resize.
                 d.box->update();
             }
         }
