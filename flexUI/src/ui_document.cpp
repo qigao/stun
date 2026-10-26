@@ -511,7 +511,8 @@ std::string value_to_string(const UiDocumentValue &value) {
 
 // Slots belong to one component instance, not the Box-global ID namespace.
 // Check the entire tree before any factory invocation or Box modification.
-UiDocumentError validate_slots(const UiNodeDefinition &root) {
+UiDocumentError validate_slots(const UiNodeDefinition &root,
+                               const UiMountOptions &options) {
   std::unordered_set<std::string> names;
   std::vector<const UiNodeDefinition *> pending{&root};
   while (!pending.empty()) {
@@ -530,6 +531,16 @@ UiDocumentError validate_slots(const UiNodeDefinition &root) {
       }
     }
     for (const auto &child : node->children) pending.push_back(&child);
+  }
+  if (options.required_slots.size() > UiDocumentLimits{}.max_nodes) {
+    return make_error(UiDocumentErrorCode::NodeLimitExceeded,
+                      "component requires more slots than the node budget");
+  }
+  for (const auto &required : options.required_slots) {
+    if (required.empty() || names.count(required) == 0) {
+      return make_error(UiDocumentErrorCode::MissingSlot,
+                        "UI component requires missing slot: " + required);
+    }
   }
   return {};
 }
@@ -1049,7 +1060,7 @@ UiDocumentInstantiateResult UiDocumentInstantiator::instantiate_impl(
     return result;
   }
 
-  result.error = validate_slots(definition.root);
+  result.error = validate_slots(definition.root, options);
   if (result.error) return result;
   if (options.id_policy == UiIdPolicy::Scoped) {
     for (const auto &id : ids) {
