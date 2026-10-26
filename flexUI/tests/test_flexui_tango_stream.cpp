@@ -16,9 +16,11 @@
 #include "tui_app_internal.h"
 #include "tui_terminal_internal.h"
 
+#include <algorithm>
 #include <array>
 #include <chrono>
 #include <cmath>
+#include <cstdio>
 #include <cstdint>
 #include <cstring>
 #include <limits>
@@ -26,6 +28,7 @@
 #include <string>
 #include <string_view>
 #include <thread>
+#include <vector>
 
 namespace {
 
@@ -1082,6 +1085,124 @@ spec("FlexUI MarkdownWidget through Tango async transport and cell renderer") {
         check(box.focused_element() == focus);
         check(tui_transcript_destroy(transcript_state) ==
               TUI_TRANSCRIPT_OK);
+    }
+
+    it("bounds real transcript projection ownership over 512 owner turns") {
+        // Exercise the actual C11 registry + fixed-slot FlexUI window, not a
+        // fake list or benchmark-only renderer. Structural budgets are hard
+        // assertions; observed p50/p95 timings establish an exact-head CI
+        // baseline before choosing any machine-dependent latency threshold.
+        constexpr std::uint64_t kMessages = 512u;
+        constexpr std::size_t kRetained = 4u;
+        constexpr std::size_t kVisible = 3u;
+        constexpr std::size_t kMaxChunk = 64u;
+        flexUI::Box box(nullptr);
+        box.set_viewport(320.0f, 160.0f);
+        box.load_css(
+            "#root { width:320px; height:160px; display:flex; "
+            "flex-direction:column; } "
+            "#long-window { width:280px; height:96px; overflow-y:scroll; "
+            "display:flex; flex-direction:column; } "
+            ".transcript-message { width:280px; flex-shrink:0; }");
+        auto* root = box.create("div", "root");
+        auto* viewport = box.create("div", "long-window");
+        check(root && viewport);
+        if (!root || !viewport) return;
+        root->append(viewport);
+        box.set_root(root);
+        flex::tui_backend::TranscriptWindow window(box, *viewport, kVisible);
+        const std::size_t initial_owned = box.owned_element_count();
+
+        auto* transcript = tui_transcript_create(kRetained, 512u, kMaxChunk);
+        check(transcript != nullptr);
+        if (!transcript) return;
+        std::uint64_t sequence = 0u;
+        const auto emit = [&](std::uint64_t id, std::uint32_t type,
+                              std::string_view text) {
+            if (text.size() > kMaxChunk) return false;
+            std::array<unsigned char,
+                       sizeof(tui_stream_packet_header_t) + kMaxChunk> data{};
+            const tui_stream_packet_header_t header{id};
+            std::memcpy(data.data(), &header, sizeof(header));
+            if (!text.empty())
+                std::memcpy(data.data() + sizeof(header),
+                            text.data(), text.size());
+            const tui_async_event_t event{
+                type, 1u, ++sequence, sizeof(header) + text.size()
+            };
+            return tui_transcript_apply(
+                transcript, &event, data.data(), nullptr) ==
+                TUI_TRANSCRIPT_OK;
+        };
+
+        std::vector<std::int64_t> update_us;
+        update_us.reserve(static_cast<std::size_t>(kMessages));
+        std::size_t peak_owned = initial_owned;
+        std::size_t peak_cached_styles = 0u;
+        const auto session_start = std::chrono::steady_clock::now();
+        bool all_accepted = true;
+        for (std::uint64_t id = 1u; id <= kMessages; ++id) {
+            std::uint64_t evicted = 0u;
+            if (tui_transcript_open(transcript, id, &evicted) !=
+                    TUI_TRANSCRIPT_OK ||
+                evicted != (id > kRetained ? id - kRetained : 0u)) {
+                all_accepted = false;
+                break;
+            }
+            const std::string markdown =
+                "# Response " + std::to_string(id) +
+                "\n\nStreaming 中 **content**.\n";
+            if (!emit(id, TUI_STREAM_BEGIN, {}) ||
+                !emit(id, TUI_STREAM_CHUNK, markdown) ||
+                !emit(id, TUI_STREAM_END, {})) {
+                all_accepted = false;
+                break;
+            }
+
+            const auto start = std::chrono::steady_clock::now();
+            const auto status = window.show_tail(transcript);
+            box.update();
+            update_us.push_back(
+                std::chrono::duration_cast<std::chrono::microseconds>(
+                    std::chrono::steady_clock::now() - start).count());
+            peak_owned = std::max(peak_owned, box.owned_element_count());
+            peak_cached_styles = std::max(
+                peak_cached_styles, box.cached_style_element_count());
+            const auto expected_visible = std::min<std::size_t>(
+                kVisible, static_cast<std::size_t>(id));
+            const auto expected_retained = std::min<std::size_t>(
+                kRetained, static_cast<std::size_t>(id));
+            check(status == flex::tui_backend::TranscriptWindow::Status::Updated);
+            check(window.slot_capacity() == kVisible);
+            check(window.visible_count() == expected_visible);
+            check(viewport->child_count() == expected_visible);
+            check(window.visible_host(id) != nullptr);
+            check(tui_transcript_count(transcript) == expected_retained);
+            // These budgets cover Box-owned projections and pointer-keyed
+            // style baselines. LSan independently checks teardown leaks.
+            check(box.owned_element_count() <= initial_owned + 96u);
+            check(box.cached_style_element_count() <= initial_owned + 96u);
+        }
+        const auto elapsed_ms =
+            std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::steady_clock::now() - session_start).count();
+        check(all_accepted);
+        check(update_us.size() == static_cast<std::size_t>(kMessages));
+        if (!update_us.empty()) {
+            std::sort(update_us.begin(), update_us.end());
+            const auto p50 = update_us[update_us.size() / 2u];
+            const auto p95 = update_us[
+                (update_us.size() - 1u) * 95u / 100u];
+            std::printf(
+                "TUI_LONG_SESSION iterations=%zu elapsed_ms=%lld "
+                "p50_update_us=%lld p95_update_us=%lld "
+                "peak_box_elements=%zu peak_style_baselines=%zu\n",
+                update_us.size(), static_cast<long long>(elapsed_ms),
+                static_cast<long long>(p50),
+                static_cast<long long>(p95),
+                peak_owned, peak_cached_styles);
+        }
+        check(tui_transcript_destroy(transcript) == TUI_TRANSCRIPT_OK);
     }
 
     it("retires intermediate Markdown projections during repeated owner updates") {
