@@ -475,6 +475,16 @@ jobs:
           virtual_names = (
               "turns", "peak_elements", "peak_styles", "visible_hosts"
           )
+          wheel_expression = re.compile(
+              r"TUI_VIRTUAL_WHEEL turns=(\d+) elapsed_ms=(\d+) "
+              r"p50_scroll_us=(\d+) p95_scroll_us=(\d+) "
+              r"peak_elements=(\d+) visible_hosts=(\d+) "
+              r"fast_path_hits=(\d+)"
+          )
+          wheel_names = (
+              "turns", "elapsed_ms", "p50_scroll_us", "p95_scroll_us",
+              "peak_elements", "visible_hosts", "fast_path_hits"
+          )
           paths = {
               "asan_ubsan": Path("build/xml-runtime/Testing/Temporary/LastTest.log"),
               "lsan": Path("build/xml-runtime-lsan/Testing/Temporary/LastTest.log"),
@@ -486,6 +496,7 @@ jobs:
                         "p95_update_us": "us"},
               "modes": {},
               "virtual_modes": {},
+              "wheel_modes": {},
           }
           for mode, path in paths.items():
               log = path.read_text(encoding="utf-8")
@@ -520,6 +531,28 @@ jobs:
                       f"{virtual_values}"
                   )
               evidence["virtual_modes"][mode] = virtual_values
+              wheel_matches = list(wheel_expression.finditer(log))
+              if len(wheel_matches) != 1:
+                  raise SystemExit(
+                      f"{mode}: expected exactly one TUI_VIRTUAL_WHEEL "
+                      f"result in {path}, got {len(wheel_matches)}"
+                  )
+              wheel_values = dict(zip(
+                  wheel_names, (int(x) for x in wheel_matches[0].groups())
+              ))
+              if (wheel_values["turns"] != 96 or
+                  wheel_values["fast_path_hits"] != 96 or
+                  wheel_values["visible_hosts"] != 2 or
+                  wheel_values["peak_elements"] > 96 or
+                  wheel_values["elapsed_ms"] > 30000 or
+                  wheel_values["p95_scroll_us"] > 100000 or
+                  wheel_values["p50_scroll_us"] >
+                      wheel_values["p95_scroll_us"]):
+                  raise SystemExit(
+                      f"{mode}: invalid bounded semantic-wheel evidence "
+                      f"{wheel_values}"
+                  )
+              evidence["wheel_modes"][mode] = wheel_values
           output = Path("build/tui-long-session-metrics.json")
           output.write_text(json.dumps(evidence, indent=2, sort_keys=True) + "\n",
                             encoding="utf-8")
@@ -545,6 +578,16 @@ jobs:
                                 f'{result["peak_elements"]} | '
                                 f'{result["peak_styles"]} | '
                                 f'{result["visible_hosts"]} |\n')
+                  out.write("\n### 96-turn semantic wheel baseline (opt-in)\n\n")
+                  out.write("| Mode | Total ms | p50 us | p95 us | "
+                            "Peak Box nodes | Fast path hits |\n")
+                  out.write("|---|---:|---:|---:|---:|---:|\n")
+                  for mode, result in evidence["wheel_modes"].items():
+                      out.write(f'| {mode} | {result["elapsed_ms"]} | '
+                                f'{result["p50_scroll_us"]} | '
+                                f'{result["p95_scroll_us"]} | '
+                                f'{result["peak_elements"]} | '
+                                f'{result["fast_path_hits"]} |\n')
           print(output.read_text(encoding="utf-8"))
           PY
 
