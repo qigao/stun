@@ -24,54 +24,57 @@ examples directory also configures desktop examples and may require their
 GLFW/OpenGL build prerequisites; this sample itself has no GPU or window
 dependency.
 
-### Experimental virtual-spacer terminal path (explicit opt-in)
+### Bounded virtual scrolling (enabled by default in this Demo)
 
-Run the **same physical-terminal** demo with an application-local flag:
+The ordinary physical-terminal launch now uses the retained-height index,
+five recyclable Markdown hosts and two Box-owned virtual Spacer nodes:
 
 ```sh
-<path-to-built-executable>/flexui_tui_streaming_demo --experimental-virtual-spacers
+<path-to-built-executable>/flexui_tui_streaming_demo
 ```
 
-The default invocation remains unchanged. This experimental path enables
-the existing private `TranscriptHeightIndex` and **two Box-owned virtual
-Spacer nodes** ahead of and behind at most five actual MarkdownWidget hosts.
-The native C11 transcript still admits at most 12 monotonically increasing
-message IDs, and the existing Tango UI Owner processes input and mailbox
-events; there is no second queue, parser, event loop, or public Tango ABI.
+To compare with the historical message-by-message scroll behavior:
 
-- Heights of visible retained messages are recorded from **real Box layout**;
-  unseen offscreen heights are explicit estimates, not pixel-exact claims.
-- When resizing a physical terminal, the app updates Box viewport geometry
-  **before** the height index checks width-based sample validity. A native
-  `SIGWINCH` or ConPTY host resize cannot qualify against the old width.
-- Home/End and cancellation keep their existing message-level semantics.
-  In the **experimental** mode only, real Up/Down/Page and wheel inputs
-  instead add or subtract three terminal-cell rows in Box layout coordinates.
-  The existing UI Owner batches these deltas, maps the absolute viewport
-  coordinate through the bounded retained-message height index, rebinds
-  at most five hosts, then restores the message-local offset after real
-  Box measurement. Two opposite moves within one Owner turn cancel without
-  switching the user's original tail/history intent.
-- Estimated offscreen heights are explicitly approximate. This is a
-  private, fixed-step coordinate-to-window experiment, **not** a general
-  touchpad precision-delta or scrollbar drag API, a character-accurate
-  unseen-message locator, nor a complete production variable-height
-  transcript virtualization implementation.
-- The flag does not persist or change any user/default setting. It is intended
-  for qualification and can be discarded without affecting normal users.
+```sh
+<path-to-built-executable>/flexui_tui_streaming_demo --legacy-message-scroll
+```
 
-Independent CI test entries exercise the **unmodified owner/UI loop** under
-kernel POSIX PTY with `--virtual-spacers` and Windows ConPTY with
-`--virtual-spacers`. They preserve the ordinary PTY/ConPTY tests, external
-visible cell assertions, 80×24 → 52×16 host resize and complete terminal
-restoration. The POSIX fixture additionally checks a bounded out-of-band
-post-Box owner frame for the expected host count and exactly two Spacers.
-The experimental POSIX PTY also sends 24 real SGR wheel-up events after a
-settled 12-message history and requires the first projected retained message
-ID to move backwards, rather than accepting a `tail`→`scrollback` label alone.
-An independent headless owner smoke checks the coordinate crossing and the
-balanced Up/Down coalescing contract. A green experimental test does not
-permit enabling virtualization by default.
+The previous `--experimental-virtual-spacers` CLI flag is still accepted
+as a compatibility alias for the **new default**. It is no longer necessary
+to enable the virtual path. This only changes **this Streaming Demo's default
+presentation policy**: other applications using the `TranscriptWindow`
+API still choose whether to call `enable_height_tracking()` and
+`enable_virtual_spacers()` explicitly. Neither Tango's C11 API,
+the event loop, the queue, nor the application's retention limit changes.
+
+- The native `tui_transcript` keeps at most 12 monotonically increasing
+  message IDs, while FlexUI materializes at most five message hosts.
+  Unseen history takes numeric heights in the two Spacer elements.
+- Measured height comes from actual `MarkdownWidget` and `Box`
+  layout. An unseen, never-rendered message has an **approximate** height.
+  Scrolling into it refreshes the bounded window, measures it and preserves
+  the retained message-ID + within-message offset anchor.
+- Home/End preserve their oldest/follow-tail semantics; Up/Down/Page and
+  mouse wheel move three terminal-cell rows through the height index.
+  Opposing input in the same Owner turn cancels without changing the
+  original follow/history intent. Native `SIGWINCH` or ConPTY resizing
+  invalidates width-sensitive measured samples before rebinding.
+- The explicit legacy mode skips the virtual index and Spacers, using the
+  old one-retained-message-per-navigation-step behavior. It is a reversible
+  diagnostic/user preference, not a second event loop or renderer.
+- This is **bounded message-window virtualization**, not unbounded
+  persistent history, touchpad precision deltas, pixel-perfect geometry
+  for unseen variable-height GFM, or a finished TurboAgent/TUI product.
+
+Independent installed-SDK tests must validate the *default* real POSIX PTY,
+Windows Console and ConPTY, and also explicitly run the legacy opt-out.
+The required default PTY oracles inspect actual Home/End visible cells,
+a post-Box owner frame with **exactly two Spacer nodes**, real wheel input,
+80x24→52x16 terminal resize and complete terminal restoration. Separate
+rapid-history PTY tests exercise 24 real SGR wheel events across estimated
+history and validate that the oldest projected retained ID changes.
+ASan/UBSan and independent LSan retain the 256-entry height index,
+variable-height GFM growth/shrink, allocator rollback and bounded-host gates.
 
 The focused installed-SDK headless project offers the same executable with
 `STUN_BUILD_TUI_STREAMING_DEMO=ON` (the default for that project). Its
@@ -92,8 +95,8 @@ establish physical console/IME behavior.
 
 | Input | Action |
 |---|---|
-| Up / Page Up / mouse wheel up | Default: browse one older retained message; experiment: scroll three terminal text rows towards history |
-| Down / Page Down / mouse wheel down | Default: browse one newer retained message; experiment: scroll three terminal text rows towards newer content |
+| Up / Page Up / mouse wheel up | Scroll three terminal text rows toward history (legacy opt-out: one older retained message) |
+| Down / Page Down / mouse wheel down | Scroll three terminal text rows toward new content (legacy opt-out: one newer retained message) |
 | Home | View the oldest retained message |
 | End | Follow the newest messages |
 | c | Cancel the current scripted response |
@@ -149,9 +152,14 @@ the window and C11 transcript before releasing the terminal.
   Windows and macOS headless/real-terminal tests succeeded on the LSan-gate
   integration commit. Production TurboAgent usage remains outside scope.
 
-PRs #265 (Tango queue) and #268 (Markdown consumer) must be reviewed and
-integrated independently before #269 is rebased/retargeted to master.
-CI success alone is not an independent merge approval.
+The underlying Tango, Markdown consumer, and bounded transcript work were
+merged via [#265](https://github.com/qigao/stun/pull/265),
+[#268](https://github.com/qigao/stun/pull/268) and
+[#269](https://github.com/qigao/stun/pull/269).
+This default-policy change is separately qualified against that merged base.
 
-Tracking: [Stun Issue #266](https://github.com/qigao/stun/issues/266),
-[Draft PR #269](https://github.com/qigao/stun/pull/269).
+Tracking: [Streaming contract #266](https://github.com/qigao/stun/issues/266)
+and [physical macOS PTY Home diagnosis #270](https://github.com/qigao/stun/issues/270).
+Issue #270 remains independent of enabling the opt-in-reversible virtual
+presentation policy. Passing repeated PTY sessions does not demonstrate the
+root cause of the previous intermittent Home deadline.
