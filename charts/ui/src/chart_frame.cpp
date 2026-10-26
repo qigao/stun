@@ -32,10 +32,12 @@ std::string pixel_value(float value) {
 const flexUI::CompiledUiProgram& chart_frame_template() {
   static auto compiled = [] {
     const auto result = flexUI::compile_ui_xml(R"xml(
-<ui name="ChartFrame" xmlns:attr="urn:flexui:attribute">
+<ui name="ChartFrame" xmlns:attr="urn:flexui:attribute"
+    xmlns:var="urn:flexui:css-variable">
   <figure slot="chart" attr:role="figure"
           class="flex flex-col relative w-full box-border rounded-lg border bg-card text-card-foreground p-4 gap-4">
-    <figcaption slot="chart-title" class="text-sm font-medium" />
+    <figcaption slot="chart-title" class="text-sm font-medium"
+                var:overflow-wrap="anywhere" />
     <div slot="chart-surface" attr:role="img" class="relative w-full" />
     <div slot="chart-legend" attr:role="list"
          class="flex items-center justify-center gap-4 text-sm" />
@@ -118,9 +120,6 @@ ChartFrame create_chart_frame(flexUI::Box& box,
   frame.tooltip = optional_slot(installed.tree, "chart-tooltip");
   if (!frame.root || !frame.surface) {
     throw std::logic_error("ChartFrame missing mandatory XML slots");
-  }
-  if (frame.title) {
-    frame.title->set_custom_property("--overflow-wrap", "anywhere");
   }
   return frame;
 }
