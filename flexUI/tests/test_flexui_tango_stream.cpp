@@ -1869,9 +1869,21 @@ spec("FlexUI MarkdownWidget through Tango async transport and cell renderer") {
                 16.0, &wheel_anchor);
             check(next_coordinate == Status::Updated ||
                   next_coordinate == Status::Unchanged);
+            // At this point the width changed, so cached Box heights
+            // were invalidated to 24px estimates. Three estimates total
+            // 72px, exactly the 72px viewport height; subtracting the
+            // viewport from that provisional total would have suppressed
+            // the wheel step entirely, despite real scrollable Markdown.
+            // The evicted #2 anchor must first clamp to retained #3 at
+            // local zero, then admit the requested +16px within #3.
             check(!wheel_anchor.follow_tail &&
-                  wheel_anchor.message_id >= 3u &&
-                  wheel_anchor.message_id <= 5u);
+                  wheel_anchor.message_id == 3u &&
+                  std::fabs(wheel_anchor.within_message_y - 16.0f) < 2.5f);
+            auto* measured3 = window.visible_host(3u);
+            check(measured3 != nullptr);
+            if (measured3)
+                check(std::fabs(viewport->scroll_y() -
+                         (measured3->y() + 16.0f)) < 2.5f);
             // Invalid/non-retained anchors never resurrect an evicted ID,
             // and an invalid value cannot mutate live Box scroll state.
             const float before_bad_anchor = viewport->scroll_y();
