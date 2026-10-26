@@ -270,6 +270,26 @@ def run_test(executable, early_home=False, home_burst=False,
                     "unbounded/incorrect virtual Box children: %r" %
                     last_geometry)
 
+    def last_owner_epoch():
+        with open(input_trace, "rb") as trace:
+            records = trace.read(16384).splitlines()
+        views = [line for line in records
+                 if line.startswith(b"owner_view_epoch=")]
+        if not views:
+            return -1
+        match = re.search(rb"owner_view_epoch=(\d+)", views[-1])
+        return int(match.group(1)) if match else -1
+
+    def last_virtual_first():
+        with open(input_trace, "rb") as trace:
+            records = trace.read(16384).splitlines()
+        geometry = [line for line in records
+                    if line.startswith(b"virtual_geometry epoch=")]
+        if not geometry:
+            return 0
+        match = re.search(rb"first=(\d+)", geometry[-1])
+        return int(match.group(1)) if match else 0
+
     def mode_matches(original, restored):
         return original == restored
 
@@ -394,6 +414,35 @@ def run_test(executable, early_home=False, home_burst=False,
             # This is not a headless index-only acceptance: the wheel
             # entered the real UI Owner and Box now contains bounded
             # message hosts plus two physical Spacer elements.
+            require_last_owner_frame(2, False)
+
+            # Let the scripted worker settle before comparing first
+            # projected message IDs. The existing concurrent wheel/Home
+            # cases remain intact; this extra phase isolates *coordinate
+            # mapping* from C11 settled-message eviction while checking
+            # the same real terminal and owner loop.
+            until("virtual transcript reaches retained full settled history",
+                  lambda: screen.retained() == 12 and
+                  "settled=48" in screen.status(), 24.0)
+            previous_epoch = last_owner_epoch()
+            send(b"\x1b[F")
+            until("virtual End owner frame after final settle",
+                  lambda: screen.mode() == "tail" and
+                  last_owner_epoch() > previous_epoch, 5.0)
+            first_tail = last_virtual_first()
+            require(first_tail > 0,
+                    "missing first projected message at virtual tail")
+            previous_epoch = last_owner_epoch()
+
+            # One burst of actual SGR wheel events now traverses the
+            # previous offscreen Spacer. The UI Owner must reproject
+            # *older retained messages*, not merely change footer text.
+            # Keep actual Home/End and 52x16 terminal restoration checks.
+            send(b"\x1b[<64;3;3M" * 24)
+            until("real wheel coordinate rewindows retained virtual hosts",
+                  lambda: screen.mode() == "scrollback" and
+                  last_owner_epoch() > previous_epoch and
+                  0 < last_virtual_first() < first_tail, 8.0)
             require_last_owner_frame(2, False)
 
         # Resize an actual PTY, deliver SIGWINCH to the child with a genuine
