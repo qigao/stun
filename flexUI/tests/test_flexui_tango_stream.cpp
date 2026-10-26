@@ -1371,6 +1371,22 @@ spec("FlexUI MarkdownWidget through Tango async transport and cell renderer") {
         check(!heights.window_extent(9u, 2u).has_value());
         check(!heights.window_extent(13u, 2u).has_value());
         check(!heights.window_extent(11u, 0u).has_value());
+        check(!heights.locate_offset(-1.0));
+        check(!heights.locate_offset(
+            std::numeric_limits<double>::quiet_NaN()));
+        const auto estimated_start = heights.locate_offset(2.0);
+        check(estimated_start && estimated_start->message_id == 10u &&
+              estimated_start->prefix_exact &&
+              !estimated_start->message_measured);
+        const auto measured_middle =
+            heights.locate_offset(24.0 + height11 / 2.0);
+        check(measured_middle && measured_middle->message_id == 11u &&
+              !measured_middle->prefix_exact &&
+              measured_middle->message_measured);
+        const auto last_retain =
+            heights.locate_offset(heights.total_height_estimate());
+        check(last_retain && last_retain->message_id == 13u &&
+              !last_retain->message_measured);
         const auto height_info12 = heights.lookup(12u);
         check(height_info12 && height_info12->measured);
         const auto before12 = heights.height_before(12u);
@@ -1450,6 +1466,9 @@ spec("FlexUI MarkdownWidget through Tango async transport and cell renderer") {
         check(!heights.height_before(10u));
         check(heights.height_before(11u).has_value());
         check(!heights.window_extent(10u, 2u));
+        const auto now_oldest = heights.locate_offset(0.0);
+        check(now_oldest && now_oldest->message_id == 11u &&
+              now_oldest->prefix_exact);
         const auto evicted_plan = heights.window_extent(11u, 2u);
         check(evicted_plan && std::fabs(evicted_plan->leading) < 0.01);
         check(window.show_tail(transcript) ==
