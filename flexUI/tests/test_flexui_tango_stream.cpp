@@ -1089,6 +1089,163 @@ spec("FlexUI MarkdownWidget through Tango async transport and cell renderer") {
               TUI_TRANSCRIPT_OK);
     }
 
+    it("keeps a bounded variable-height message anchor across reflow and eviction") {
+        // Test the actual C11 transcript -> MarkdownWidget -> Box layout
+        // instead of estimating offscreen heights. No full-history DOM tree.
+        flexUI::Box box(nullptr);
+        box.set_viewport(320.0f, 176.0f);
+        box.load_css(
+            "#root { display:flex; flex-direction:column; width:100%; "
+            "height:100%; } "
+            "#anchor-window { display:flex; flex-direction:column; "
+            "width:80%; height:72px; overflow-y:scroll; } "
+            ".transcript-message { width:100%; flex-shrink:0; }");
+        auto* root = box.create("div", "root");
+        auto* viewport = box.create("div", "anchor-window");
+        check(root && viewport);
+        if (!root || !viewport) return;
+        root->append(viewport);
+        box.set_root(root);
+        flex::tui_backend::TranscriptWindow window(box, *viewport, 3u);
+        const std::size_t original_nodes = box.owned_element_count();
+        auto* transcript = tui_transcript_create(3u, 8192u, 128u);
+        check(transcript != nullptr);
+        if (!transcript) return;
+        std::uint64_t sequence = 0u;
+        const auto emit = [&](std::uint64_t id, std::uint32_t type,
+                              std::string_view chunk) {
+            if (chunk.size() > 128u) return false;
+            std::array<unsigned char,
+                       sizeof(tui_stream_packet_header_t) + 128u> bytes{};
+            const tui_stream_packet_header_t header{id};
+            std::memcpy(bytes.data(), &header, sizeof(header));
+            if (!chunk.empty())
+                std::memcpy(bytes.data() + sizeof(header),
+                            chunk.data(), chunk.size());
+            const tui_async_event_t event{
+                type, 1u, ++sequence, sizeof(header) + chunk.size()
+            };
+            return tui_transcript_apply(
+                transcript, &event, bytes.data(), nullptr) ==
+                TUI_TRANSCRIPT_OK;
+        };
+        const auto paragraphs = [](std::uint64_t id, unsigned n) {
+            std::string source = "# Message " + std::to_string(id) + "\n\n";
+            for (unsigned i = 0u; i < n; ++i)
+                source += "Wrapped 中 **Markdown** paragraph for layout.\n\n";
+            return source;
+        };
+        const auto send_source = [&](std::uint64_t id, const std::string& source) {
+            for (std::size_t offset = 0u; offset < source.size(); offset += 96u) {
+                const auto size = std::min<std::size_t>(96u, source.size() - offset);
+                if (!emit(id, TUI_STREAM_CHUNK,
+                          std::string_view(source.data() + offset, size)))
+                    return false;
+            }
+            return true;
+        };
+        bool accepted = true;
+        for (std::uint64_t id = 1u; id <= 3u; ++id) {
+            std::uint64_t evicted = 99u;
+            const std::string text = paragraphs(id, id == 3u ? 16u : 5u);
+            accepted = accepted &&
+                tui_transcript_open(transcript, id, &evicted) ==
+                    TUI_TRANSCRIPT_OK && evicted == 0u &&
+                emit(id, TUI_STREAM_BEGIN, {}) &&
+                send_source(id, text) &&
+                (id == 1u || emit(id, TUI_STREAM_END, {}));
+        }
+        check(accepted);
+        if (!accepted) {
+            check(tui_transcript_destroy(transcript) == TUI_TRANSCRIPT_OK);
+            return;
+        }
+        using Status = flex::tui_backend::TranscriptWindow::Status;
+        check(window.show(transcript, 0u) == Status::Updated);
+        box.update();
+        auto* host2 = window.visible_host(2u);
+        auto* host3 = window.visible_host(3u);
+        check(host2 && host3 && viewport->can_scroll_y());
+        if (!host2 || !host3 || !viewport->can_scroll_y()) {
+            check(tui_transcript_destroy(transcript) == TUI_TRANSCRIPT_OK);
+            return;
+        }
+        const float requested = host2->y() + 6.0f;
+        check(viewport->max_scroll_y() > requested + 2.0f);
+        if (viewport->max_scroll_y() <= requested + 2.0f) {
+            check(tui_transcript_destroy(transcript) == TUI_TRANSCRIPT_OK);
+            return;
+        }
+        check(viewport->set_scroll_offset(0.0f, requested));
+        const auto anchor = window.capture_scroll_anchor();
+        check(!anchor.follow_tail && anchor.message_id == 2u);
+        check(std::fabs(anchor.within_message_y - 6.0f) < 2.0f);
+        if (anchor.follow_tail || anchor.message_id != 2u) {
+            check(tui_transcript_destroy(transcript) == TUI_TRANSCRIPT_OK);
+            return;
+        }
+        const float previous_top = host2->y();
+        check(send_source(1u, paragraphs(1u, 12u)));
+        check(window.show_preserving_anchor(transcript, anchor) ==
+              Status::Updated);
+        check(window.visible_host(2u) == host2);
+        check(host2->y() > previous_top + 2.0f);
+        check(std::fabs(viewport->scroll_y() -
+                        (host2->y() + anchor.within_message_y)) < 2.0f);
+
+        // The stored value survives a real Box/CSS reflow. The caller captures
+        // it before resize; the bounded owner then repositions the same ID.
+        box.set_viewport(240.0f, 176.0f);
+        box.update();
+        const auto resized = window.show_preserving_anchor(transcript, anchor);
+        check(resized == Status::Updated || resized == Status::Unchanged);
+        check(window.visible_host(2u) == host2);
+        check(std::fabs(viewport->scroll_y() -
+                        (host2->y() + anchor.within_message_y)) < 2.0f);
+
+        // Only explicit follow-tail requests may override a scroll-away.
+        check(viewport->set_scroll_offset(0.0f, viewport->max_scroll_y()));
+        const auto following = window.capture_scroll_anchor();
+        check(following.follow_tail);
+        const auto tail_result = window.show_preserving_anchor(transcript, following);
+        check(tail_result == Status::Updated || tail_result == Status::Unchanged);
+        check(std::fabs(viewport->scroll_y() - viewport->max_scroll_y()) < 2.0f);
+
+        // Oldest completed message is evicted while the chosen anchor (2)
+        // remains retained: keep its host identity, not an absolute scrollY.
+        check(emit(1u, TUI_STREAM_END, {}));
+        std::uint64_t evicted = 0u;
+        check(tui_transcript_open(transcript, 4u, &evicted) ==
+              TUI_TRANSCRIPT_OK && evicted == 1u);
+        check(emit(4u, TUI_STREAM_BEGIN, {}));
+        check(send_source(4u, paragraphs(4u, 12u)));
+        check(emit(4u, TUI_STREAM_END, {}));
+        check(window.show_preserving_anchor(transcript, anchor) ==
+              Status::Updated);
+        check(window.visible_host(2u) == host2);
+        check(window.visible_host(3u) == host3);
+        check(std::fabs(viewport->scroll_y() -
+                        (host2->y() + anchor.within_message_y)) < 2.0f);
+
+        // Once message 2 is evicted, an old anchor clamps to oldest retained
+        // #3 at its start; it must NOT force End/tail or reuse ID 2's host.
+        check(tui_transcript_open(transcript, 5u, &evicted) ==
+              TUI_TRANSCRIPT_OK && evicted == 2u);
+        check(emit(5u, TUI_STREAM_BEGIN, {}));
+        check(send_source(5u, paragraphs(5u, 10u)));
+        check(emit(5u, TUI_STREAM_END, {}));
+        check(window.show_preserving_anchor(transcript, anchor) ==
+              Status::Updated);
+        check(window.visible_host(2u) == nullptr);
+        check(window.visible_host(3u) == host3);
+        check(viewport->scroll_y() < 1.0f);
+        check(window.visible_count() <= 3u);
+        check(viewport->child_count() <= 3u);
+        check(box.owned_element_count() <= original_nodes + 96u);
+        check(box.cached_style_element_count() <= original_nodes + 96u);
+        check(tui_transcript_destroy(transcript) == TUI_TRANSCRIPT_OK);
+    }
+
     it("bounds real transcript projection ownership over 512 owner turns") {
         // Exercise the actual C11 registry + fixed-slot FlexUI window, not a
         // fake list or benchmark-only renderer. Structural budgets are hard
