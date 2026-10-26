@@ -87,7 +87,9 @@ ChartFrame create_chart_frame(flexUI::Box& box,
     throw std::invalid_argument("ChartFrame XML specialization failed: " +
                                 compiled.error.message);
   }
-  auto registry = flexUI::WidgetRegistry::builtins();
+  // The compiled XML program and immutable factory catalog are shared;
+  // neither caches a Box/Element or any chart-specific mutable state.
+  static const auto registry = flexUI::WidgetRegistry::builtins();
   flexUI::UiMountOptions mount;
   mount.mode = flexUI::UiMountMode::DetachedFragment;
   mount.id_policy = flexUI::UiIdPolicy::LocalOnly;
