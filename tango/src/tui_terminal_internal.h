@@ -102,6 +102,11 @@ bool tui_terminal_input_push(tui_terminal_t *term, const void *data,
                              size_t size);
 bool tui_terminal_input_next(tui_terminal_t *term, tui_event_t *event);
 bool tui_terminal_input_flush(tui_terminal_t *term, tui_event_t *event);
+/* Private POSIX select-result boundary, used by production poll and C11
+ * signal-interruption conformance. Not a public Tango header or ABI. */
+bool tui_terminal_input_after_wait(tui_terminal_t *term,
+                                   tui_event_t *event,
+                                   int select_result, int select_error);
 #endif
 
 #ifdef __cplusplus

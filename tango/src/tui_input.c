@@ -14,6 +14,7 @@
 #include <unistd.h>
 #include <sys/select.h>
 #include <signal.h>
+#include <errno.h>
 #endif
 
 /* Forward declaration of terminal struct */
@@ -565,6 +566,25 @@ bool tui_terminal_input_flush(tui_terminal_t *term, tui_event_t *event) {
     return false;
 }
 
+/* A signal-interrupted select() has NOT observed the 10ms ambiguity
+ * timeout. In particular, do not flush an unfinished ESC [ prefix when a
+ * concurrent SIGWINCH interrupts the read: its final Home/End byte may
+ * arrive on the next owner turn. This private result seam is exercised by
+ * the native C11 tests; production poll() calls exactly the same path. */
+bool tui_terminal_input_after_wait(tui_terminal_t *term,
+                                   tui_event_t *event,
+                                   int select_result, int select_error) {
+    if (!term || !event || select_result > 0) return false;
+    if (tui_terminal_consume_resize_pending()) {
+        memset(event, 0, sizeof(*event));
+        event->type = TUI_EVENT_RESIZE;
+        return true;
+    }
+    if (select_result < 0 && select_error == EINTR)
+        return false; /* Preserve incomplete CSI for the next poll. */
+    return tui_terminal_input_flush(term, event);
+}
+
 bool tui_terminal_poll(tui_terminal_t* term, tui_event_t* event) {
     if (!term || !event) return false;
 
@@ -584,14 +604,10 @@ bool tui_terminal_poll(tui_terminal_t* term, tui_event_t* event) {
 
         /* Wait briefly only while disambiguating a partial escape sequence. */
         struct timeval tv = {0, term->input_len != 0u ? 10000 : 0};
-        if (select(STDIN_FILENO + 1, &fds, NULL, NULL, &tv) <= 0) {
-            if (tui_terminal_consume_resize_pending()) {
-                memset(event, 0, sizeof(*event));
-                event->type = TUI_EVENT_RESIZE;
-                return true;
-            }
-            return tui_terminal_input_flush(term, event);
-        }
+        const int selected = select(STDIN_FILENO + 1, &fds, NULL, NULL, &tv);
+        if (selected <= 0)
+            return tui_terminal_input_after_wait(
+                term, event, selected, selected < 0 ? errno : 0);
 
         unsigned char buf[32];
         const size_t available = sizeof(term->input_bytes) - term->input_len;
