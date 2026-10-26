@@ -1494,6 +1494,36 @@ spec("FlexUI MarkdownWidget through Tango async transport and cell renderer") {
         check(window.leading_spacer_height() < 1.0f);
         check(viewport->child_count() == 4u);
         check(std::fabs(viewport->scroll_y()) < 1.0f);
+        // A measured middle message may be selected without materializing
+        // the newest history; the existing first Host is retained.
+        const auto* current11 = window.visible_host(11u);
+        const auto* current12 = window.visible_host(12u);
+        const auto middle_start = live_index->height_before(12u);
+        check(middle_start.has_value());
+        if (middle_start && live_index->lookup(12u) &&
+            live_index->lookup(12u)->measured) {
+            const auto requested_y = *middle_start + 2.0;
+            const auto mapped = window.virtual_location(requested_y);
+            check(mapped && mapped->message_id == 12u &&
+                  mapped->prefix_exact && mapped->message_measured);
+            const auto reposition = window.show_at_scroll_offset(
+                transcript, requested_y);
+            check(reposition ==
+                      flex::tui_backend::TranscriptWindow::Status::Updated ||
+                  reposition ==
+                      flex::tui_backend::TranscriptWindow::Status::Unchanged);
+            check(window.visible_host(11u) == current11);
+            check(window.visible_host(12u) == current12);
+            check(std::fabs(viewport->scroll_y() -
+                            (current12->y() + 2.0)) < 2.0);
+        }
+        const auto rejected_scroll = window.show_at_scroll_offset(
+            transcript, std::numeric_limits<double>::quiet_NaN());
+        check(rejected_scroll ==
+              flex::tui_backend::TranscriptWindow::Status::Invalid);
+        check(window.visible_host(11u) == current11);
+        check(window.visible_host(12u) == current12);
+        check(viewport->child_count() == 4u);
         // Offscreen retained ID 11 keeps a valid measured sample when its
         // generation, source revision and layout epoch have not changed.
         check(live_index->lookup(11u)->measured);
