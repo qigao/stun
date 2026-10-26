@@ -89,6 +89,10 @@ struct Demo {
     // remains a fixed-host window; native Tango event/owner APIs do not
     // acquire any virtual-layout state.
     bool experimental_virtual_spacers = false;
+    // UI-owner-only accumulated wheel/arrow intent for the optional
+    // pixel-coordinate window map. The ordinary demo still browses by
+    // message. No worker mutates this value or any Box-owned Element.
+    int pending_virtual_scroll_steps = 0;
 #if defined(STUN_TUI_DEMO_HEADLESS_TEST) && !defined(_WIN32)
     // CI-only out-of-band navigation provenance. The next owner frame is
     // sampled independently from the parent's VT/cell reconstruction.
@@ -282,12 +286,14 @@ bool on_key(int command, void* ptr) {
         return true;
     }
     if (command == Tail) {
+        d.pending_virtual_scroll_steps = 0;
         d.following = true;
         d.anchor = 0u;
         return true;
     }
     const std::size_t count = tui_transcript_count(d.transcript);
     if (command == Oldest) {
+        d.pending_virtual_scroll_steps = 0;
         // Home is an intent, even before the first asynchronous BEGIN has
         // been admitted. Keep a pending oldest anchor (zero) until the
         // owner receives its first retained message; never turn this into
@@ -298,6 +304,18 @@ bool on_key(int command, void* ptr) {
     }
     if (!count) return true;
     if (command != Older && command != Newer) return true;
+    if (d.experimental_virtual_spacers) {
+        // Real terminal wheel/arrow events become layout-coordinate deltas
+        // only in opt-in mode; a non-scrollable viewport is a legal no-op.
+        // Accumulate multiple input events within one bounded Owner turn.
+        if (!d.viewport || !d.viewport->can_scroll_y() ||
+            d.viewport->max_scroll_y() <= 0.0f)
+            return true;
+        if (command == Newer && d.following) return true;
+        d.pending_virtual_scroll_steps += command == Older ? -1 : 1;
+        d.following = false;
+        return true;
+    }
     const std::size_t tail_start = count > kVisible ? count - kVisible : 0u;
     std::size_t first = tail_start;
     if (!d.following && d.anchor) {
@@ -430,20 +448,37 @@ void on_view(const void* ptr, tui_buffer_t* back) {
                 d.box->update();
             }
         }
+        const bool has_virtual_scroll = d.experimental_virtual_spacers &&
+            d.pending_virtual_scroll_steps != 0;
         const bool continuing_history = !d.following && d.anchor != 0u &&
             d.projected_anchor == d.anchor &&
             prior_scroll.message_id != 0u && !prior_scroll.follow_tail;
-        const auto status = d.following || d.anchor == 0u
-            ? d.window->show_tail(d.transcript)
-            : continuing_history
-                ? d.window->show_preserving_anchor(d.transcript, prior_scroll)
-                : d.window->show_from_id(d.transcript, d.anchor);
+        flex::tui_backend::TranscriptScrollAnchor mapped_scroll{};
+        // One actual scroll cell step = three terminal text rows. The
+        // adapter maps its absolute target through bounded retained
+        // heights, materializes the matching window and reanchors after
+        // Box measurement. No new loop, queue, parser or cross-thread UI.
+        const auto status = has_virtual_scroll
+            ? d.window->scroll_by_offset(
+                d.transcript,
+                static_cast<double>(d.pending_virtual_scroll_steps) *
+                    (3.0 * kCellHeight), &mapped_scroll)
+            : d.following || d.anchor == 0u
+                ? d.window->show_tail(d.transcript)
+                : continuing_history
+                    ? d.window->show_preserving_anchor(d.transcript, prior_scroll)
+                    : d.window->show_from_id(d.transcript, d.anchor);
         using WindowStatus = flex::tui_backend::TranscriptWindow::Status;
         if (status == WindowStatus::QueryRejected ||
             status == WindowStatus::Invalid) {
             d.valid = false;
             (void)tui_async_queue_close(tui_app_async_queue(d.app));
             return;
+        }
+        if (has_virtual_scroll) {
+            d.pending_virtual_scroll_steps = 0;
+            d.anchor = mapped_scroll.message_id;
+            d.following = false;
         }
         d.projected_anchor = d.following ? 0u : d.anchor;
         if (d.status) d.status->set_text(format_status(d, w, h));
@@ -478,7 +513,7 @@ void on_view(const void* ptr, tui_buffer_t* back) {
                         std::fprintf(trace,
                             "virtual_geometry epoch=%llu enabled=%d "
                             "visible=%zu children=%zu leading=%.2f "
-                            "trailing=%.2f\n",
+                            "trailing=%.2f first=%llu\n",
                             static_cast<unsigned long long>(
                                 d.pty_command_epoch),
                             d.experimental_virtual_spacers ? 1 : 0,
@@ -487,7 +522,9 @@ void on_view(const void* ptr, tui_buffer_t* back) {
                             static_cast<double>(
                                 d.window->leading_spacer_height()),
                             static_cast<double>(
-                                d.window->trailing_spacer_height()));
+                                d.window->trailing_spacer_height()),
+                            static_cast<unsigned long long>(
+                                d.window->first_visible_message_id()));
                         std::fclose(trace);
                         ++d.pty_frame_reports;
                     }
