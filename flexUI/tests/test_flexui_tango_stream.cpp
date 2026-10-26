@@ -1368,11 +1368,19 @@ spec("FlexUI MarkdownWidget through Tango async transport and cell renderer") {
               Index::Status::Updated);
         check(!heights.lookup(11u)->measured);
         check(!heights.lookup(12u)->measured);
+        check(heights.record_height(11u, height11));
+        // A font/CSS change invalidates the sample even if viewport width
+        // and native stream sequence did not change.
+        check(heights.sync(transcript, width - 20.0f, 1u) ==
+              Index::Status::Updated);
+        check(!heights.lookup(11u)->measured);
+        check(heights.layout_revision() == 1u);
         const auto frozen_size = heights.size();
         check(heights.sync(
-                  transcript, std::numeric_limits<float>::quiet_NaN()) ==
+                  transcript, std::numeric_limits<float>::quiet_NaN(), 2u) ==
               Index::Status::Invalid);
         check(heights.size() == frozen_size);
+        check(heights.layout_revision() == 1u);
         check(heights.width() == width - 20.0f);
         check(emit(12u, TUI_STREAM_END, {}));
 
@@ -1398,6 +1406,23 @@ spec("FlexUI MarkdownWidget through Tango async transport and cell renderer") {
         Index too_small(3u, 24.0f);
         check(too_small.sync(transcript, width) == Index::Status::Capacity);
         check(too_small.size() == 0u);
+        // Constructor admission MUST reject impossible sizes before making
+        // a vector allocation; this guards the private cache against API
+        // misuse and preserves fixed-capacity ownership.
+        bool rejected_capacity = false;
+        try {
+            Index invalid(std::numeric_limits<std::size_t>::max(), 24.0f);
+        } catch (const std::invalid_argument&) {
+            rejected_capacity = true;
+        }
+        check(rejected_capacity);
+        bool rejected_fallback = false;
+        try {
+            Index invalid(4u, std::numeric_limits<float>::infinity());
+        } catch (const std::invalid_argument&) {
+            rejected_fallback = true;
+        }
+        check(rejected_fallback);
         bool all_measured = true;
         check(heights.total_height_estimate(&all_measured) > 0.0);
         check(!all_measured);

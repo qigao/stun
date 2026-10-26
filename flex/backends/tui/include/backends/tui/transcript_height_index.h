@@ -36,23 +36,29 @@ public:
   // Fixed maximum is determined by the application-owned C11 retainer.
   // Entries are values; only retained message IDs can occupy a slot.
   TranscriptHeightIndex(std::size_t max_retained, float fallback_height)
-      : maximum_(max_retained), fallback_height_(fallback_height),
-        scratch_(max_retained) {
+      : maximum_(max_retained), fallback_height_(fallback_height) {
+    // Validate BEFORE allocating: an attacker-controlled SIZE_MAX request
+    // must fail with a contract error, not attempt unbounded scratch storage.
     if (!maximum_ || maximum_ > 256u ||
-        !std::isfinite(fallback_height) || fallback_height <= 0.0f)
+        !std::isfinite(fallback_height) || fallback_height <= 0.0f ||
+        fallback_height > 10000000.0f)
       throw std::invalid_argument("invalid bounded transcript height index");
+    scratch_.resize(maximum_);
     entries_.reserve(maximum_);
   }
 
   std::size_t size() const noexcept { return entries_.size(); }
   std::size_t capacity() const noexcept { return maximum_; }
   float width() const noexcept { return width_; }
+  std::uint64_t layout_revision() const noexcept { return layout_revision_; }
 
-  // Admission is transactional: a rejected owner query, invalid width, or
-  // capacity mismatch cannot evict existing measurements. An exact revision
-  // (generation + last_sequence) and width retain a prior measured height.
-  // New/changed sources or a new layout width require remeasurement.
-  Status sync(const tui_transcript_t* transcript, float layout_width) {
+  // Admission is transactional: rejected owner queries, invalid widths and
+  // capacity mismatches cannot evict existing measurements. An exact message
+  // revision, width AND caller-controlled layout revision preserve a sample.
+  // Increment layout_revision when font/theme/style metrics change without
+  // changing the viewport width (CSS, DPI, terminal cell metrics).
+  Status sync(const tui_transcript_t* transcript, float layout_width,
+              std::uint64_t layout_revision = 0u) {
     if (!transcript || !std::isfinite(layout_width) ||
         layout_width <= 0.0f)
       return Status::Invalid;
@@ -64,8 +70,9 @@ public:
         written != count)
       return Status::QueryRejected;
 
-    const bool same_width = width_ == layout_width;
-    bool changed = !same_width || count != entries_.size();
+    const bool same_layout = width_ == layout_width &&
+        layout_revision_ == layout_revision;
+    bool changed = !same_layout || count != entries_.size();
     std::vector<Entry> staged;
     staged.reserve(count);
     std::uint64_t previous_id = 0u;
@@ -83,7 +90,7 @@ public:
           entries_.begin(), entries_.end(), [&](const Entry& old) {
             return old.message_id == current.message_id;
           });
-      if (same_width && found != entries_.end() &&
+      if (same_layout && found != entries_.end() &&
           found->generation == current.generation &&
           found->last_sequence == current.last_sequence) {
         current.measured = found->measured;
@@ -102,6 +109,7 @@ public:
 
     entries_.swap(staged);
     width_ = layout_width;
+    layout_revision_ = layout_revision;
     return changed ? Status::Updated : Status::Unchanged;
   }
 
@@ -158,6 +166,7 @@ private:
   std::size_t maximum_;
   float fallback_height_;
   float width_ = 0.0f;
+  std::uint64_t layout_revision_ = 0u;
   std::vector<tui_transcript_message_t> scratch_;
   std::vector<Entry> entries_;
 };
