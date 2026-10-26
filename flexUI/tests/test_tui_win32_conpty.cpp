@@ -567,7 +567,8 @@ public:
             "', owner_cell_frames='" + owner_cell_frames + "'";
     }
     bool setup(const char* executable, bool probe = false,
-               bool frame_diagnostic = true) {
+               bool frame_diagnostic = true,
+               bool virtual_spacers = false) {
         phase_ = "CreatePseudoConsole/child";
         HANDLE conpty_in = nullptr, conpty_out = nullptr;
         SECURITY_ATTRIBUTES attrs{sizeof(attrs), nullptr, TRUE};
@@ -632,6 +633,8 @@ public:
                 command += utf8_to_wide(frame_report_path_.c_str());
                 command += L"\"";
             }
+            if (virtual_spacers)
+                command += L" --experimental-virtual-spacers";
             std::vector<wchar_t> cmd(command.begin(), command.end());
             cmd.push_back(L'\0');
             STARTUPINFOEXW startup{};
@@ -693,8 +696,10 @@ public:
         DWORD code = 999;
         return GetExitCodeProcess(process_.hProcess, &code) && code == 0;
     }
-    bool run(const char *executable, bool frame_diagnostic = true) {
-        if (!setup(executable, false, frame_diagnostic)) return false;
+    bool run(const char *executable, bool frame_diagnostic = true,
+             bool virtual_spacers = false) {
+        if (!setup(executable, false, frame_diagnostic,
+                   virtual_spacers)) return false;
         if (!await("real 80x24 ConPTY terminal frame", 12000,
             [](const Screen &s) {return s.entered_alt() && s.header() &&
                                         s.vt_resize_commands() == 0u &&
@@ -891,9 +896,14 @@ int main(int argc, char** argv) {
     // onscreen header/footer restoration predicates.
     const bool plain = argc == 3 &&
         std::strcmp(argv[1], "--plain") == 0;
-    if (argc != 2 && !plain) return 2;
+    const bool virtual_spacers = argc == 3 &&
+        std::strcmp(argv[1], "--virtual-spacers") == 0;
+    if (argc != 2 && !plain && !virtual_spacers) return 2;
     ConptyAcceptance harness;
-    if (!harness.run(argv[plain ? 2 : 1], !plain)) {
+    // Virtual mode has its own real host-driven 52x16 test; keep it free
+    // of extra synchronous owner-frame writes just like plain ConPTY.
+    if (!harness.run(argv[plain || virtual_spacers ? 2 : 1],
+                     !plain && !virtual_spacers, virtual_spacers)) {
         std::fprintf(stderr, "Win32 ConPTY resize acceptance failed at '%s', "
             "%s, error=%lu\n",
             harness.last_phase().c_str(), harness.diagnostic().c_str(),
