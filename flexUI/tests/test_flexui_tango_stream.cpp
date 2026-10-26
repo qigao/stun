@@ -1864,13 +1864,21 @@ spec("FlexUI MarkdownWidget through Tango async transport and cell renderer") {
             box.set_viewport(152.0f, 176.0f);
             box.update();
             flex::tui_backend::TranscriptScrollAnchor wheel_anchor{};
-            const auto next_coordinate = window.scroll_by_offset(
-                transcript, 16.0, &wheel_anchor);
+            const auto next_coordinate = window.scroll_from_anchor(
+                transcript, {2u, 8.0f, false},
+                16.0, &wheel_anchor);
             check(next_coordinate == Status::Updated ||
                   next_coordinate == Status::Unchanged);
             check(!wheel_anchor.follow_tail &&
                   wheel_anchor.message_id >= 3u &&
                   wheel_anchor.message_id <= 5u);
+            // Invalid/non-retained anchors never resurrect an evicted ID,
+            // and an invalid value cannot mutate live Box scroll state.
+            const float before_bad_anchor = viewport->scroll_y();
+            check(window.scroll_from_anchor(
+                      transcript, {3u, -1.0f, false}, 4.0) ==
+                  Status::Invalid);
+            check(std::fabs(viewport->scroll_y() - before_bad_anchor) < 0.01f);
             check(window.visible_host(wheel_anchor.message_id) != nullptr);
             check(!heights->lookup(1u) && !heights->lookup(2u));
             check(std::fabs(heights->width() - viewport->width()) < 1.0f);
