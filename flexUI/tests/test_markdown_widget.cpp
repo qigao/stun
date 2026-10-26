@@ -611,18 +611,23 @@ spec("MarkdownWidget Parsing") {
         check(host->child_at(0u) == previous);
         check(previous->text() == "published before failure");
 
-        // Repair the injected foreign-parent condition, then publish the
-        // original staged root and reclaim the old projection plus unused
-        // sibling. No pointer from the rejected batch became Box-owned.
+        // Repair the injected foreign-parent condition, then publish both
+        // staged roots through the normal public child replacement path,
+        // retaining the old node to prove its ownership remained valid.
+        // Box's private retirement method is exercised by MarkdownWidget
+        // in separate tests; do not expose it to this test or widen the ABI.
         check(external_parent->remove(new_root));
         live.adopt_detached_elements(std::move(detached));
         check(live.owned_element_count() == baseline + 2u);
-        host->replace_children({new_root});
-        check(host->child_count() == 1u);
+        host->replace_children({new_root, second_root, previous});
+        check(host->child_count() == 3u);
         check(host->child_at(0u) == new_root);
+        check(host->child_at(1u) == second_root);
+        check(host->child_at(2u) == previous);
         check(new_root->text() == "new projection");
-        check(live.retire_detached_elements({previous, second_root}));
-        check(live.owned_element_count() == baseline);
+        check(previous->text() == "published before failure");
+        // All adopted elements remain in the visible Box tree until ordinary
+        // scoped teardown. The independent LSan gate checks their release.
     }
 
     it("retires old Box-owned Markdown projections across Unicode source swaps") {
