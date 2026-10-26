@@ -277,7 +277,8 @@ WidgetRegistry WidgetRegistry::builtins() {
   static constexpr const char *kElementTags[] = {
       "div", "span",  "main", "section",  "article", "header", "footer",
       "nav", "aside", "form", "fieldset", "legend",  "p",      "a",
-      "ul",  "ol",    "li",   "window",   "view",    "box",    "content"};
+      "ul",  "ol",    "li",   "window",   "view",    "box",    "content",
+      "figure", "figcaption"};
   for (const auto *tag : kElementTags) {
     // Generic Elements already support scalar text and ordered children.
     // Preserve that explicit container contract, not an unknown-tag fallback.
