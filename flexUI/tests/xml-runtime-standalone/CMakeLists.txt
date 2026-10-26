@@ -131,6 +131,16 @@ if(STUN_BUILD_TUI_STREAMING_DEMO)
         "$<TARGET_FILE:flexui_tui_streaming_demo>" --home-burst)
     set_tests_properties(tui_streaming_demo_posix_pty_home_burst
       PROPERTIES TIMEOUT 60)
+    # Explicit experimental application switch: real OS PTY input, worker
+    # streaming, retained-message eviction, native Box spacer geometry,
+    # SIGWINCH 80x24 -> 52x16, and terminal state restoration.
+    # The default PTY and strict macOS Home regression remain separate.
+    add_test(NAME tui_streaming_demo_posix_pty_virtual_spacers
+      COMMAND "${Python3_EXECUTABLE}"
+        "${STUN_ROOT}/flexUI/tests/test_tui_streaming_pty.py"
+        "$<TARGET_FILE:flexui_tui_streaming_demo>" --virtual-spacers)
+    set_tests_properties(tui_streaming_demo_posix_pty_virtual_spacers
+      PROPERTIES TIMEOUT 60)
   elseif(WIN32)
     # Spawn the unchanged real interactive demo under a fresh OS Console.
     # Independent supervising process writes INPUT_RECORDs and reads native
