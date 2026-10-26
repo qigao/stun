@@ -67,8 +67,11 @@ public:
   };
 
   TranscriptWindow(flexUI::Box& box, flexUI::Element& viewport,
-                   std::size_t max_visible,
-                   StagingAllocation staging = {})
+                   std::size_t max_visible)
+      : TranscriptWindow(box, viewport, max_visible, StagingAllocation{}) {}
+
+  TranscriptWindow(flexUI::Box& box, flexUI::Element& viewport,
+                   std::size_t max_visible, StagingAllocation staging)
       : box_(box), viewport_(viewport), staging_(staging) {
     if (max_visible == 0u || max_visible > 64u ||
         (bool(staging.allocate) != bool(staging.deallocate)) ||
