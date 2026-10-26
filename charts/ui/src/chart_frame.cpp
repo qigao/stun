@@ -93,6 +93,10 @@ ChartFrame create_chart_frame(flexUI::Box& box,
   flexUI::UiMountOptions mount;
   mount.mode = flexUI::UiMountMode::DetachedFragment;
   mount.id_policy = flexUI::UiIdPolicy::LocalOnly;
+  mount.required_slots = {"chart", "chart-surface"};
+  if (!options.title.empty()) mount.required_slots.emplace_back("chart-title");
+  if (options.create_legend) mount.required_slots.emplace_back("chart-legend");
+  if (options.create_tooltip) mount.required_slots.emplace_back("chart-tooltip");
   auto installed = flexUI::UiDocumentInstantiator::instantiate(
       box, *compiled.program, registry, mount);
   if (!installed) {
