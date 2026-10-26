@@ -155,6 +155,18 @@ public:
     return std::nullopt;
   }
 
+  // Keep the numerical height contract in one place. A retained message
+  // without a Box sample uses the explicit fallback, never a guessed
+  // character count or a stale native text pointer. Evicted IDs reject.
+  std::optional<double> height_for(
+      std::uint64_t message_id) const noexcept {
+    for (const Entry& entry : entries_)
+      if (entry.message_id == message_id)
+        return entry.measured ? static_cast<double>(entry.height) :
+                                static_cast<double>(fallback_height_);
+    return std::nullopt;
+  }
+
   // Deterministic placeholders for not-yet-measured retained messages.
   // The returned flag explicitly distinguishes exact vs estimated geometry.
   std::optional<double> height_before(std::uint64_t message_id,
