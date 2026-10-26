@@ -2724,6 +2724,7 @@ spec("FlexUI MarkdownWidget through Tango async transport and cell renderer") {
         float observed_local = 0.0f;
         std::size_t peak_nodes = initial_nodes;
         std::size_t cancellations = 0u;
+        std::size_t cross_window_round_trips = 0u;
         for (std::uint64_t id = 1u; id <= kTurns && accepted; ++id) {
             last_id = id;
             stage = "native-open-and-begin";
@@ -2804,6 +2805,70 @@ spec("FlexUI MarkdownWidget through Tango async transport and cell renderer") {
                        std::fabs(mapped.within_message_y - 8.0f) < 2.5f &&
                        window.visible_host(oldest) != nullptr;
             if (!accepted) break;
+
+            // Cross a REAL fixed-Host window boundary, not merely a wheel
+            // movement inside a previously measured message. After the
+            // viewport-width reflow, #oldest and #(oldest+1) were measured
+            // by Box, but #(oldest+2) remains an unmeasured offscreen GFM
+            // estimate. Advance from the last eight pixels of the second
+            // message by sixteen pixels; the owner must materialize the
+            // third and resolve its local offset to eight. Then reverse
+            // the same step and recover the original second-message anchor
+            // without following tail or resurrecting a retired UiHandle.
+            if (id >= 3u) {
+                const std::uint64_t second_id = oldest + 1u;
+                const std::uint64_t third_id = oldest + 2u;
+                const auto* index_before = window.tracked_heights();
+                const auto second = index_before
+                    ? index_before->lookup(second_id) : std::nullopt;
+                const auto third = index_before
+                    ? index_before->lookup(third_id) : std::nullopt;
+                stage = "cross-window-preflight";
+                accepted = second && second->measured &&
+                           second->height > 24.0f &&
+                           third && !third->measured &&
+                           window.visible_host(second_id) != nullptr &&
+                           window.visible_host(third_id) == nullptr;
+                if (!accepted) break;
+                const float second_local = second->height - 8.0f;
+                flex::tui_backend::TranscriptScrollAnchor forward_anchor{};
+                stage = "cross-window-into-unmeasured-gfm";
+                const auto forward = window.scroll_from_anchor(
+                    transcript, {second_id, second_local, false},
+                    16.0, &forward_anchor);
+                observed_id = forward_anchor.message_id;
+                observed_local = forward_anchor.within_message_y;
+                const auto third_after = index_before->lookup(third_id);
+                accepted = (forward == Status::Updated ||
+                            forward == Status::Unchanged) &&
+                           !forward_anchor.follow_tail &&
+                           forward_anchor.message_id == third_id &&
+                           std::fabs(forward_anchor.within_message_y -
+                                     8.0f) < 2.5f &&
+                           window.visible_host(third_id) != nullptr &&
+                           window.visible_host(oldest) == nullptr &&
+                           third_after && third_after->measured;
+                if (!accepted) break;
+
+                flex::tui_backend::TranscriptScrollAnchor backward_anchor{};
+                stage = "cross-window-reverse-into-measured-gfm";
+                const auto backward = window.scroll_from_anchor(
+                    transcript, forward_anchor, -16.0, &backward_anchor);
+                observed_id = backward_anchor.message_id;
+                observed_local = backward_anchor.within_message_y;
+                accepted = (backward == Status::Updated ||
+                            backward == Status::Unchanged) &&
+                           !backward_anchor.follow_tail &&
+                           backward_anchor.message_id == second_id &&
+                           std::fabs(backward_anchor.within_message_y -
+                                     second_local) < 2.5f &&
+                           window.visible_host(second_id) != nullptr &&
+                           window.slot_capacity() == 2u &&
+                           viewport->child_count() ==
+                               window.visible_count() + 2u;
+                if (!accepted) break;
+                ++cross_window_round_trips;
+            }
             stage = "bounded-retainer-index-and-box";
             const auto* index = window.tracked_heights();
             accepted = window.slot_capacity() == 2u &&
@@ -2829,11 +2894,13 @@ spec("FlexUI MarkdownWidget through Tango async transport and cell renderer") {
                 static_cast<double>(viewport->scroll_y()));
         check(accepted);
         check(cancellations == 5u);
+        check(cross_window_round_trips == kTurns - 2u);
         check(tui_transcript_count(transcript) == 4u);
         if (accepted) std::printf(
-            "TUI_GFM_REFLOW turns=%zu cancels=%zu peak_elements=%zu "
-            "visible_hosts=%zu\n", kTurns, cancellations, peak_nodes,
-            window.visible_count());
+            "TUI_GFM_REFLOW turns=%zu cancels=%zu crossings=%zu "
+            "peak_elements=%zu visible_hosts=%zu\n",
+            kTurns, cancellations, cross_window_round_trips,
+            peak_nodes, window.visible_count());
         check(tui_transcript_destroy(transcript) == TUI_TRANSCRIPT_OK);
     }
 

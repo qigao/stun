@@ -499,6 +499,14 @@ jobs:
               r"p50_sync_us=(\d+) p95_sync_us=(\d+)"
           )
           height_names = ("turns", "retained", "p50_sync_us", "p95_sync_us")
+          gfm_expression = re.compile(
+              r"TUI_GFM_REFLOW turns=(\d+) cancels=(\d+) crossings=(\d+) "
+              r"peak_elements=(\d+) visible_hosts=(\d+)"
+          )
+          gfm_names = (
+              "turns", "cancels", "crossings", "peak_elements",
+              "visible_hosts"
+          )
           paths = {
               "asan_ubsan": Path("build/xml-runtime/Testing/Temporary/LastTest.log"),
               "lsan": Path("build/xml-runtime-lsan/Testing/Temporary/LastTest.log"),
@@ -513,6 +521,7 @@ jobs:
               "wheel_modes": {},
               "reuse_modes": {},
               "height_modes": {},
+              "gfm_modes": {},
           }
           for mode, path in paths.items():
               log = path.read_text(encoding="utf-8")
@@ -608,6 +617,25 @@ jobs:
                       f"evidence {height_values}"
                   )
               evidence["height_modes"][mode] = height_values
+              gfm_matches = list(gfm_expression.finditer(log))
+              if len(gfm_matches) != 1:
+                  raise SystemExit(
+                      f"{mode}: expected exactly one TUI_GFM_REFLOW "
+                      f"result in {path}, got {len(gfm_matches)}"
+                  )
+              gfm_values = dict(zip(
+                  gfm_names, (int(x) for x in gfm_matches[0].groups())
+              ))
+              if (gfm_values["turns"] != 32 or
+                  gfm_values["cancels"] != 5 or
+                  gfm_values["crossings"] != 30 or
+                  gfm_values["visible_hosts"] != 2 or
+                  gfm_values["peak_elements"] > 300):
+                  raise SystemExit(
+                      f"{mode}: invalid GFM cross-window anchor evidence "
+                      f"{gfm_values}"
+                  )
+              evidence["gfm_modes"][mode] = gfm_values
           output = Path("build/tui-long-session-metrics.json")
           output.write_text(json.dumps(evidence, indent=2, sort_keys=True) + "\n",
                             encoding="utf-8")
@@ -653,6 +681,16 @@ jobs:
                                 f'{result["p50_reuse_us"]} | '
                                 f'{result["p95_reuse_us"]} | '
                                 f'{result["cancel_reflow"]} |\n')
+                  out.write("\n### 32-turn variable-height GFM cross-window regression\n\n")
+                  out.write("| Mode | Turns | Cancels | Bidirectional boundaries | "
+                            "Peak Box nodes | Visible hosts |\n")
+                  out.write("|---|---:|---:|---:|---:|---:|\n")
+                  for mode, result in evidence["gfm_modes"].items():
+                      out.write(f'| {mode} | {result["turns"]} | '
+                                f'{result["cancels"]} | '
+                                f'{result["crossings"]} | '
+                                f'{result["peak_elements"]} | '
+                                f'{result["visible_hosts"]} |\n')
           print(output.read_text(encoding="utf-8"))
           PY
 
