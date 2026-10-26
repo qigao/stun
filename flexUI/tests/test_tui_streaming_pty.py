@@ -27,6 +27,9 @@ import time
 
 MAX_CAPTURE = 12 * 1024 * 1024
 TIMEOUT = 45.0
+# The demo records at most 64 commands and 64 owner frames (plus geometry).
+# Reject overflow instead of silently reading only the oldest 16 KiB.
+PTY_TRACE_LIMIT = 64 * 1024
 
 
 
@@ -176,6 +179,20 @@ def require(ok, detail):
         raise AssertionError(detail)
 
 
+def read_owner_trace_lines(path):
+    """Read all bounded PTY evidence, including the latest owner frame.
+
+    Reading only the first 16 KiB hid later commands under wheel bursts.
+    Do not silently truncate this independent input/Box diagnostic stream.
+    It never substitutes for the physical terminal-cell oracle.
+    """
+    with open(path, "rb") as trace:
+        captured = trace.read(PTY_TRACE_LIMIT + 1)
+    require(len(captured) <= PTY_TRACE_LIMIT,
+            "independent PTY trace exceeded 64 KiB; evidence incomplete")
+    return captured.splitlines()
+
+
 def winsize(fd, rows, cols):
     fcntl.ioctl(fd, termios.TIOCSWINSZ, struct.pack("HHHH", rows, cols, 0, 0))
 
@@ -241,8 +258,7 @@ def run_test(executable, early_home=False, home_burst=False,
         # Post-Box owner evidence is separate from physical VT/cell evidence.
         # A successful input write or command trace can never substitute
         # for the independent screen.mode() assertion made by the caller.
-        with open(input_trace, "rb") as trace:
-            lines = trace.read(16384).splitlines()
+        lines = read_owner_trace_lines(input_trace)
         frames = [line for line in lines if line.startswith(b"owner_view_epoch=")]
         require(frames, "missing independent owner post-layout frame evidence")
         last = frames[-1]
@@ -283,8 +299,7 @@ def run_test(executable, early_home=False, home_burst=False,
                     last_geometry)
 
     def last_owner_epoch():
-        with open(input_trace, "rb") as trace:
-            records = trace.read(16384).splitlines()
+        records = read_owner_trace_lines(input_trace)
         views = [line for line in records
                  if line.startswith(b"owner_view_epoch=")]
         if not views:
@@ -293,8 +308,7 @@ def run_test(executable, early_home=False, home_burst=False,
         return int(match.group(1)) if match else -1
 
     def last_virtual_first():
-        with open(input_trace, "rb") as trace:
-            records = trace.read(16384).splitlines()
+        records = read_owner_trace_lines(input_trace)
         geometry = [line for line in records
                     if line.startswith(b"virtual_geometry epoch=")]
         if not geometry:
@@ -568,8 +582,12 @@ def run_test(executable, early_home=False, home_burst=False,
               file=sys.stderr)
         try:
             with open(input_trace, "rb") as trace:
-                print("PTY independent owner-input trace: %r" %
-                      trace.read(32768)[-8192:], file=sys.stderr)
+                trace.seek(0, os.SEEK_END)
+                total_bytes = trace.tell()
+                trace.seek(max(0, total_bytes - 8192), os.SEEK_SET)
+                latest = trace.read(8192)
+            print("PTY independent owner-input trace (bytes=%d; latest 8 KiB): %r" %
+                  (total_bytes, latest), file=sys.stderr)
         except OSError as exc:
             print("PTY owner-input trace unavailable: %s" % exc,
                   file=sys.stderr)

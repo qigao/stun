@@ -292,6 +292,14 @@ jobs:
           cmake --build build/flexui-tango-cross --config Debug \
             --target "${targets[@]}" --parallel 2
 
+      - name: Validate bounded POSIX PTY diagnostic trace reader
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m unittest discover -s flexUI/tests \
+            -p 'test_tui_streaming_pty_trace.py' -v
+
       - name: Run native Markdown, Streaming, demo and POSIX PTY conformance
         shell: bash
         run: |
