@@ -1774,7 +1774,73 @@ spec("FlexUI MarkdownWidget through Tango async transport and cell renderer") {
         check(std::fabs(viewport->scroll_y() -
                         (host1->y() + anchor.within_message_y)) < 2.5f);
         check(viewport->child_count() == 4u);
+        // A REAL retained-message eviction and viewport width change now
+        // happen in one owner turn. The old GFM anchor (#1) must clamp to
+        // the first still-retained message (#2) at local offset zero, NOT to
+        // the tail. A surviving #2 host/handle keeps its identity.
+        const auto retired1 = box.handle_for(*host1);
+        const auto kept2 = box.handle_for(*host2);
         check(emit(1u, TUI_STREAM_END, {}));
+        std::uint64_t evicted = 0u;
+        check(tui_transcript_open(transcript, 4u, &evicted) ==
+              TUI_TRANSCRIPT_OK && evicted == 1u);
+        check(emit(4u, TUI_STREAM_BEGIN, {}));
+        check(send(4u,
+                   "| 后续 | 结果 |\n| --- | --- |\n"
+                   "| emoji 😀 | wide 中中 |\n\n"
+                   "```c\nint next(void) {return 4;}\n```\n"));
+        check(emit(4u, TUI_STREAM_END, {}));
+        box.set_viewport(176.0f, 176.0f);
+        box.update();
+        const auto first_eviction = window.show_preserving_anchor(
+            transcript, anchor);
+        check(first_eviction == Status::Updated ||
+              first_eviction == Status::Unchanged);
+        check(window.visible_host(1u) == nullptr);
+        check(window.visible_host(2u) == host2);
+        check(box.resolve_handle(retired1) == nullptr);
+        check(box.resolve_handle(kept2) == host2);
+        check(heights->lookup(1u) == std::nullopt);
+        check(heights->lookup(2u) && heights->lookup(2u)->measured);
+        check(std::fabs(heights->width() - viewport->width()) < 1.0f);
+        check(std::fabs(viewport->scroll_y() - host2->y()) < 2.5f);
+        check(window.visible_host(4u) == nullptr);
+        check(window.trailing_spacer_height() > 0.0f);
+        check(viewport->child_count() == 4u);
+
+        // Evict #2 as well, still holding its OLD anchor; clamp to #3.
+        // The intervening #3 host survives with the same UiHandle.
+        auto* host3 = window.visible_host(3u);
+        check(host3 != nullptr);
+        if (host3) {
+            const auto old2 = box.handle_for(*host2);
+            const auto kept3 = box.handle_for(*host3);
+            check(tui_transcript_open(transcript, 5u, &evicted) ==
+                  TUI_TRANSCRIPT_OK && evicted == 2u);
+            check(emit(5u, TUI_STREAM_BEGIN, {}));
+            check(send(5u, "Another 中 😀 body\n\n"));
+            check(emit(5u, TUI_STREAM_END, {}));
+            const auto second_eviction = window.show_preserving_anchor(
+                transcript, {2u, 8.0f, false});
+            check(second_eviction == Status::Updated ||
+                  second_eviction == Status::Unchanged);
+            check(window.visible_host(2u) == nullptr);
+            check(window.visible_host(3u) == host3);
+            check(box.resolve_handle(old2) == nullptr);
+            check(box.resolve_handle(kept3) == host3);
+            check(!heights->lookup(2u));
+            check(heights->lookup(3u) && heights->lookup(3u)->measured);
+            check(std::fabs(viewport->scroll_y() - host3->y()) < 2.5f);
+            check(viewport->child_count() == 4u);
+            check(window.slot_capacity() == 2u);
+
+            // Only an explicit End/tail policy may now follow the newest
+            // message. The earlier evicted anchor cannot cause that jump.
+            check(window.show_tail(transcript) == Status::Updated);
+            check(window.visible_host(5u) != nullptr);
+            check(std::fabs(viewport->max_scroll_y() -
+                            viewport->scroll_y()) < 2.5f);
+        }
         check(tui_transcript_destroy(transcript) == TUI_TRANSCRIPT_OK);
     }
 
