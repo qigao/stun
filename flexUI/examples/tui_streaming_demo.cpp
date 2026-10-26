@@ -85,6 +85,15 @@ struct Demo {
     std::size_t rejected = 0u;
     bool following = true;
     bool valid = true;
+#if defined(STUN_TUI_DEMO_HEADLESS_TEST) && !defined(_WIN32)
+    // CI-only out-of-band navigation provenance. The next owner frame is
+    // sampled independently from the parent's VT/cell reconstruction.
+    std::uint64_t pty_command_epoch = 0u;
+    std::uint64_t pty_frame_epoch = 0u;
+    unsigned pty_command_reports = 0u;
+    unsigned pty_frame_reports = 0u;
+    int pty_last_command = -1;
+#endif
 #if defined(STUN_TUI_DEMO_HEADLESS_TEST) && defined(_WIN32)
     // Optional CI-only owner-cell diagnostic; no callbacks, event transport
     // or terminal output are changed. At most 96 bounded lines are written.
@@ -238,11 +247,24 @@ bool on_key(int command, void* ptr) {
     // Optional diagnostics for the *real* installed-SDK POSIX PTY test.
     // Out-of-band logging cannot alter VT output or satisfy screen asserts.
     if (const char* path = std::getenv("STUN_TUI_PTY_INPUT_TRACE")) {
-        if (FILE* trace = std::fopen(path, "a")) {
-            std::fprintf(trace, "command=%d following=%d retained=%zu\n",
-                         command, d.following ? 1 : 0,
-                         tui_transcript_count(d.transcript));
-            std::fclose(trace);
+        ++d.pty_command_epoch;
+        d.pty_last_command = command;
+        if (d.pty_command_reports < 64u) {
+            if (FILE* trace = std::fopen(path, "a")) {
+                // Keep the original prefix for #270 legacy trace checks.
+                // This is PRE-command owner state, NOT an input-write
+                // receipt and NOT a terminal-cell observation.
+                std::fprintf(trace,
+                    "command=%d following=%d retained=%zu "
+                    "anchor=%llu projected=%llu epoch=%llu\n",
+                    command, d.following ? 1 : 0,
+                    tui_transcript_count(d.transcript),
+                    static_cast<unsigned long long>(d.anchor),
+                    static_cast<unsigned long long>(d.projected_anchor),
+                    static_cast<unsigned long long>(d.pty_command_epoch));
+                std::fclose(trace);
+                ++d.pty_command_reports;
+            }
         }
     }
 #endif
@@ -407,6 +429,38 @@ void on_view(const void* ptr, tui_buffer_t* back) {
         d.projected_anchor = d.following ? 0u : d.anchor;
         if (d.status) d.status->set_text(format_status(d, w, h));
         d.box->update();
+#if defined(STUN_TUI_DEMO_HEADLESS_TEST) && !defined(_WIN32)
+        // Model and Box have updated, but tui_terminal_render() has NOT
+        // yet emitted a physical frame. The independent PTY cell oracle
+        // can now distinguish an owner-state error from VT rendering or
+        // parent-side ANSI replay without relying on input admissions.
+        if (d.pty_frame_epoch != d.pty_command_epoch) {
+            if (const char* path = std::getenv("STUN_TUI_PTY_INPUT_TRACE")) {
+                if (d.pty_frame_reports < 64u) {
+                    if (FILE* trace = std::fopen(path, "a")) {
+                        std::fprintf(trace,
+                            "owner_view_epoch=%llu command=%d following=%d "
+                            "retained=%zu anchor=%llu projected=%llu "
+                            "scroll_y=%.2f max_y=%.2f frame=%dx%d "
+                            "valid=%d\n",
+                            static_cast<unsigned long long>(
+                                d.pty_command_epoch),
+                            d.pty_last_command, d.following ? 1 : 0,
+                            tui_transcript_count(d.transcript),
+                            static_cast<unsigned long long>(d.anchor),
+                            static_cast<unsigned long long>(
+                                d.projected_anchor),
+                            static_cast<double>(d.viewport->scroll_y()),
+                            static_cast<double>(d.viewport->max_scroll_y()),
+                            w, h, d.valid ? 1 : 0);
+                        std::fclose(trace);
+                        ++d.pty_frame_reports;
+                    }
+                }
+            }
+            d.pty_frame_epoch = d.pty_command_epoch;
+        }
+#endif
 #if defined(STUN_TUI_DEMO_HEADLESS_TEST) && defined(_WIN32)
         report_owned_ui_cells(d, back);
 #endif
