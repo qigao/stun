@@ -121,6 +121,7 @@ jobs:
           prefix="$SALTS_ROOT"
           if [[ "$RUNNER_OS" == Windows ]]; then prefix="$(cygpath -w "$prefix")"; fi
           cmake -S tango -B build/tango -DCMAKE_BUILD_TYPE=Debug -DBUILD_TESTING=ON \
+            -DTANGO_BUILD_CPP_INTEROP_TESTS=ON \
             "-DCMAKE_PREFIX_PATH=$prefix" \
             -DCMAKE_FIND_USE_PACKAGE_REGISTRY=OFF \
             -DCMAKE_FIND_USE_SYSTEM_PACKAGE_REGISTRY=OFF
@@ -137,3 +138,77 @@ jobs:
             Windows) export PATH="$(cygpath -w "$SALTS_ROOT/bin"):$PATH" ;;
           esac
           ctest --test-dir build/tango -C Debug --output-on-failure
+
+      - name: C++17 public-header smoke
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          smoke="$RUNNER_TEMP/tango-public-header-smoke.cpp"
+          cat > "$smoke" <<'EOF'
+          #include "tui.h"
+          int main() {
+              const tui_cell_t cell =
+                  tui_cell(static_cast<uint32_t>('A'), TUI_WHITE, TUI_BLACK);
+              return cell.ch == static_cast<uint32_t>('A') ? 0 : 1;
+          }
+          EOF
+          c++ -std=c++17 -Wall -Wextra -Werror \
+            -I tango/include -fsyntax-only "$smoke"
+
+      - name: Configure ASan/UBSan async mailbox
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          cmake -S tango -B build/tango-sanitizers \
+            -DCMAKE_BUILD_TYPE=Debug -DBUILD_TESTING=ON \
+            "-DCMAKE_PREFIX_PATH=$SALTS_ROOT" \
+            "-DCMAKE_C_FLAGS=-fsanitize=address,undefined -fno-omit-frame-pointer" \
+            "-DCMAKE_EXE_LINKER_FLAGS=-fsanitize=address,undefined" \
+            -DCMAKE_FIND_USE_PACKAGE_REGISTRY=OFF \
+            -DCMAKE_FIND_USE_SYSTEM_PACKAGE_REGISTRY=OFF
+
+      - name: Build ASan/UBSan async mailbox
+        if: runner.os == 'Linux'
+        shell: bash
+        run: cmake --build build/tango-sanitizers --config Debug --parallel 2
+
+      - name: Run ASan/UBSan regressions
+        if: runner.os == 'Linux'
+        shell: bash
+        env:
+          ASAN_OPTIONS: detect_leaks=1:halt_on_error=1
+          UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
+        run: |
+          set -euo pipefail
+          export LD_LIBRARY_PATH="$SALTS_ROOT/lib:${LD_LIBRARY_PATH:-}"
+          ctest --test-dir build/tango-sanitizers -C Debug --output-on-failure
+
+      - name: Configure TSan async mailbox
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          cmake -S tango -B build/tango-tsan -DCMAKE_BUILD_TYPE=Debug -DBUILD_TESTING=ON \
+            "-DCMAKE_PREFIX_PATH=$SALTS_ROOT" \
+            "-DCMAKE_C_FLAGS=-fsanitize=thread -fno-omit-frame-pointer -g" \
+            "-DCMAKE_EXE_LINKER_FLAGS=-fsanitize=thread" \
+            -DCMAKE_FIND_USE_PACKAGE_REGISTRY=OFF \
+            -DCMAKE_FIND_USE_SYSTEM_PACKAGE_REGISTRY=OFF
+
+      - name: Build TSan async mailbox
+        if: runner.os == 'Linux'
+        shell: bash
+        run: cmake --build build/tango-tsan --config Debug --parallel 2
+
+      - name: Run TSan async mailbox regression
+        if: runner.os == 'Linux'
+        shell: bash
+        env:
+          TSAN_OPTIONS: halt_on_error=1
+        run: |
+          set -euo pipefail
+          export LD_LIBRARY_PATH="$SALTS_ROOT/lib:${LD_LIBRARY_PATH:-}"
+          ctest --test-dir build/tango-tsan -C Debug \
+            -R '^tango_async_queue_test' --output-on-failure
