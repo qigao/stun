@@ -2194,6 +2194,116 @@ spec("FlexUI MarkdownWidget through Tango async transport and cell renderer") {
         check(tui_transcript_destroy(transcript) == TUI_TRANSCRIPT_OK);
     }
 
+    it("rebinds identical GFM source to the correct retained message and retires old UiHandles") {
+        // A fixed Markdown host is recycled for a DIFFERENT native ID with
+        // byte-identical Markdown. Identity must not be inferred from text
+        // equality or an unchanged Box slot pointer.
+        flexUI::Box box(nullptr);
+        box.set_viewport(320.0f, 160.0f);
+        box.load_css(
+            "#ident-root {width:100%;height:100%;display:flex;"
+            "flex-direction:column;} "
+            "#ident-window {width:200px;height:72px;overflow-y:scroll;"
+            "display:flex;flex-direction:column;} "
+            ".transcript-message {width:100%;flex-shrink:0;} "
+            ".tui-virtual-spacer {width:100%;flex-shrink:0;"
+            "height:var(--tui-virtual-height);}");
+        auto* root = box.create("div", "ident-root");
+        auto* viewport = box.create("div", "ident-window");
+        check(root && viewport);
+        if (!root || !viewport) return;
+        root->append(viewport);
+        box.set_root(root);
+        box.update();
+        flex::tui_backend::TranscriptWindow window(box, *viewport, 1u);
+        window.enable_height_tracking(2u, 24.0f);
+        window.enable_virtual_spacers();
+        auto* transcript = tui_transcript_create(2u, 2048u, 64u);
+        check(transcript != nullptr);
+        if (!transcript) return;
+        std::uint64_t sequence = 0u;
+        const auto emit = [&](std::uint64_t id, std::uint32_t type,
+                              std::string_view chunk) {
+            if (chunk.size() > 64u) return TUI_TRANSCRIPT_INVALID;
+            std::array<unsigned char,
+                       sizeof(tui_stream_packet_header_t) + 64u> data{};
+            const tui_stream_packet_header_t header{id};
+            std::memcpy(data.data(), &header, sizeof(header));
+            if (!chunk.empty())
+                std::memcpy(data.data() + sizeof(header),
+                            chunk.data(), chunk.size());
+            const tui_async_event_t event{
+                type, 1u, ++sequence, sizeof(header) + chunk.size()
+            };
+            return tui_transcript_apply(
+                transcript, &event, data.data(), nullptr);
+        };
+        const std::string common =
+            "## Same source\n\n| key | value |\n| --- | --- |\n"
+            "| 中 | 😀 |\n\n";
+        bool native_ok = true;
+        for (const std::uint64_t id : {11u, 12u}) {
+            std::uint64_t evicted = 99u;
+            native_ok = native_ok &&
+                tui_transcript_open(transcript, id, &evicted) ==
+                    TUI_TRANSCRIPT_OK && evicted == 0u &&
+                emit(id, TUI_STREAM_BEGIN, {}) == TUI_TRANSCRIPT_OK;
+            for (std::size_t off = 0u;
+                 off < common.size() && native_ok; off += 40u) {
+                native_ok = emit(id, TUI_STREAM_CHUNK,
+                    std::string_view(common.data() + off,
+                        std::min<std::size_t>(40u, common.size() - off))) ==
+                    TUI_TRANSCRIPT_OK;
+            }
+            native_ok = native_ok &&
+                emit(id, TUI_STREAM_END, {}) == TUI_TRANSCRIPT_OK;
+        }
+        check(native_ok);
+        if (!native_ok) {
+            check(tui_transcript_destroy(transcript) == TUI_TRANSCRIPT_OK);
+            return;
+        }
+        using Status = flex::tui_backend::TranscriptWindow::Status;
+        check(window.show_from_id(transcript, 11u) == Status::Updated);
+        auto* host = window.visible_host(11u);
+        check(host != nullptr);
+        if (!host) {
+            check(tui_transcript_destroy(transcript) == TUI_TRANSCRIPT_OK);
+            return;
+        }
+        const auto handle11 = box.handle_for(*host);
+        const auto* heights = window.tracked_heights();
+        check(heights && heights->lookup(11u) &&
+              heights->lookup(11u)->measured);
+        check(viewport->child_count() == 3u);
+        const std::size_t owned = box.owned_element_count();
+
+        // The next visible source has exactly the same content, so the
+        // only reason to update is the different C11 message identity.
+        check(window.show_from_id(transcript, 12u) == Status::Updated);
+        check(window.first_visible_message_id() == 12u);
+        check(window.visible_host(11u) == nullptr);
+        check(window.visible_host(12u) == host);
+        check(box.resolve_handle(handle11) == nullptr);
+        const auto handle12 = box.handle_for(*host);
+        check(box.resolve_handle(handle12) == host);
+        auto* markdown = static_cast<flexUI::MarkdownWidget*>(host->widget);
+        check(markdown && markdown->markdown() == common);
+        check(heights && heights->lookup(12u) &&
+              heights->lookup(12u)->measured);
+        check(viewport->child_count() == 3u);
+
+        // Rebinding back must also retire handle12; never leave a handle
+        // pointing at a different logical message despite identical bytes.
+        check(window.show_from_id(transcript, 11u) == Status::Updated);
+        check(window.first_visible_message_id() == 11u);
+        check(window.visible_host(12u) == nullptr);
+        check(window.visible_host(11u) == host);
+        check(box.resolve_handle(handle12) == nullptr);
+        check(box.owned_element_count() <= owned + 32u);
+        check(tui_transcript_destroy(transcript) == TUI_TRANSCRIPT_OK);
+    }
+
     it("keeps GFM scroll anchors bounded across 32 incremental reflows, cancels and resizes") {
         // Exercise actual C11 source, MarkdownWidget, and Box over repeated
         // UI Owner turns with GFM tables/code/CJK, source growth, cancellation
