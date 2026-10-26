@@ -193,8 +193,18 @@ public:
         located->message_id, static_cast<float>(located->local_y), false};
     const Status projected = show_preserving_anchor(transcript, mapped);
     if (resolved && (projected == Status::Updated ||
-                     projected == Status::Unchanged))
+                     projected == Status::Unchanged)) {
       *resolved = mapped;
+      // This ID may have occupied a 400px estimated spacer but measure
+      // only a few real Box pixels once brought into the bounded window.
+      // Never hand an impossible estimated local offset back to the next
+      // owner wheel turn. This is a clamped message-local anchor, not a
+      // claim of exact offscreen pixel geometry.
+      const auto measured = heights_->lookup(mapped.message_id);
+      if (measured && measured->measured)
+        resolved->within_message_y = std::clamp(
+            mapped.within_message_y, 0.0f, measured->height);
+    }
     return projected;
   }
 

@@ -1625,6 +1625,111 @@ spec("FlexUI MarkdownWidget through Tango async transport and cell renderer") {
         check(box.cached_style_element_count() <= owned);
     }
 
+    it("clamps oversized virtual scroll estimates after actual Box measurement") {
+        // Regression for fallback > actual GFM height. The original
+        // numeric lookup targets #1 inside an unmeasured 400px spacer;
+        // once the fixed host lays it out the caller MUST NOT receive a
+        // stale 200px message-local anchor for a much shorter document.
+        flexUI::Box box(nullptr);
+        box.set_viewport(320.0f, 176.0f);
+        box.load_css(
+            "#estimate-root {width:100%;height:100%;display:flex;"
+            "flex-direction:column;} "
+            "#estimate-window {width:180px;height:60px;overflow-y:scroll;"
+            "display:flex;flex-direction:column;} "
+            ".transcript-message {width:100%;flex-shrink:0;} "
+            ".tui-virtual-spacer {width:100%;flex-shrink:0;"
+            "height:var(--tui-virtual-height);}");
+        auto* root = box.create("div", "estimate-root");
+        auto* viewport = box.create("div", "estimate-window");
+        check(root && viewport);
+        if (!root || !viewport) return;
+        root->append(viewport);
+        box.set_root(root);
+        box.update();
+
+        flex::tui_backend::TranscriptWindow window(box, *viewport, 1u);
+        window.enable_height_tracking(2u, 400.0f);
+        window.enable_virtual_spacers();
+        const auto base_nodes = box.owned_element_count();
+        auto* transcript = tui_transcript_create(2u, 1024u, 64u);
+        check(transcript != nullptr);
+        if (!transcript) return;
+        std::uint64_t sequence = 0u;
+        const auto emit = [&](std::uint64_t id, std::uint32_t type,
+                              std::string_view source) {
+            if (source.size() > 64u) return false;
+            std::array<unsigned char,
+                       sizeof(tui_stream_packet_header_t) + 64u> bytes{};
+            const tui_stream_packet_header_t header{id};
+            std::memcpy(bytes.data(), &header, sizeof(header));
+            if (!source.empty())
+                std::memcpy(bytes.data() + sizeof(header),
+                            source.data(), source.size());
+            const tui_async_event_t event{
+                type, 1u, ++sequence, sizeof(header) + source.size()
+            };
+            return tui_transcript_apply(transcript, &event, bytes.data(),
+                                        nullptr) == TUI_TRANSCRIPT_OK;
+        };
+        bool admitted = true;
+        for (std::uint64_t id = 1u; id <= 2u; ++id) {
+            std::uint64_t evicted = 99u;
+            admitted = admitted &&
+                tui_transcript_open(transcript, id, &evicted) ==
+                    TUI_TRANSCRIPT_OK && evicted == 0u &&
+                emit(id, TUI_STREAM_BEGIN, {}) &&
+                emit(id, TUI_STREAM_CHUNK,
+                     id == 1u ? "# Short\n\n中文 😀\n" :
+                                "## Tail\n\nAnother short document.\n") &&
+                emit(id, TUI_STREAM_END, {});
+        }
+        check(admitted);
+        if (!admitted) {
+            check(tui_transcript_destroy(transcript) == TUI_TRANSCRIPT_OK);
+            return;
+        }
+        using Status = flex::tui_backend::TranscriptWindow::Status;
+        check(window.show_tail(transcript) == Status::Updated);
+        const auto* heights = window.tracked_heights();
+        const auto estimated = window.virtual_location(200.0);
+        check(estimated && estimated->message_id == 1u &&
+              !estimated->message_measured &&
+              std::fabs(estimated->local_y - 200.0) < 1.0);
+
+        flex::tui_backend::TranscriptScrollAnchor resolved{};
+        const auto projected =
+            window.show_at_scroll_offset(transcript, 200.0, &resolved);
+        check(projected == Status::Updated ||
+              projected == Status::Unchanged);
+        const auto sample = heights ? heights->lookup(1u) : std::nullopt;
+        const auto* actual_host = window.visible_host(1u);
+        check(sample && sample->measured && sample->height > 0.0f &&
+              sample->height < 200.0f);
+        check(actual_host != nullptr);
+        if (sample && sample->measured && actual_host) {
+            check(resolved.message_id == 1u && !resolved.follow_tail);
+            check(resolved.within_message_y >= 0.0f &&
+                  resolved.within_message_y <= sample->height + 0.01f);
+            check(std::fabs(resolved.within_message_y -
+                            sample->height) < 0.05f);
+            check(std::fabs(viewport->scroll_y() -
+                            (actual_host->y() + resolved.within_message_y))
+                  < 2.5f);
+            flex::tui_backend::TranscriptScrollAnchor reversed{};
+            const auto moved =
+                window.scroll_from_anchor(transcript, resolved, -8.0,
+                                          &reversed);
+            check(moved == Status::Updated || moved == Status::Unchanged);
+            check(reversed.message_id == 1u && !reversed.follow_tail &&
+                  reversed.within_message_y <= sample->height);
+            check(window.visible_host(1u) == actual_host);
+        }
+        check(viewport->child_count() == 3u);
+        check(box.owned_element_count() <= base_nodes + 48u);
+        check(tui_transcript_destroy(transcript) == TUI_TRANSCRIPT_OK);
+    }
+
     it("anchors GFM tables, fenced code and wide glyphs while estimates become measurements") {
         // Drive real C11 source -> MarkdownWidget -> Box layout. Message #1
         // starts outside the two-host window with only an estimated height;
