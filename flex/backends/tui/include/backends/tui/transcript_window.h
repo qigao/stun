@@ -81,6 +81,11 @@ public:
 
   std::size_t slot_capacity() const noexcept { return slots_.size(); }
   std::size_t visible_count() const noexcept { return visible_.size(); }
+  // Private adapter diagnostics for deterministic wheel-path qualification;
+  // not a public Tango ABI counter or a cross-thread observable.
+  std::size_t in_message_scroll_fast_paths() const noexcept {
+    return in_message_scroll_fast_paths_;
+  }
   std::uint64_t first_visible_message_id() const noexcept {
     return visible_.empty() ? 0u : visible_.front()->message_id;
   }
@@ -242,6 +247,7 @@ public:
         const bool moved = viewport_.set_scroll_offset(
             viewport_.scroll_x(), static_cast<float>(next_absolute));
         if (moved) box_.update();
+        ++in_message_scroll_fast_paths_;
         if (resolved)
           *resolved = {anchor.message_id,
                        static_cast<float>(next_local), false};
@@ -683,6 +689,7 @@ private:
   std::vector<tui_transcript_message_t> scratch_;
   std::unique_ptr<TranscriptHeightIndex> heights_;
   std::uint64_t layout_revision_ = 0u;
+  std::size_t in_message_scroll_fast_paths_ = 0u;
   flexUI::Element* leading_spacer_ = nullptr;
   flexUI::Element* trailing_spacer_ = nullptr;
 };
