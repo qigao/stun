@@ -422,21 +422,22 @@ def run_test(executable, early_home=False, home_burst=False,
             # message hosts plus two physical Spacer elements.
             require_last_owner_frame(2, False)
 
-            # Real wheel rewindowing needs a FULL BOUNDED retainer, not
-            # all 48 scripted messages to finish. Waiting for all 48 here
-            # accidentally turned a scroll check into a producer-throughput
-            # deadline on slower macOS runners (at failure: retained=12,
-            # settled=30, child alive and rendering). Instead assert that
-            # >=12 messages have really settled, while the worker may
-            # continue streaming. This also stresses eviction overlapping
-            # owner navigation, not an unrealistically quiescent transcript.
-            def full_window_with_history():
+            # This extra coordinate-to-window test uses the explicitly
+            # CI-only rapid producer. Wait for ALL 48 settled messages so
+            # the tail-first and wheel-first IDs belong to the SAME stable
+            # 12-message retained snapshot. Merely seeing 12 slots full
+            # while the producer keeps evicting would compare two different
+            # generations: the tail can advance past a correct wheel anchor
+            # before the screen oracle samples it. Ordinary-rate PTY/Home
+            # concurrent tests remain separate; none of their 5s deadlines
+            # or native input assertions are weakened.
+            def stable_retained_history():
                 matched = re.search(r"settled=(\d+)", screen.status())
                 return (screen.retained() == 12 and matched is not None
-                        and int(matched.group(1)) >= 12)
+                        and int(matched.group(1)) == 48)
 
-            until("virtual transcript admits full 12-message history",
-                  full_window_with_history, 18.0)
+            until("all 48 rapid messages are settled for stable scroll map",
+                  stable_retained_history, 18.0)
             previous_epoch = last_owner_epoch()
             send(b"\x1b[F")
             until("virtual End owner frame after full retention",
