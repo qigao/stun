@@ -1967,6 +1967,11 @@ spec("FlexUI MarkdownWidget through Tango async transport and cell renderer") {
                     fail_next = false;
                     successful_allocations_before_failure = -1;
                     ++failure_count;
+                    std::fprintf(stderr,
+                        "TUI_ALLOC_RESOURCE before-throw bytes=%zu alignment=%zu "
+                        "failures=%zu\n",
+                        bytes, alignment, failure_count);
+                    std::fflush(stderr);
                     throw std::bad_alloc();
                 }
                 if (successful_allocations_before_failure > 0)
@@ -2070,7 +2075,17 @@ spec("FlexUI MarkdownWidget through Tango async transport and cell renderer") {
         check(tui_transcript_count(transcript) == 2u);
         trace("before-desired-rejection");
         staging.fail_next = true;
-        check(window.show_tail(transcript) == Status::ResourceExhausted);
+        Status desired_rejection = Status::Invalid;
+        try {
+            desired_rejection = window.show_tail(transcript);
+            trace("desired-call-returned");
+        } catch (const std::exception& e) {
+            std::fprintf(stderr, "TUI_ALLOC_RESOURCE escaped-exception %s\n",
+                         e.what());
+            std::fflush(stderr);
+            throw;
+        }
+        check(desired_rejection == Status::ResourceExhausted);
         trace("after-desired-rejection");
         check(staging.failure_count == 1u);
         check(window.visible_host(11u) == old_host);
