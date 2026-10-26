@@ -81,6 +81,9 @@ public:
 
   std::size_t slot_capacity() const noexcept { return slots_.size(); }
   std::size_t visible_count() const noexcept { return visible_.size(); }
+  std::uint64_t first_visible_message_id() const noexcept {
+    return visible_.empty() ? 0u : visible_.front()->message_id;
+  }
 
   // Optional, value-only geometry tracking, enabled by the UI owner before
   // its first projection. Defaults OFF for all existing TUI consumers.
@@ -139,7 +142,8 @@ public:
   // message and restore a local scroll position after actual Box layout.
   // No new input loop, actor, parser or application-owned offscreen nodes.
   Status show_at_scroll_offset(const tui_transcript_t* transcript,
-                               double scroll_y) {
+                               double scroll_y,
+                               TranscriptScrollAnchor* resolved = nullptr) {
     if (!transcript || !heights_ || !leading_spacer_ ||
         !std::isfinite(scroll_y) || scroll_y < 0.0)
       return Status::Invalid;
@@ -152,9 +156,34 @@ public:
     if (!located || !std::isfinite(located->local_y) ||
         located->local_y > 10000000.0)
       return Status::QueryRejected;
-    return show_preserving_anchor(
-        transcript, {located->message_id,
-                     static_cast<float>(located->local_y), false});
+    const TranscriptScrollAnchor mapped{
+        located->message_id, static_cast<float>(located->local_y), false};
+    const Status projected = show_preserving_anchor(transcript, mapped);
+    if (resolved && (projected == Status::Updated ||
+                     projected == Status::Unchanged))
+      *resolved = mapped;
+    return projected;
+  }
+
+  // Take a REAL owner scroll delta (one or more cell/scroll-wheel steps)
+  // into the bounded virtual height domain. Source heights not yet laid
+  // out remain estimates and become accurate only after Box projection.
+  // Clamp against the actual Box scroll extent to avoid falsely following
+  // the tail or fabricating a message outside the retained C11 registry.
+  // This optional adapter method does not modify native Tango input ABI.
+  Status scroll_by_offset(const tui_transcript_t* transcript,
+                          double delta_y,
+                          TranscriptScrollAnchor* resolved = nullptr) {
+    if (!transcript || !heights_ || !leading_spacer_ ||
+        !std::isfinite(delta_y) || !viewport_.is_scroll_container() ||
+        !std::isfinite(viewport_.scroll_y()) ||
+        !std::isfinite(viewport_.max_scroll_y()) ||
+        viewport_.max_scroll_y() < 0.0f)
+      return Status::Invalid;
+    const double current = viewport_.scroll_y();
+    const double maximum = viewport_.max_scroll_y();
+    const double target = std::clamp(current + delta_y, 0.0, maximum);
+    return show_at_scroll_offset(transcript, target, resolved);
   }
 
   float leading_spacer_height() const noexcept {
