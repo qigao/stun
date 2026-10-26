@@ -637,6 +637,82 @@ tui_buffer_t* tui_terminal_buffer(tui_terminal_t* term) {
     return term->back;
 }
 
+#if defined(STUN_TUI_PTY_RENDER_TRACE_CI) && !defined(_WIN32)
+/* CI-only instrumentation on the *real* C11 renderer. It records a finite
+ * post-write/committed-front receipt for the navigation epoch armed by the
+ * demo's existing post-Box trace. Neither production Tango nor its public
+ * headers/event loop contain this diagnostic code. */
+void tui_terminal_ci_arm_next_render(tui_terminal_t *term,
+                                     unsigned long long epoch) {
+    if (term && term->ci_render_reports < 64u)
+        term->ci_render_epoch = epoch;
+}
+
+static bool ci_front_contains(const tui_buffer_t *buf, int y,
+                              const char *needle) {
+    if (!buf || !needle || y < 0 || y >= buf->height) return false;
+    const size_t n = strlen(needle);
+    if (n == 0u || n > (size_t)buf->width) return false;
+    for (int x = 0; x + (int)n <= buf->width; ++x) {
+        size_t k = 0u;
+        for (; k < n; ++k) {
+            const tui_cell_t *cell = tui_buffer_at_const(buf, x + (int)k, y);
+            if (!cell || cell->ch != (unsigned char)needle[k]) break;
+        }
+        if (k == n) return true;
+    }
+    return false;
+}
+
+static void ci_render_fingerprint(const tui_terminal_t *term,
+                                  unsigned long long *hash,
+                                  char prefix_hex[33]) {
+    static const char alphabet[] = "0123456789abcdef";
+    unsigned long long result = 14695981039346656037ULL;
+    const size_t sample = term->output_len < 16u ? term->output_len : 16u;
+    for (size_t i = 0u; i < term->output_len; ++i) {
+        const unsigned char b = (unsigned char)term->output[i];
+        result = (result ^ (unsigned long long)b) * 1099511628211ULL;
+        if (i < sample) {
+            prefix_hex[i * 2u] = alphabet[b >> 4];
+            prefix_hex[i * 2u + 1u] = alphabet[b & 15u];
+        }
+    }
+    prefix_hex[sample * 2u] = '\0';
+    *hash = result;
+}
+
+static void ci_render_receipt(tui_terminal_t *term, bool committed,
+                              size_t bytes, unsigned long long hash,
+                              const char *prefix_hex) {
+    const unsigned long long epoch = term->ci_render_epoch;
+    term->ci_render_epoch = 0u;
+    if (!epoch || term->ci_render_reports >= 64u) return;
+    const char *path = getenv("STUN_TUI_PTY_INPUT_TRACE");
+    if (!path || !*path) return;
+
+    int mode = -1, row = -1;
+    if (committed && term->front) {
+        for (int y = 0; y < term->front->height; ++y) {
+            if (!ci_front_contains(term->front, y, "Retained ")) continue;
+            row = y;
+            mode = ci_front_contains(term->front, y, " | scrollback | ") ? 1 :
+                   ci_front_contains(term->front, y, " | tail | ") ? 0 : -1;
+            break;
+        }
+    }
+    FILE *trace = fopen(path, "a");
+    if (!trace) return;
+    (void)fprintf(trace,
+        "%s epoch=%llu bytes=%zu fnv64=%016llx prefix=%s "
+        "cell_mode=%d cell_row=%d error=%d\n",
+        committed ? "render_commit" : "render_failed", epoch,
+        bytes, hash, prefix_hex, mode, row, (int)term->last_error);
+    (void)fclose(trace);
+    ++term->ci_render_reports;
+}
+#endif
+
 /* ============================================================================
  * Rendering
  * ============================================================================ */
@@ -684,7 +760,13 @@ bool tui_terminal_render(tui_terminal_t* term) {
     tui_buffer_t* back = term->back;
     tui_buffer_t* front = term->front;
     
-    if (!tui_buffer_is_dirty(back)) return true;
+    if (!tui_buffer_is_dirty(back)) {
+#if defined(STUN_TUI_PTY_RENDER_TRACE_CI) && !defined(_WIN32)
+        /* No physical diff for this armed input is not success evidence. */
+        ci_render_receipt(term, false, 0u, 0u, ""); /* no VT bytes */
+#endif
+        return true;
+    }
     
     output_clear(term);
     if (!output_append(term, "\033[0m")) goto output_failed;
@@ -785,6 +867,15 @@ bool tui_terminal_render(tui_terminal_t* term) {
         }
     }
 
+#if defined(STUN_TUI_PTY_RENDER_TRACE_CI) && !defined(_WIN32)
+    size_t ci_written_bytes = 0u;
+    unsigned long long ci_hash = 0u;
+    char ci_prefix[33] = "";
+    if (term->ci_render_epoch) {
+        ci_written_bytes = term->output_len;
+        ci_render_fingerprint(term, &ci_hash, ci_prefix);
+    }
+#endif
     if (!flush_output(term)) goto output_failed;
 
     /* Commit the rendered rectangle only after output construction and write
@@ -795,9 +886,16 @@ bool tui_terminal_render(tui_terminal_t* term) {
         }
     }
     tui_buffer_reset_dirty(back);
+#if defined(STUN_TUI_PTY_RENDER_TRACE_CI) && !defined(_WIN32)
+    /* At this point the actual VT diff write AND front commit succeeded. */
+    ci_render_receipt(term, true, ci_written_bytes, ci_hash, ci_prefix);
+#endif
     return true;
 
 output_failed:
+#if defined(STUN_TUI_PTY_RENDER_TRACE_CI) && !defined(_WIN32)
+    ci_render_receipt(term, false, 0u, 0u, "");
+#endif
     output_clear(term);
     return false;
 }

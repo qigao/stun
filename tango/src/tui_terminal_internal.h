@@ -82,11 +82,26 @@ struct tui_terminal {
     bool paste_active;
     bool paste_discarding;
 #endif
+
+#if defined(STUN_TUI_PTY_RENDER_TRACE_CI) && !defined(_WIN32)
+    /* Keep this test-only tail AFTER all shared private fields so regular
+     * headless consumers see unchanged layout and offsets. */
+    unsigned long long ci_render_epoch;
+    unsigned ci_render_reports;
+#endif
 };
 
 /* Private pre-frame resize and invalidation. UI Owner invokes this before
  * any view callback; terminal_render keeps it as an idempotent safeguard. */
 bool tui_terminal_prepare_frame(tui_terminal_t *term);
+
+#if defined(STUN_TUI_PTY_RENDER_TRACE_CI) && !defined(_WIN32)
+/* Private conformance-only hook: the demo arms exactly its most recent
+ * on_key epoch after the Box-owned back buffer is updated. The native C11
+ * terminal reports write/commit outcome independently after render(). */
+void tui_terminal_ci_arm_next_render(tui_terminal_t *term,
+                                     unsigned long long epoch);
+#endif
 
 #ifdef _WIN32
 /* Private deterministic translation of an actual Win32 input record. */

@@ -410,6 +410,14 @@ jobs:
             --timeout 120 --output-junit build/xml-runtime/results.xml
           git diff --exit-code
 
+      - name: Verify PTY native-write trace and epoch oracle on Linux
+        if: needs.changes.outputs.xml_runtime == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m unittest discover -s flexUI/tests \
+            -p 'test_tui_streaming_pty_trace.py' -v
+
       # LSan must be a separate *real-source* installed-SDK build, not a
       # relabelled ASan success. Keep ASan/UBSan above independently enabled;
       # inspect liblsan in the executable so this gate cannot silently run

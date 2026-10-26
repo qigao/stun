@@ -11,9 +11,10 @@ import tempfile
 import unittest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from test_tui_streaming_pty import (PTY_TRACE_LIMIT,
+from test_tui_streaming_pty import (PTY_TRACE_LIMIT, fnv1a64,
                                     read_owner_trace_lines,
-                                    require_navigation_provenance)
+                                    require_navigation_provenance,
+                                    require_render_receipt)
 
 
 class PtyTraceReaderTest(unittest.TestCase):
@@ -109,6 +110,80 @@ class PtyNavigationEpochTest(unittest.TestCase):
         records = self.records()[:1] * 64 + self.records()[1:]
         with self.assertRaisesRegex(AssertionError, "trace saturated"):
             require_navigation_provenance(records, 8, 5, False, True)
+
+
+
+class PtyNativeWriteReceiptTest(unittest.TestCase):
+    @staticmethod
+    def diff():
+        return b"\x1b[0m\x1b[23;1HRetained 7/12 | scrollback | 80x24 | "
+
+    @classmethod
+    def records(cls, epoch=9, front_mode=1, kind="render_commit",
+                payload=None):
+        data = cls.diff() if payload is None else payload
+        prefix = data[:16].hex()
+        before = (b"owner_view_epoch=9 command=5 following=0 "
+                  b"cell_mode=1 cell_row=22")
+        receipt = (
+            "%s epoch=%d bytes=%d fnv64=%016x prefix=%s "
+            "cell_mode=%d cell_row=22 error=0" %
+            (kind, epoch, len(data), fnv1a64(data), prefix, front_mode)
+        ).encode("ascii")
+        return [before, receipt]
+
+    def test_matches_actual_captured_serialized_diff(self):
+        data = self.diff()
+        raw = bytearray(b"previous frames") + data + b"\x1b[0m"
+        self.assertEqual(
+            require_render_receipt(
+                self.records(), 9, False, raw, len(b"previous frames")),
+            len(b"previous frames"))
+
+    def test_stale_commit_cannot_qualify_new_home(self):
+        with self.assertRaisesRegex(AssertionError, "stale epoch"):
+            require_render_receipt(
+                self.records(epoch=8), 9, False, self.diff(), 0)
+
+    def test_native_write_failure_cannot_qualify(self):
+        with self.assertRaisesRegex(AssertionError, "did not commit"):
+            require_render_receipt(
+                self.records(kind="render_failed"), 9, False, self.diff(), 0)
+
+    def test_correct_model_with_wrong_committed_cells_fails(self):
+        with self.assertRaisesRegex(AssertionError, "committed front cells"):
+            require_render_receipt(
+                self.records(front_mode=0), 9, False, self.diff(), 0)
+
+    def test_matching_prefix_but_missing_full_bytes_fails(self):
+        changed = bytearray(self.diff())
+        changed[-1] ^= 1
+        with self.assertRaisesRegex(AssertionError, "absent from physical PTY"):
+            require_render_receipt(
+                self.records(), 9, False, changed, 0)
+
+    def test_old_bytes_before_navigation_do_not_qualify(self):
+        raw = bytearray(self.diff() + b"unrelated")
+        with self.assertRaisesRegex(AssertionError, "absent from physical PTY"):
+            require_render_receipt(
+                self.records(), 9, False, raw, len(self.diff()))
+
+    def test_receipt_preceding_owner_frame_is_invalid(self):
+        with self.assertRaisesRegex(AssertionError, "before the requested"):
+            require_render_receipt(
+                self.records()[::-1], 9, False, self.diff(), 0)
+
+    def test_empty_native_diff_is_not_evidence(self):
+        with self.assertRaisesRegex(AssertionError, "no bounded VT diff"):
+            require_render_receipt(
+                self.records(payload=b""), 9, False, b"", 0)
+
+    def test_integrated_command_owner_write_and_output(self):
+        raw = bytearray(b"already drained") + self.diff()
+        records = PtyNavigationEpochTest.records() + self.records()[1:]
+        self.assertEqual(
+            require_navigation_provenance(
+                records, 8, 5, False, True, raw, len(b"already drained")), 9)
 
 
 
