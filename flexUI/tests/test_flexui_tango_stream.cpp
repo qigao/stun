@@ -2070,7 +2070,8 @@ spec("FlexUI MarkdownWidget through Tango async transport and cell renderer") {
         check(emit(12u, TUI_STREAM_CHUNK,
                    "## Second\n\nA replacement GFM viewport.\n\n") ==
               TUI_TRANSCRIPT_OK);
-        check(emit(12u, TUI_STREAM_END, {}) == TUI_TRANSCRIPT_OK);
+        // Leave message #12 ACTIVE: a later CANCEL preserves the exact
+        // same Markdown bytes but changes native stream generation/state.
         check(tui_transcript_count(transcript) == 2u);
         // A NULL allocation result is the actual resource failure.
         // The projection returns without changing the live window.
@@ -2135,6 +2136,40 @@ spec("FlexUI MarkdownWidget through Tango async transport and cell renderer") {
         check(box.owned_element_count() <= owned + 48u);
         check(box.cached_style_element_count() <= styles + 48u);
         check(staging.live_allocations == 0u);
+        check(staging.allocations == staging.frees);
+
+        // Source/ID equality is checked directly against owner-admitted C11
+        // bytes. A normal repaint of the same projected message must avoid
+        // BOTH scratch malloc calls, even if the fault injector remains
+        // armed. This does NOT bypass native generation/revision checks.
+        const auto allocations_before_reuse = staging.allocations;
+        const auto failures_before_reuse = staging.failure_count;
+        staging.fail_next = true;
+        for (unsigned turn = 0u; turn < 96u; ++turn) {
+            const auto redraw = window.show_tail(transcript);
+            check(redraw == Status::Updated ||
+                  redraw == Status::Unchanged);
+            check(window.visible_host(12u) == old_host);
+        }
+        check(staging.allocations == allocations_before_reuse);
+        check(staging.failure_count == failures_before_reuse);
+        check(staging.fail_next);
+        check(staging.live_allocations == 0u);
+
+        // CANCEL does not change content bytes, but MUST still invalidate
+        // height samples by native revision and update Box geometry. The
+        // source-equal fast path must not mask this state transition.
+        check(emit(12u, TUI_STREAM_CANCEL, {}) == TUI_TRANSCRIPT_OK);
+        const auto after_cancel = window.show_tail(transcript);
+        check(after_cancel == Status::Updated);
+        check(staging.allocations == allocations_before_reuse);
+        check(staging.failure_count == failures_before_reuse);
+        check(staging.fail_next);
+        check(index && index->lookup(12u) &&
+              index->lookup(12u)->measured);
+        check(box.resolve_handle(old_handle) == nullptr);
+        check(window.visible_host(12u) == old_host);
+        staging.fail_next = false;
         check(staging.allocations == staging.frees);
         trace("before-destroy");
         check(tui_transcript_destroy(transcript) == TUI_TRANSCRIPT_OK);
