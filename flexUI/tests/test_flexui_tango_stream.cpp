@@ -2660,6 +2660,176 @@ spec("FlexUI MarkdownWidget through Tango async transport and cell renderer") {
         check(tui_transcript_destroy(transcript) == TUI_TRANSCRIPT_OK);
     }
 
+    it("asserts actual GFM pixel height increase and reversible width reflow") {
+        // Real C11 Transcript -> MarkdownWidget -> Box. Separately prove
+        // (1) content adds height, (2) narrower layout wraps into MORE rows,
+        // (3) restoring width SHRINKS to the prior measured height.
+        flexUI::Box box(nullptr);
+        constexpr float wide_width = 560.0f;
+        constexpr float narrow_width = 152.0f;
+        box.set_viewport(wide_width, 176.0f);
+        box.load_css(
+            "#height-root {width:100%;height:100%;display:flex;"
+            "flex-direction:column;} "
+            "#height-window {width:100%;height:72px;overflow-y:scroll;"
+            "display:flex;flex-direction:column;} "
+            ".transcript-message {width:100%;flex-shrink:0;} "
+            ".tui-virtual-spacer {width:100%;flex-shrink:0;"
+            "height:var(--tui-virtual-height);}");
+        auto* root = box.create("div", "height-root");
+        auto* viewport = box.create("div", "height-window");
+        check(root && viewport);
+        if (!root || !viewport) return;
+        root->append(viewport);
+        box.set_root(root);
+        box.update();
+
+        flex::tui_backend::TranscriptWindow window(box, *viewport, 1u);
+        window.enable_height_tracking(1u, 24.0f);
+        window.enable_virtual_spacers();
+        const auto initial_elements = box.owned_element_count();
+        auto* transcript = tui_transcript_create(1u, 16384u, 64u);
+        check(transcript != nullptr);
+        if (!transcript) return;
+        std::uint64_t sequence = 0u;
+        const auto emit = [&](std::uint32_t type, std::string_view bytes) {
+            if (bytes.size() > 64u) return false;
+            std::array<unsigned char,
+                       sizeof(tui_stream_packet_header_t) + 64u> packet{};
+            const tui_stream_packet_header_t header{1u};
+            std::memcpy(packet.data(), &header, sizeof(header));
+            if (!bytes.empty())
+                std::memcpy(packet.data() + sizeof(header),
+                            bytes.data(), bytes.size());
+            const tui_async_event_t event{
+                type, 1u, ++sequence, sizeof(header) + bytes.size()
+            };
+            return tui_transcript_apply(transcript, &event, packet.data(),
+                                        nullptr) == TUI_TRANSCRIPT_OK;
+        };
+        const auto append = [&](std::string_view source) {
+            for (std::size_t i = 0u; i < source.size(); i += 48u) {
+                if (!emit(TUI_STREAM_CHUNK, source.substr(i, 48u)))
+                    return false;
+            }
+            return true;
+        };
+        std::uint64_t evicted = 99u;
+        const std::string initial =
+            "| 名称 | 内容 |\n| --- | --- |\n"
+            "| 中文 😀 | **GFM** |\n\n"
+            "~~~c\nint answer(void) {\n  return 42;\n}\n~~~\n\n"
+            "First variable-height 中文 😀 paragraph with some text.\n\n";
+        const bool admitted = tui_transcript_open(transcript, 1u,
+                                                   &evicted) ==
+                                  TUI_TRANSCRIPT_OK &&
+                              evicted == 0u &&
+                              emit(TUI_STREAM_BEGIN, {}) &&
+                              append(initial);
+        check(admitted);
+        if (!admitted) {
+            check(tui_transcript_destroy(transcript) == TUI_TRANSCRIPT_OK);
+            return;
+        }
+        using Status = flex::tui_backend::TranscriptWindow::Status;
+        const auto good = [](Status s) {
+            return s == Status::Updated || s == Status::Unchanged;
+        };
+        check(window.show_tail(transcript) == Status::Updated);
+        auto* host = window.visible_host(1u);
+        check(host != nullptr);
+        if (!host) {
+            check(tui_transcript_destroy(transcript) == TUI_TRANSCRIPT_OK);
+            return;
+        }
+        const auto handle = box.handle_for(*host);
+        const auto* heights = window.tracked_heights();
+        const auto measured = [&]() {
+            const auto result = heights ? heights->lookup(1u) : std::nullopt;
+            return result && result->measured &&
+                   std::fabs(result->height - host->height()) < 1.0f;
+        };
+        const float baseline_px = host->height();
+        check(measured());
+        check(std::isfinite(baseline_px) && baseline_px > 72.0f);
+        const flex::tui_backend::TranscriptScrollAnchor anchor{
+            1u, 12.0f, false};
+        check(good(window.show_preserving_anchor(transcript, anchor)));
+        const auto stable = [&]() {
+            return window.visible_host(1u) == host &&
+                box.resolve_handle(handle) == host && measured() &&
+                std::fabs(viewport->scroll_y() -
+                          (host->y() + anchor.within_message_y)) < 2.0f;
+        };
+        check(stable());
+
+        // Additional GFM blocks must actually increase content height.
+        std::string more;
+        for (unsigned i = 0u; i < 8u; ++i)
+            more += "Additional paragraph " + std::to_string(i) +
+                " with very long wrapped content and 中文 😀 **emphasis** "
+                "that must participate in real Box text layout. "
+                "Many extra English words for predictable wrap testing.\n\n";
+        more += "~~~c\n"
+                "int one(void) { return 1; }\n"
+                "int two(void) { return 2; }\n"
+                "int three(void) { return 3; }\n"
+                "~~~\n\n";
+        check(append(more));
+        check(good(window.show_preserving_anchor(transcript, anchor)));
+        const float content_px = host->height();
+        check(stable());
+        check(content_px > baseline_px + 1.0f);
+
+        // Unchanged native bytes at a narrower width: REAL extra wrap rows.
+        box.set_viewport(narrow_width, 176.0f);
+        box.update();
+        check(good(window.show_preserving_anchor(transcript, anchor)));
+        const float narrow_px = host->height();
+        check(stable());
+        check(std::fabs(viewport->width() - narrow_width) < 1.0f);
+        check(narrow_px > content_px + 1.0f);
+
+        // Restoring the wide viewport must shrink and converge to the
+        // exact original wide-width source geometry.
+        box.set_viewport(wide_width, 176.0f);
+        box.update();
+        check(good(window.show_preserving_anchor(transcript, anchor)));
+        const float restored_px = host->height();
+        check(stable());
+        check(std::fabs(viewport->width() - wide_width) < 1.0f);
+        check(restored_px < narrow_px - 1.0f);
+        check(std::fabs(restored_px - content_px) < 2.0f);
+        check(window.visible_count() == 1u &&
+              viewport->child_count() == 3u);
+        check(box.owned_element_count() <= initial_elements + 256u);
+        check(box.cached_style_element_count() <= initial_elements + 256u);
+
+        const float source_delta = content_px - baseline_px;
+        const float wrap_delta = narrow_px - content_px;
+        const float unwrap_delta = narrow_px - restored_px;
+        const bool height_ok =
+            std::isfinite(source_delta) && source_delta > 1.0f &&
+            std::isfinite(wrap_delta) && wrap_delta > 1.0f &&
+            std::isfinite(unwrap_delta) && unwrap_delta > 1.0f &&
+            std::fabs(restored_px - content_px) < 2.0f && stable();
+        check(height_ok);
+        if (height_ok)
+            std::printf(
+                "TUI_GFM_HEIGHT initial_px=%.2f content_px=%.2f "
+                "narrow_px=%.2f restored_px=%.2f "
+                "source_delta_px=%.2f wrap_delta_px=%.2f "
+                "unwrap_delta_px=%.2f anchor_preserved=1\n",
+                static_cast<double>(baseline_px),
+                static_cast<double>(content_px),
+                static_cast<double>(narrow_px),
+                static_cast<double>(restored_px),
+                static_cast<double>(source_delta),
+                static_cast<double>(wrap_delta),
+                static_cast<double>(unwrap_delta));
+        check(tui_transcript_destroy(transcript) == TUI_TRANSCRIPT_OK);
+    }
+
     it("keeps GFM scroll anchors bounded across 32 incremental reflows, cancels and resizes") {
         // Exercise actual C11 source, MarkdownWidget, and Box over repeated
         // UI Owner turns with GFM tables/code/CJK, source growth, cancellation
