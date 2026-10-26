@@ -77,6 +77,10 @@ struct Demo {
     // Unlike latest BEGIN, this marks an actually settled message.
     std::uint64_t last_settled_message = 0u;
     std::uint64_t anchor = 0u;
+    // Last requested first-message ID actually projected by on_view().
+    // Navigation changes this intent; stream/reflow updates of the same
+    // window can instead preserve a value-only message-local cell anchor.
+    std::uint64_t projected_anchor = 0u;
     std::size_t accepted = 0u;
     std::size_t rejected = 0u;
     bool following = true;
@@ -356,13 +360,21 @@ void on_view(const void* ptr, tui_buffer_t* back) {
             return;
         }
 #endif
+        // Snapshot BEFORE a viewport resize changes Box layout geometry.
+        // The value contains no borrowed Element or C11 text pointer.
+        const auto prior_scroll = d.window->capture_scroll_anchor();
         const int w = tui_terminal_width(term);
         const int h = tui_terminal_height(term);
         if (w > 0 && h > 0)
             d.box->set_viewport(w * kCellWidth, h * kCellHeight);
+        const bool continuing_history = !d.following && d.anchor != 0u &&
+            d.projected_anchor == d.anchor &&
+            prior_scroll.message_id != 0u && !prior_scroll.follow_tail;
         const auto status = d.following
             ? d.window->show_tail(d.transcript)
-            : d.window->show_from_id(d.transcript, d.anchor);
+            : continuing_history
+                ? d.window->show_preserving_anchor(d.transcript, prior_scroll)
+                : d.window->show_from_id(d.transcript, d.anchor);
         using WindowStatus = flex::tui_backend::TranscriptWindow::Status;
         if (status == WindowStatus::QueryRejected ||
             status == WindowStatus::Invalid) {
@@ -370,6 +382,7 @@ void on_view(const void* ptr, tui_buffer_t* back) {
             (void)tui_async_queue_close(tui_app_async_queue(d.app));
             return;
         }
+        d.projected_anchor = d.following ? 0u : d.anchor;
         if (d.status) d.status->set_text(format_status(d, w, h));
         d.box->update();
 #if defined(STUN_TUI_DEMO_HEADLESS_TEST) && defined(_WIN32)
@@ -619,6 +632,15 @@ int headless_smoke() {
         d.window->visible_host(12u) != nullptr &&
         d.viewport->scroll_y() <= 0.01f;
 
+    // Scroll within the oldest displayed Markdown message, then resize.
+    // Unlike an explicit Home/End, this must preserve its local viewport
+    // offset even though the Box geometry and line wrapping change.
+    const bool scrollable_for_anchor = d.viewport &&
+        d.viewport->can_scroll_y() && d.viewport->max_scroll_y() > 12.0f;
+    if (scrollable_for_anchor)
+        (void)d.viewport->set_scroll_offset(d.viewport->scroll_x(), 8.0f);
+    const auto before_resize_anchor = d.window->capture_scroll_anchor();
+
     // Reflow the actual terminal's two cell buffers after a size change.
     // The TUI renderer must borrow the current back buffer each frame,
     // and the Box viewport must agree with the new cell geometry.
@@ -636,6 +658,13 @@ int headless_smoke() {
             0u &&
         normal_status.find("Retained 12/12 | scrollback | 80x24 | settled=23 |") ==
             0u;
+    const auto* kept_host = before_resize_anchor.message_id != 0u
+        ? d.window->visible_host(before_resize_anchor.message_id) : nullptr;
+    const bool local_anchor_preserved = scrollable_for_anchor &&
+        !before_resize_anchor.follow_tail && kept_host &&
+        std::abs(d.viewport->scroll_y() -
+                 (kept_host->y() +
+                  before_resize_anchor.within_message_y)) <= 2.0f;
     const bool resized = prepared && d.box &&
         term->front->width == 52 && term->front->height == 16 &&
         term->back->width == 52 && term->back->height == 16 &&
@@ -646,7 +675,7 @@ int headless_smoke() {
     shutdown(d);
     if (!okay || !at_tail || !bounded || !browsed || !did_cancel ||
         !anchored || !returned || !returned_oldest || !resized ||
-        !single_row_status || frames < 3u)
+        !local_anchor_preserved || !single_row_status || frames < 3u)
         return 4;
     std::puts("Tango/FlexUI streaming demo headless smoke passed");
     return 0;

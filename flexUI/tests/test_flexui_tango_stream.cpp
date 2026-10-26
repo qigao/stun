@@ -1250,8 +1250,10 @@ spec("FlexUI MarkdownWidget through Tango async transport and cell renderer") {
                     "style_baselines=%zu visible_hosts=%zu\n",
                     box.owned_element_count(),
                     box.cached_style_element_count(), window.visible_count());
-        check(box.owned_element_count() <= original_nodes + 256u);
-        check(box.cached_style_element_count() <= original_nodes + 256u);
+        // Observed three-host projection high-water was 160 nodes on
+        // Linux ASan/LSan; leave bounded growth room for other compilers.
+        check(box.owned_element_count() <= original_nodes + 192u);
+        check(box.cached_style_element_count() <= original_nodes + 192u);
         check(tui_transcript_destroy(transcript) == TUI_TRANSCRIPT_OK);
     }
 
