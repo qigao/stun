@@ -1120,8 +1120,10 @@ spec("FlexUI MarkdownWidget through Tango async transport and cell renderer") {
         const auto emit = [&](std::uint64_t id, std::uint32_t type,
                               std::string_view text) {
             if (text.size() > kMaxChunk) return false;
+            // An explicit non-captured constant is required as an MSVC
+            // C++17 non-type template argument inside this owner lambda.
             std::array<unsigned char,
-                       sizeof(tui_stream_packet_header_t) + kMaxChunk> data{};
+                       sizeof(tui_stream_packet_header_t) + 64u> data{};
             const tui_stream_packet_header_t header{id};
             std::memcpy(data.data(), &header, sizeof(header));
             if (!text.empty())
