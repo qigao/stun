@@ -11,6 +11,7 @@
 #ifndef FLEX_TUI_TRANSCRIPT_WINDOW_H
 #define FLEX_TUI_TRANSCRIPT_WINDOW_H
 
+#include <backends/tui/transcript_height_index.h>
 #include <flexUI/box.h>
 #include <flexUI/stream_scroll_follow.h>
 #include <flexUI/widgets/markdown_widget.h>
@@ -21,6 +22,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <limits>
+#include <memory>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -79,6 +81,25 @@ public:
 
   std::size_t slot_capacity() const noexcept { return slots_.size(); }
   std::size_t visible_count() const noexcept { return visible_.size(); }
+
+  // Optional, value-only geometry tracking, enabled by the UI owner before
+  // its first projection. Defaults OFF for all existing TUI consumers.
+  // Box ownership and native C11 stream lifetimes remain unchanged.
+  void enable_height_tracking(std::size_t retained_capacity,
+                              float fallback_height) {
+    if (!visible_.empty())
+      throw std::logic_error("enable bounded height tracking before show()");
+    heights_ = std::make_unique<TranscriptHeightIndex>(
+        retained_capacity, fallback_height);
+  }
+
+  void set_height_layout_revision(std::uint64_t revision) noexcept {
+    layout_revision_ = revision;
+  }
+
+  const TranscriptHeightIndex* tracked_heights() const noexcept {
+    return heights_.get();
+  }
 
   // A stable host and UiHandle remain stable as long as message_id remains
   // in the visible window, even as source bytes or global window order change.
@@ -196,6 +217,15 @@ private:
     return viewport_.set_scroll_offset(viewport_.scroll_x(), 0.0f);
   }
 
+  void record_visible_heights() noexcept {
+    if (!heights_) return;
+    for (const Slot* slot : visible_) {
+      if (!slot->message_id) continue;
+      (void)heights_->record_height(
+          slot->message_id, slot->host->height());
+    }
+  }
+
   Status show_with_policy(const tui_transcript_t* transcript,
                           std::size_t first, ScrollPolicy policy,
                           const TranscriptScrollAnchor* anchor = nullptr) {
@@ -221,6 +251,19 @@ private:
           id, std::string(text, bytes), std::string("transcript-msg-") +
           std::to_string(id)
       });
+    }
+
+    // Reject invalid or over-capacity geometry snapshots before modifying
+    // a live widget ID or publishing a new Box topology. Unlike a full DOM,
+    // the optional cache stores at most native retainer capacity records.
+    bool geometry_changed = false;
+    if (heights_) {
+      const auto result = heights_->sync(
+          transcript, viewport_.width(), layout_revision_);
+      if (result != TranscriptHeightIndex::Status::Updated &&
+          result != TranscriptHeightIndex::Status::Unchanged)
+        return Status::QueryRejected;
+      geometry_changed = result == TranscriptHeightIndex::Status::Updated;
     }
 
     std::vector<Slot*> next;
@@ -257,12 +300,25 @@ private:
         // Reflow can change host geometry even when the Markdown source did
         // not change (e.g. resize or CSS width change).
         box_.update();
-        return restore_anchor(*anchor) ? Status::Updated : Status::Unchanged;
+        record_visible_heights();
+        const bool moved = restore_anchor(*anchor);
+        return moved || geometry_changed ? Status::Updated : Status::Unchanged;
       }
-      if (policy == ScrollPolicy::FollowTail &&
-          viewport_.set_scroll_offset(viewport_.scroll_x(),
-                                      viewport_.max_scroll_y())) {
+      if (policy == ScrollPolicy::FollowTail) {
+        const bool moved = viewport_.set_scroll_offset(
+            viewport_.scroll_x(), viewport_.max_scroll_y());
+        if (moved || geometry_changed) {
+          box_.update();
+          record_visible_heights();
+          return Status::Updated;
+        }
+      }
+      // Native revision/width/style changes can invalidate cached numeric
+      // heights even with identical visible Markdown. Re-measure only after
+      // an actual owner Box update; never stamp old layout as a new sample.
+      if (geometry_changed) {
         box_.update();
+        record_visible_heights();
         return Status::Updated;
       }
       return Status::Unchanged;
@@ -306,6 +362,7 @@ private:
     visible_ = std::move(next);
     box_.invalidate();
     box_.update();
+    record_visible_heights();
     if (policy == ScrollPolicy::FollowTail) {
       (void)viewport_.set_scroll_offset(viewport_.scroll_x(),
                                         viewport_.max_scroll_y());
@@ -387,6 +444,8 @@ private:
   std::vector<Slot> slots_;
   std::vector<Slot*> visible_;
   std::vector<tui_transcript_message_t> scratch_;
+  std::unique_ptr<TranscriptHeightIndex> heights_;
+  std::uint64_t layout_revision_ = 0u;
 };
 
 }  // namespace flex::tui_backend

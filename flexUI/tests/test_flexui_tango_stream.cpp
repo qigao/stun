@@ -1277,6 +1277,8 @@ spec("FlexUI MarkdownWidget through Tango async transport and cell renderer") {
         root->append(viewport);
         box.set_root(root);
         flex::tui_backend::TranscriptWindow window(box, *viewport, 2u);
+        box.update();
+        window.enable_height_tracking(4u, 24.0f);
         auto* transcript = tui_transcript_create(4u, 4096u, 128u);
         check(transcript != nullptr);
         if (!transcript) return;
@@ -1320,6 +1322,14 @@ spec("FlexUI MarkdownWidget through Tango async transport and cell renderer") {
         auto* host11 = window.visible_host(11u);
         auto* host12 = window.visible_host(12u);
         check(host11 && host12 && viewport->width() > 0.0f);
+        const auto* live_index = window.tracked_heights();
+        check(live_index != nullptr && live_index->size() == 4u);
+        if (live_index && host11 && host12) {
+            check(live_index->lookup(11u)->measured);
+            check(live_index->lookup(12u)->measured);
+            check(!live_index->lookup(10u)->measured);
+            check(!live_index->lookup(13u)->measured);
+        }
         if (!host11 || !host12 || viewport->width() <= 0.0f) {
             check(tui_transcript_destroy(transcript) == TUI_TRANSCRIPT_OK);
             return;
@@ -1361,6 +1371,7 @@ spec("FlexUI MarkdownWidget through Tango async transport and cell renderer") {
         check(window.show(transcript, 1u) ==
               flex::tui_backend::TranscriptWindow::Status::Updated);
         box.update();
+        check(live_index->lookup(12u)->measured);
         check(heights.record_height(12u, host12->height()));
         // Width invalidation is conservative: an unchanged C11 revision
         // needs a new Box measurement after wrapping changes.
@@ -1375,6 +1386,14 @@ spec("FlexUI MarkdownWidget through Tango async transport and cell renderer") {
               Index::Status::Updated);
         check(!heights.lookup(11u)->measured);
         check(heights.layout_revision() == 1u);
+        window.set_height_layout_revision(1u);
+        const auto unchanged_source = window.show(transcript, 1u);
+        check(unchanged_source ==
+                  flex::tui_backend::TranscriptWindow::Status::Unchanged ||
+              unchanged_source ==
+                  flex::tui_backend::TranscriptWindow::Status::Updated);
+        check(live_index->layout_revision() == 1u);
+        check(live_index->lookup(11u)->measured);
         const auto frozen_size = heights.size();
         check(heights.sync(
                   transcript, std::numeric_limits<float>::quiet_NaN(), 2u) ==
@@ -1400,6 +1419,13 @@ spec("FlexUI MarkdownWidget through Tango async transport and cell renderer") {
         check(heights.lookup(14u).has_value());
         check(!heights.height_before(10u));
         check(heights.height_before(11u).has_value());
+        check(window.show_tail(transcript) ==
+              flex::tui_backend::TranscriptWindow::Status::Updated);
+        check(!live_index->lookup(10u));
+        check(live_index->lookup(14u)->measured);
+        // Offscreen retained ID 11 keeps a valid measured sample when its
+        // generation, source revision and layout epoch have not changed.
+        check(live_index->lookup(11u)->measured);
 
         // A smaller cache refuses oversized native retention before changing
         // any entries, without silently discarding newest message geometry.
