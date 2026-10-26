@@ -186,7 +186,7 @@ def started_as_tty():
     return master, slave
 
 
-def run_test(executable, early_home=False):
+def run_test(executable, early_home=False, home_burst=False):
     master, slave = started_as_tty()
     original_termios = termios.tcgetattr(slave)
     output = bytearray()
@@ -235,6 +235,20 @@ def run_test(executable, early_home=False):
     def send(data):
         n = os.write(master, data)
         require(n == len(data), "short PTY input write")
+
+    def require_last_owner_frame(command, following):
+        # Post-Box owner evidence is separate from physical VT/cell evidence.
+        # A successful input write or command trace can never substitute
+        # for the independent screen.mode() assertion made by the caller.
+        with open(input_trace, "rb") as trace:
+            lines = trace.read(16384).splitlines()
+        frames = [line for line in lines if line.startswith(b"owner_view_epoch=")]
+        require(frames, "missing independent owner post-layout frame evidence")
+        last = frames[-1]
+        expected = ("command=%d following=%d " %
+                    (command, int(following))).encode("ascii")
+        require(expected in last,
+                "owner post-layout navigation state mismatch: %r" % last)
 
     def mode_matches(original, restored):
         return original == restored
@@ -289,13 +303,13 @@ def run_test(executable, early_home=False):
                     "worker admitted BEGIN before physical Home gate")
 
         # The worker is publishing concurrently in the default test.
-        # In the extra gated test it cannot publish until Home reaches UI
-        # Owner and the independent cell oracle has observed scrollback. Browse with a POSIX
-        # terminal HOME sequence and verify the ordinary owner event map
-        # caused a visible status transition.
+        # In the gated test it cannot publish until Home reaches UI Owner
+        # and the independent cell oracle observes scrollback. Use genuine
+        # PTY bytes and preserve the existing strict 5-second deadline.
         send(b"\x1b[H")
         until("Home changes visible terminal state to scrollback",
               lambda: screen.mode() == "scrollback", 5.0)
+        require_last_owner_frame(5, False)
         if early_home:
             # Assert BOTH independent command admission and the rendered
             # footer before releasing the producer. Raw VT grep is never
@@ -317,6 +331,7 @@ def run_test(executable, early_home=False):
         send(b"\x1b[F")
         until("End changes visible terminal state to tail mode",
               lambda: screen.mode() == "tail", 5.0)
+        require_last_owner_frame(4, True)
 
         # Observe at least six admitted messages *on the rendered screen*.
         # A fixed sleep falsely assumes the CI host can render five windows
@@ -324,6 +339,26 @@ def run_test(executable, early_home=False):
         until("six rendered message admissions before wheel",
               lambda: screen.retained() >= 6 and screen.mode() == "tail"
               and screen.geometry() == (80, 24), 18.0)
+
+        if home_burst:
+            # Interleave actual HOME and END under an ACTIVE Markdown
+            # producer, after multiple messages are genuinely rendered.
+            # Some Home CSI bytes arrive in separate PTY writes. Every
+            # command MUST reach owner state AND physical visible cells;
+            # owner frame coalescing is fine, dropping an input is not.
+            for round_no in range(3):
+                if round_no % 2 == 0:
+                    send(b"\x1b[")
+                    send(b"H")
+                else:
+                    send(b"\x1b[H")
+                until("concurrent Home %d visible scrollback" % round_no,
+                      lambda: screen.mode() == "scrollback", 5.0)
+                require_last_owner_frame(5, False)
+                send(b"\x1b[F")
+                until("concurrent End %d visible tail" % round_no,
+                      lambda: screen.mode() == "tail", 5.0)
+                require_last_owner_frame(4, True)
 
         # Drive one native mouse wheel event. The SGR parser is invoked from
         # tui_terminal_poll(), not from a test-only decoder entry point.
@@ -374,8 +409,8 @@ def run_test(executable, early_home=False):
                     "parent-observed termios mismatch after normal exit")
         print("native POSIX PTY chat passed: keyboard, SGR mouse, "
               "SIGWINCH 52x16 UI, termios restoration and terminal controls; "
-              "early_home=%d, captured=%d bytes" %
-              (int(early_home), len(output)))
+              "early_home=%d, home_burst=%d, captured=%d bytes" %
+              (int(early_home), int(home_burst), len(output)))
     except Exception:
         print("PTY visible status: %r; retained=%d; mode=%r; "
               "geometry=%r; parser_state=%s" %
@@ -432,10 +467,13 @@ def main():
     parser.add_argument("executable")
     parser.add_argument("--early-home", action="store_true",
                         help="gate first worker BEGIN until real PTY Home is visible")
+    parser.add_argument("--home-burst", action="store_true",
+                        help="interleave strict real Home/End under active Markdown bursts")
     args = parser.parse_args()
     require(os.path.isfile(args.executable),
             "missing real streaming demo executable")
-    run_test(os.path.abspath(args.executable), early_home=args.early_home)
+    run_test(os.path.abspath(args.executable), early_home=args.early_home,
+             home_burst=args.home_burst)
 
 
 if __name__ == "__main__":
