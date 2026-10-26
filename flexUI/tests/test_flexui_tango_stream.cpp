@@ -2116,6 +2116,246 @@ spec("FlexUI MarkdownWidget through Tango async transport and cell renderer") {
         check(tui_transcript_destroy(transcript) == TUI_TRANSCRIPT_OK);
     }
 
+    it("drains real async cancellation and rejects posts after close while virtual history reflows") {
+        // A genuine worker only publishes copied C11 packets. Native stream
+        // mutation, host remapping, and Box layout occur on the actual
+        // tui_app_dispatch_once() UI Owner. Promises establish the producer
+        // ordering without sleeping or racing an owner-owned pointer.
+        flexUI::Box box(nullptr);
+        box.set_viewport(320.0f, 176.0f);
+        box.load_css(
+            "#race-root {width:100%;height:100%;display:flex;"
+            "flex-direction:column;} "
+            "#race-window {width:75%;height:68px;overflow-y:scroll;"
+            "display:flex;flex-direction:column;} "
+            ".transcript-message {width:100%;flex-shrink:0;} "
+            ".tui-virtual-spacer {width:100%;flex-shrink:0;"
+            "height:var(--tui-virtual-height);}");
+        auto* root = box.create("div", "race-root");
+        auto* viewport = box.create("div", "race-window");
+        check(root && viewport);
+        if (!root || !viewport) return;
+        root->append(viewport);
+        box.set_root(root);
+        box.update();
+        flex::tui_backend::TranscriptWindow window(box, *viewport, 1u);
+        window.enable_height_tracking(1u, 24.0f);
+        window.enable_virtual_spacers();
+        auto* transcript = tui_transcript_create(1u, 4096u, 64u);
+        check(transcript != nullptr);
+        if (!transcript) return;
+
+        struct Owner {
+            tui_transcript_t* transcript;
+            flex::tui_backend::TranscriptWindow* window;
+            flexUI::Box* box;
+            flexUI::Element* viewport;
+            flex::tui_backend::TranscriptScrollAnchor pending_anchor{};
+            flex::tui_backend::TranscriptScrollAnchor resolved{};
+            std::size_t accepted = 0u;
+            std::size_t stale = 0u;
+            std::size_t frames = 0u;
+            std::uint64_t evicted_id = 0u;
+            bool apply_wheel = false;
+            bool valid = true;
+        } owner{transcript, &window, &box, viewport};
+        const auto update = +[](const tui_async_event_t* event,
+                                const void* payload, void* context) -> bool {
+            auto& o = *static_cast<Owner*>(context);
+            if (!event || !payload ||
+                event->payload_size < sizeof(tui_stream_packet_header_t))
+                return o.valid = false;
+            tui_stream_packet_header_t header{};
+            std::memcpy(&header, payload, sizeof(header));
+            if (event->type == TUI_STREAM_BEGIN) {
+                tui_transcript_message_t previous{};
+                if (tui_transcript_get(o.transcript, header.message_id,
+                                       &previous) == TUI_TRANSCRIPT_UNKNOWN) {
+                    std::uint64_t evicted = 0u;
+                    if (tui_transcript_open(
+                            o.transcript, header.message_id, &evicted) !=
+                        TUI_TRANSCRIPT_OK)
+                        return o.valid = false;
+                    if (evicted) o.evicted_id = evicted;
+                }
+            }
+            const auto result = tui_transcript_apply(
+                o.transcript, event, payload, nullptr);
+            if (result == TUI_TRANSCRIPT_STALE) {
+                ++o.stale;
+                return true;
+            }
+            if (result != TUI_TRANSCRIPT_OK)
+                return o.valid = false;
+            ++o.accepted;
+            return true;
+        };
+        const auto view = +[](const void* context, tui_buffer_t*) {
+            auto& o = *const_cast<Owner*>(static_cast<const Owner*>(context));
+            ++o.frames;
+            using Status = flex::tui_backend::TranscriptWindow::Status;
+            const Status result = o.apply_wheel
+                ? o.window->scroll_from_anchor(
+                    o.transcript, o.pending_anchor, 16.0, &o.resolved)
+                : o.window->show_tail(o.transcript);
+            if (result != Status::Updated && result != Status::Unchanged)
+                o.valid = false;
+            o.apply_wheel = false;
+            o.box->update();
+        };
+        auto* app = tui_app_create(&owner, keyboard_noop, view, input_noop);
+        check(app != nullptr);
+        if (!app) {
+            check(tui_transcript_destroy(transcript) == TUI_TRANSCRIPT_OK);
+            return;
+        }
+        auto* terminal = tui_app_terminal(app);
+        terminal->width = 80;
+        terminal->height = 24;
+        terminal->front = tui_buffer_create(80, 24);
+        terminal->back = tui_buffer_create(80, 24);
+        check(terminal->front && terminal->back);
+        if (!terminal->front || !terminal->back) {
+            tui_app_destroy(app);
+            check(tui_transcript_destroy(transcript) == TUI_TRANSCRIPT_OK);
+            return;
+        }
+        terminal->initialized = true;
+        terminal->color_mode = TUI_COLOR_TRUECOLOR;
+        terminal->write_output = mock_terminal_write;
+        check(tui_app_set_async_update(app, update));
+        auto* queue = tui_app_async_queue(app);
+        check(queue != nullptr);
+        if (!queue) {
+            terminal->initialized = false;
+            tui_app_destroy(app);
+            check(tui_transcript_destroy(transcript) == TUI_TRANSCRIPT_OK);
+            return;
+        }
+        app->needs_redraw = false;
+
+        std::promise<void> first_ready, continue_cancel, second_ready;
+        std::promise<void> allow_after_close;
+        auto first_future = first_ready.get_future();
+        auto cancel_future = continue_cancel.get_future();
+        auto second_future = second_ready.get_future();
+        auto close_future = allow_after_close.get_future();
+        std::atomic<bool> producer_ok{true};
+        std::atomic<tui_async_status_t> after_close{
+            TUI_ASYNC_INVALID_ARGUMENT};
+        std::thread worker([&] {
+            const auto post = [&](std::uint64_t id, std::uint32_t type,
+                                  std::string_view text) {
+                if (text.size() > 64u) return TUI_ASYNC_INVALID_ARGUMENT;
+                std::array<unsigned char,
+                           sizeof(tui_stream_packet_header_t) + 64u> packet{};
+                const tui_stream_packet_header_t header{id};
+                std::memcpy(packet.data(), &header, sizeof(header));
+                if (!text.empty())
+                    std::memcpy(packet.data() + sizeof(header),
+                                text.data(), text.size());
+                return tui_async_queue_post(queue, type, 1u, packet.data(),
+                                            sizeof(header) + text.size(),
+                                            nullptr);
+            };
+            const auto send = [&](std::uint64_t id, std::string_view text) {
+                for (std::size_t offset = 0u; offset < text.size();
+                     offset += 48u) {
+                    if (post(id, TUI_STREAM_CHUNK, text.substr(offset, 48u)) !=
+                        TUI_ASYNC_OK)
+                        return false;
+                }
+                return true;
+            };
+            const std::string gfm =
+                "| 中文 | emoji |\n| --- | --- |\n"
+                "| 中中 | 😀 |\n\n"
+                "```c\nint value(void) {return 1;}\n```\n\n"
+                "A long text paragraph with wrapping and 中文.\n\n"
+                "Another paragraph across terminal rows.\n\n";
+            const bool initial =
+                post(1u, TUI_STREAM_BEGIN, {}) == TUI_ASYNC_OK &&
+                send(1u, gfm);
+            producer_ok.store(initial, std::memory_order_release);
+            first_ready.set_value();
+            cancel_future.wait();
+            const bool second = initial &&
+                post(1u, TUI_STREAM_CANCEL, {}) == TUI_ASYNC_OK &&
+                post(1u, TUI_STREAM_CHUNK, "late") == TUI_ASYNC_OK &&
+                post(2u, TUI_STREAM_BEGIN, {}) == TUI_ASYNC_OK &&
+                send(2u, "## Replacement\n\nFresh after cancel.\n\n") &&
+                post(2u, TUI_STREAM_END, {}) == TUI_ASYNC_OK;
+            producer_ok.store(initial && second, std::memory_order_release);
+            second_ready.set_value();
+            close_future.wait();
+            after_close.store(post(2u, TUI_STREAM_CHUNK, "post-close"),
+                              std::memory_order_release);
+        });
+        const bool initial_delivered =
+            first_future.wait_for(std::chrono::seconds(6)) ==
+            std::future_status::ready;
+        check(initial_delivered);
+        if (initial_delivered) {
+            check(tui_app_dispatch_once(app));
+            check(owner.valid && owner.frames == 1u);
+            check(tui_transcript_count(transcript) == 1u);
+            check(window.visible_host(1u) != nullptr);
+        }
+        auto* old_host = window.visible_host(1u);
+        auto old_handle = old_host ? box.handle_for(*old_host) :
+                                     decltype(box.handle_for(*root)){};
+        const bool layout_ready = old_host && viewport->can_scroll_y() &&
+                                  viewport->max_scroll_y() > 30.0f;
+        check(layout_ready);
+        if (layout_ready) {
+            check(viewport->set_scroll_offset(0.0f, 12.0f));
+            owner.pending_anchor = window.capture_scroll_anchor();
+            check(owner.pending_anchor.message_id == 1u &&
+                  !owner.pending_anchor.follow_tail);
+        }
+        continue_cancel.set_value();
+        const bool cancel_delivered =
+            second_future.wait_for(std::chrono::seconds(6)) ==
+            std::future_status::ready;
+        check(cancel_delivered);
+        if (cancel_delivered && layout_ready) {
+            owner.apply_wheel = true;
+            box.set_viewport(224.0f, 176.0f);
+            box.update();
+        }
+        if (cancel_delivered) {
+            check(tui_app_dispatch_once(app));
+            check(owner.valid && owner.frames == 2u);
+            check(owner.evicted_id == 1u && owner.stale == 1u);
+            check(window.visible_host(1u) == nullptr);
+            check(window.visible_host(2u) == old_host);
+            if (old_host) check(box.resolve_handle(old_handle) == nullptr);
+            check(!window.tracked_heights()->lookup(1u));
+            check(window.tracked_heights()->lookup(2u) &&
+                  window.tracked_heights()->lookup(2u)->measured);
+            if (layout_ready) {
+                check(owner.resolved.message_id == 2u &&
+                      !owner.resolved.follow_tail);
+            }
+            check(viewport->child_count() == 3u);
+        }
+        check(tui_async_queue_close(queue) == TUI_ASYNC_OK);
+        allow_after_close.set_value();
+        worker.join();
+        check(producer_ok.load(std::memory_order_acquire));
+        check(after_close.load(std::memory_order_acquire) ==
+              TUI_ASYNC_CLOSED);
+        tui_async_queue_stats_t stats{};
+        check(tui_async_queue_get_stats(queue, &stats) == TUI_ASYNC_OK);
+        check(stats.closed && stats.queued == 0u);
+        check(tui_app_pump_messages(app, 128u) == 0u);
+        check(box.owned_element_count() <= 72u);
+        check(box.cached_style_element_count() <= 72u);
+        terminal->initialized = false;
+        tui_app_destroy(app);
+        check(tui_transcript_destroy(transcript) == TUI_TRANSCRIPT_OK);
+    }
+
     it("follows the new tail after a hidden message invalidates measured spacer height") {
         // A hidden ACTIVE message changes its generation/sequence revision.
         // Its *previously measured* short height becomes an estimated 400px
