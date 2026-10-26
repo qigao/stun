@@ -204,33 +204,24 @@ public:
         !std::isfinite(viewport_.height()) ||
         viewport_.height() < 0.0f)
       return Status::Invalid;
-    const auto status = heights_->sync(
-        transcript, viewport_.width(), layout_revision_);
-    if (status != TranscriptHeightIndex::Status::Updated &&
-        status != TranscriptHeightIndex::Status::Unchanged)
-      return Status::QueryRejected;
+    // Rebase a semantic message/local anchor via ACTUAL Box layout before
+    // applying the wheel delta. A resize can invalidate every cached
+    // sample and replace a 500px GFM document with a 32px placeholder.
+    // Using that placeholder to clamp within_message_y would jump into
+    // the NEXT message even while the original message is still retained.
+    // This bounded projection also clamps a newly evicted anchor to the
+    // oldest retained ID at offset zero, never silently returning to tail.
+    // No native text or Element pointer is borrowed across the projection.
+    const Status rebased = show_preserving_anchor(transcript, anchor);
+    if (rebased != Status::Updated && rebased != Status::Unchanged)
+      return rebased;
 
-    // Query by stable ID, never by a slot index that could have shifted
-    // after native C11 retirement. Both values remain estimates when
-    // predecessors are unmeasured or the layout revision changed.
-    double base = 0.0;
-    const auto prefix = heights_->height_before(anchor.message_id);
-    const auto own_height = heights_->height_for(anchor.message_id);
-    if (prefix && own_height)
-      base = *prefix + std::clamp(
-          static_cast<double>(anchor.within_message_y),
-          0.0, *own_height);
-    const double total = heights_->total_height_estimate();
-    // A width/style invalidation deliberately drops old Box measurements.
-    // The fallback-only estimate can then be SHORTER than the viewport
-    // even while its real Markdown is still scrollable. Do not use
-    // (estimated total - viewport height) as a hard scroll maximum: that
-    // would turn an admitted wheel step into an accidental zero delta.
-    // Only bound the lookup to retained numeric geometry. Box independently
-    // clamps the final visible scroll offset after actual layout, and
-    // locate_offset never fabricates an ID past the final retained item.
-    const double target = std::clamp(base + delta_y, 0.0, total);
-    return show_at_scroll_offset(transcript, target, resolved);
+    // The current viewport has been relaid out with real Markdown heights
+    // and its anchor restored. Now the existing bounded offset mapping
+    // can apply the user's relative motion without a stale prefix.
+    // This may perform two Box layout passes on the experimental path,
+    // but Tango still paints only one coalesced Owner frame.
+    return scroll_by_offset(transcript, delta_y, resolved);
   }
 
   float leading_spacer_height() const noexcept {
