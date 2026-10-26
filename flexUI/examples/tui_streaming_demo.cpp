@@ -525,41 +525,41 @@ void on_view(const void* ptr, tui_buffer_t* back) {
                         // Cell decoding is diagnostic-only and paid only
                         // for one newly admitted key command, not on every
                         // worker-driven stream frame.
-                    // Snapshot the actual Tango back-buffer cells independently from
-                    // model navigation state and the parent's physical VT screen.
-                    // No new output, input hook, renderer or owner is introduced.
-                    int pty_cell_mode = -1;
-                    int pty_cell_row = -1;
-                    if (back && back->width > 0 && back->height > 0) {
-                        const auto contains_cells = [&](int row,
-                                                       std::string_view needle) {
-                            if (needle.size() > static_cast<std::size_t>(back->width))
-                                return false;
-                            const int length = static_cast<int>(needle.size());
-                            for (int x = 0; x + length <= back->width; ++x) {
-                                int match = 0;
-                                while (match < length) {
-                                    const auto* cell = tui_buffer_at_const(
-                                        back, x + match, row);
-                                    if (!cell || cell->ch != static_cast<std::uint32_t>(
-                                            static_cast<unsigned char>(needle[
-                                                static_cast<std::size_t>(match)])))
-                                        break;
-                                    ++match;
+                        // Snapshot the actual Tango back-buffer cells independently from
+                        // model navigation state and the parent's physical VT screen.
+                        // No new output, input hook, renderer or owner is introduced.
+                        int pty_cell_mode = -1;
+                        int pty_cell_row = -1;
+                        if (back && back->width > 0 && back->height > 0) {
+                            const auto contains_cells = [&](int row,
+                                                           std::string_view needle) {
+                                if (needle.size() > static_cast<std::size_t>(back->width))
+                                    return false;
+                                const int length = static_cast<int>(needle.size());
+                                for (int x = 0; x + length <= back->width; ++x) {
+                                    int match = 0;
+                                    while (match < length) {
+                                        const auto* cell = tui_buffer_at_const(
+                                            back, x + match, row);
+                                        if (!cell || cell->ch != static_cast<std::uint32_t>(
+                                                static_cast<unsigned char>(needle[
+                                                    static_cast<std::size_t>(match)])))
+                                            break;
+                                        ++match;
+                                    }
+                                    if (match == length) return true;
                                 }
-                                if (match == length) return true;
+                                return false;
+                            };
+                            for (int row = 0; row < back->height; ++row) {
+                                if (!contains_cells(row, "Retained ")) continue;
+                                pty_cell_row = row;
+                                pty_cell_mode =
+                                    contains_cells(row, " | scrollback | ") ? 1 :
+                                    contains_cells(row, " | tail | ") ? 0 : -1;
+                                break;
                             }
-                            return false;
-                        };
-                        for (int row = 0; row < back->height; ++row) {
-                            if (!contains_cells(row, "Retained ")) continue;
-                            pty_cell_row = row;
-                            pty_cell_mode =
-                                contains_cells(row, " | scrollback | ") ? 1 :
-                                contains_cells(row, " | tail | ") ? 0 : -1;
-                            break;
                         }
-                    }
                         std::fprintf(trace,
                             "owner_view_epoch=%llu command=%d following=%d "
                             "retained=%zu anchor=%llu projected=%llu "
