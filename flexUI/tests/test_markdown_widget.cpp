@@ -11,6 +11,7 @@
 #include <stdexcept>
 #include <string_view>
 #include <unordered_set>
+#include <vector>
 
 using namespace flexUI;
 
@@ -562,6 +563,66 @@ spec("MarkdownWidget Parsing") {
             check(recovered->text() == "回復 ✅");
             check(box->owned_element_count() == owner_count);
         }
+    }
+
+    it("rejects foreign-parent projection admission atomically and recovers") {
+        // A malformed detached batch must fail before Box adopts *any*
+        // candidate, even when its initial element passes all shape checks.
+        // Existing Markdown capacity and injected FocusOut regressions cover
+        // the earlier parser/staging and later retirement failure boundaries.
+        Box live(nullptr);
+        auto* root_node = live.create("div", "fault-root");
+        auto* host = live.create("div", "projection-host");
+        auto* previous = live.create("span");
+        previous->set_text("published before failure");
+        check(root_node && host && previous);
+        if (!root_node || !host || !previous) return;
+        root_node->append(host);
+        host->append(previous);
+        live.set_root(root_node);
+        const std::size_t baseline = live.owned_element_count();
+
+        auto external_parent = std::make_unique<Element>();
+        auto first = std::make_unique<Element>();
+        auto second = std::make_unique<Element>();
+        first->set_tag("div");
+        first->set_text("new projection");
+        second->set_tag("span");
+        second->set_text("second root");
+        Element* new_root = first.get();
+        Element* second_root = second.get();
+        check(external_parent->append(new_root) == new_root);
+        std::vector<std::unique_ptr<Element>> detached;
+        detached.push_back(std::move(first));
+        detached.push_back(std::move(second));
+
+        bool rejected = false;
+        try {
+            live.adopt_detached_elements(std::move(detached));
+        } catch (const std::invalid_argument&) {
+            rejected = true;
+        }
+        check(rejected);
+        check(detached.size() == 2u);
+        check(detached[0].get() == new_root);
+        check(detached[1].get() == second_root);
+        check(live.owned_element_count() == baseline);
+        check(host->child_count() == 1u);
+        check(host->child_at(0u) == previous);
+        check(previous->text() == "published before failure");
+
+        // Repair the injected foreign-parent condition, then publish the
+        // original staged root and reclaim the old projection plus unused
+        // sibling. No pointer from the rejected batch became Box-owned.
+        check(external_parent->remove(new_root));
+        live.adopt_detached_elements(std::move(detached));
+        check(live.owned_element_count() == baseline + 2u);
+        host->replace_children({new_root});
+        check(host->child_count() == 1u);
+        check(host->child_at(0u) == new_root);
+        check(new_root->text() == "new projection");
+        check(live.retire_detached_elements({previous, second_root}));
+        check(live.owned_element_count() == baseline);
     }
 
     it("retires old Box-owned Markdown projections across Unicode source swaps") {

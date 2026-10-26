@@ -33,6 +33,8 @@
 namespace {
 
 constexpr uint64_t kMessageId = 42u;
+// Namespace scope avoids MSVC C++17 lambda capture of an array extent.
+constexpr std::size_t kLongSessionMaxChunk = 64u;
 #ifdef _WIN32
 constexpr intptr_t kNoInputHandle = 0;
 #else
@@ -1095,7 +1097,7 @@ spec("FlexUI MarkdownWidget through Tango async transport and cell renderer") {
         constexpr std::uint64_t kMessages = 512u;
         constexpr std::size_t kRetained = 4u;
         constexpr std::size_t kVisible = 3u;
-        constexpr std::size_t kMaxChunk = 64u;
+        constexpr std::size_t kMaxChunk = kLongSessionMaxChunk;
         flexUI::Box box(nullptr);
         box.set_viewport(320.0f, 160.0f);
         box.load_css(
@@ -1120,10 +1122,9 @@ spec("FlexUI MarkdownWidget through Tango async transport and cell renderer") {
         const auto emit = [&](std::uint64_t id, std::uint32_t type,
                               std::string_view text) {
             if (text.size() > kMaxChunk) return false;
-            // An explicit non-captured constant is required as an MSVC
-            // C++17 non-type template argument inside this owner lambda.
             std::array<unsigned char,
-                       sizeof(tui_stream_packet_header_t) + 64u> data{};
+                       sizeof(tui_stream_packet_header_t) +
+                           kLongSessionMaxChunk> data{};
             const tui_stream_packet_header_t header{id};
             std::memcpy(data.data(), &header, sizeof(header));
             if (!text.empty())
@@ -1182,8 +1183,8 @@ spec("FlexUI MarkdownWidget through Tango async transport and cell renderer") {
             check(tui_transcript_count(transcript) == expected_retained);
             // These budgets cover Box-owned projections and pointer-keyed
             // style baselines. LSan independently checks teardown leaks.
-            check(box.owned_element_count() <= initial_owned + 96u);
-            check(box.cached_style_element_count() <= initial_owned + 96u);
+            check(box.owned_element_count() <= initial_owned + 32u);
+            check(box.cached_style_element_count() <= initial_owned + 32u);
         }
         const auto elapsed_ms =
             std::chrono::duration_cast<std::chrono::milliseconds>(
@@ -1203,6 +1204,11 @@ spec("FlexUI MarkdownWidget through Tango async transport and cell renderer") {
                 static_cast<long long>(p50),
                 static_cast<long long>(p95),
                 peak_owned, peak_cached_styles);
+            // Coarse CI regression envelope with substantial headroom over
+            // measured ASan/UBSan and LSan baselines, not a product latency
+            // SLA: pathological CPU growth must fail rather than just log.
+            check(elapsed_ms <= 30000);
+            check(p95 <= 50000);
         }
         check(tui_transcript_destroy(transcript) == TUI_TRANSCRIPT_OK);
     }
