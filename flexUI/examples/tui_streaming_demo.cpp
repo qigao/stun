@@ -600,7 +600,7 @@ void on_view(const void* ptr, tui_buffer_t* back) {
                         // The real Tango C11 renderer will independently
                         // attest to VT diff write + front-buffer commit for
                         // THIS navigation epoch, never just a Box render.
-                        tui_terminal_ci_arm_next_render(term,
+                        tui_terminal_ci_arm_next_render(tui_app_terminal(d.app),
                             static_cast<unsigned long long>(
                                 d.pty_command_epoch));
 #endif
