@@ -1956,15 +1956,21 @@ spec("FlexUI MarkdownWidget through Tango async transport and cell renderer") {
         // intact. Reusing the same resource must allow clean recovery.
         struct FailOnceResource final : std::pmr::memory_resource {
             bool fail_next = false;
+            // -1 disables the one-shot fault; 0 rejects this allocation;
+            // 1 allows desired.reserve() but rejects next.reserve().
+            int successful_allocations_before_failure = -1;
             std::size_t failure_count = 0u;
         protected:
             void* do_allocate(std::size_t bytes,
                               std::size_t alignment) override {
-                if (fail_next) {
+                if (fail_next || successful_allocations_before_failure == 0) {
                     fail_next = false;
+                    successful_allocations_before_failure = -1;
                     ++failure_count;
                     throw std::bad_alloc();
                 }
+                if (successful_allocations_before_failure > 0)
+                    --successful_allocations_before_failure;
                 return std::pmr::new_delete_resource()->allocate(
                     bytes, alignment);
             }
@@ -2079,6 +2085,23 @@ spec("FlexUI MarkdownWidget through Tango async transport and cell renderer") {
         check(window.visible_host(11u) == old_host);
         check(box.resolve_handle(old_handle) == old_host);
         check(index && !index->lookup(12u));
+
+        // A third REAL allocation rejection happens after the initial
+        // desired source copies have succeeded: fail while reserving the
+        // bounded Slot* plan. It must still preserve the Box/UiHandle and
+        // not even change the admitted height-index or Spacer state.
+        staging.successful_allocations_before_failure = 1;
+        check(window.show_tail(transcript) == Status::ResourceExhausted);
+        check(staging.failure_count == 3u);
+        check(window.first_visible_message_id() == old_first);
+        check(window.visible_host(11u) == old_host);
+        check(window.visible_host(12u) == nullptr);
+        check(box.resolve_handle(old_handle) == old_host);
+        check(index && index->lookup(11u) && !index->lookup(12u));
+        check(viewport->child_count() == 3u);
+        check(std::fabs(viewport->scroll_y() - old_y) < 0.01f);
+        check(box.owned_element_count() == owned);
+        check(box.cached_style_element_count() == styles);
 
         // Release the allocator fault: same exact C11 source now projects.
         check(window.show_tail(transcript) == Status::Updated);
