@@ -24,6 +24,41 @@ examples directory also configures desktop examples and may require their
 GLFW/OpenGL build prerequisites; this sample itself has no GPU or window
 dependency.
 
+### Experimental virtual-spacer terminal path (explicit opt-in)
+
+Run the **same physical-terminal** demo with an application-local flag:
+
+```sh
+<path-to-built-executable>/flexui_tui_streaming_demo --experimental-virtual-spacers
+```
+
+The default invocation remains unchanged. This experimental path enables
+the existing private `TranscriptHeightIndex` and **two Box-owned virtual
+Spacer nodes** ahead of and behind at most five actual MarkdownWidget hosts.
+The native C11 transcript still admits at most 12 monotonically increasing
+message IDs, and the existing Tango UI Owner processes input and mailbox
+events; there is no second queue, parser, event loop, or public Tango ABI.
+
+- Heights of visible retained messages are recorded from **real Box layout**;
+  unseen offscreen heights are explicit estimates, not pixel-exact claims.
+- When resizing a physical terminal, the app updates Box viewport geometry
+  **before** the height index checks width-based sample validity. A native
+  `SIGWINCH` or ConPTY host resize cannot qualify against the old width.
+- Home/End, wheel, cancellation, tail-follow and eviction keep their original
+  message-level navigation semantics. This stage does **not** implement
+  arbitrary pixel-scroll-to-message admission or complete variable-height
+  production transcript virtualization.
+- The flag does not persist or change any user/default setting. It is intended
+  for qualification and can be discarded without affecting normal users.
+
+Independent CI test entries exercise the **unmodified owner/UI loop** under
+kernel POSIX PTY with `--virtual-spacers` and Windows ConPTY with
+`--virtual-spacers`. They preserve the ordinary PTY/ConPTY tests, external
+visible cell assertions, 80×24 → 52×16 host resize and complete terminal
+restoration. The POSIX fixture additionally checks a bounded out-of-band
+post-Box owner frame for the expected host count and exactly two Spacers.
+A green experimental test does not permit enabling virtualization by default.
+
 The focused installed-SDK headless project offers the same executable with
 `STUN_BUILD_TUI_STREAMING_DEMO=ON` (the default for that project). Its
 `--headless-smoke` option is enabled only in that CI-oriented build:
