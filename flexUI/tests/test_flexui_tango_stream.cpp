@@ -2229,6 +2229,28 @@ spec("FlexUI MarkdownWidget through Tango async transport and cell renderer") {
         check(box.owned_element_count() == owned);
         check(box.cached_style_element_count() == styles);
 
+        // Offset-based navigation must have the SAME failure-atomicity as
+        // direct window admission. A rejected projected #12 must not be
+        // added to the committed index by the coordinate lookup itself.
+        trace("before-offset-rejection");
+        staging.fail_next = true;
+        flex::tui_backend::TranscriptScrollAnchor rejected_anchor{};
+        check(window.show_at_scroll_offset(
+                  transcript, 100000.0, &rejected_anchor) ==
+              Status::ResourceExhausted);
+        check(staging.failure_count == 4u);
+        check(staging.live_allocations == 0u);
+        check(rejected_anchor.message_id == 0u);
+        check(window.visible_host(11u) == old_host);
+        check(window.visible_host(12u) == nullptr);
+        check(window.first_visible_message_id() == old_first);
+        check(box.resolve_handle(old_handle) == old_host);
+        check(index && index->lookup(11u) && !index->lookup(12u));
+        check(viewport->child_count() == 3u);
+        check(std::fabs(viewport->scroll_y() - old_y) < 0.01f);
+        check(box.owned_element_count() == owned);
+        check(box.cached_style_element_count() == styles);
+
         // Release the allocator fault: same exact C11 source now projects.
         trace("before-recovery");
         check(window.show_tail(transcript) == Status::Updated);

@@ -86,57 +86,45 @@ public:
   // changing the viewport width (CSS, DPI, terminal cell metrics).
   Status sync(const tui_transcript_t* transcript, float layout_width,
               std::uint64_t layout_revision = 0u) {
-    if (!transcript || !std::isfinite(layout_width) ||
-        layout_width <= 0.0f)
-      return Status::Invalid;
-    const std::size_t count = tui_transcript_count(transcript);
-    if (count > maximum_) return Status::Capacity;
-    std::size_t written = 0u;
-    if (tui_transcript_window(transcript, 0u, count, scratch_.data(),
-                              scratch_.size(), &written) != TUI_TRANSCRIPT_OK ||
-        written != count)
-      return Status::QueryRejected;
-
-    const bool same_layout = width_ == layout_width &&
-        layout_revision_ == layout_revision;
-    bool changed = !same_layout || count != entries_.size();
-    staged_.clear();
-    std::uint64_t previous_id = 0u;
-    for (std::size_t i = 0u; i < count; ++i) {
-      const tui_transcript_message_t& message = scratch_[i];
-      if (!message.message_id || message.message_id <= previous_id ||
-          message.stream.message_id != message.message_id)
-        return Status::QueryRejected;
-      previous_id = message.message_id;
-      Entry current{};
-      current.message_id = message.message_id;
-      current.generation = message.stream.generation;
-      current.last_sequence = message.stream.last_sequence;
-      const auto found = std::find_if(
-          entries_.begin(), entries_.end(), [&](const Entry& old) {
-            return old.message_id == current.message_id;
-          });
-      if (same_layout && found != entries_.end() &&
-          found->generation == current.generation &&
-          found->last_sequence == current.last_sequence) {
-        current.measured = found->measured;
-        current.height = found->height;
-      } else {
-        changed = true;
-      }
-      if (i >= entries_.size() ||
-          entries_[i].message_id != current.message_id ||
-          entries_[i].generation != current.generation ||
-          entries_[i].last_sequence != current.last_sequence ||
-          entries_[i].measured != current.measured)
-        changed = true;
-      staged_.push_back(current);
-    }
-
+    const Status state =
+        prepare_snapshot(transcript, layout_width, layout_revision);
+    if (state != Status::Updated && state != Status::Unchanged)
+      return state;
     entries_.swap(staged_);
     width_ = layout_width;
     layout_revision_ = layout_revision;
-    return changed ? Status::Updated : Status::Unchanged;
+    return state;
+  }
+
+  // Preview the native retained scroll coordinate without publishing a
+  // new height index. A subsequent Box/Markdown staging failure must
+  // leave old committed geometry intact. Uses the SAME checked snapshot
+  // preparation as sync(), with fixed-capacity value-only scratch storage.
+  std::optional<LocatedOffset> preview_locate_offset(
+      const tui_transcript_t* transcript, float layout_width,
+      std::uint64_t layout_revision, double y) {
+    if (!std::isfinite(y) || y < 0.0) return std::nullopt;
+    const Status status =
+        prepare_snapshot(transcript, layout_width, layout_revision);
+    if ((status != Status::Updated && status != Status::Unchanged) ||
+        staged_.empty())
+      return std::nullopt;
+    double cursor = 0.0;
+    bool prefix_exact = true;
+    for (std::size_t i = 0u; i < staged_.size(); ++i) {
+      const Entry& e = staged_[i];
+      const double height = e.measured ? e.height : fallback_height_;
+      const bool last = i + 1u == staged_.size();
+      if (y < cursor + height || last) {
+        return LocatedOffset{
+            e.message_id, std::clamp(y - cursor, 0.0, height),
+            prefix_exact, e.measured
+        };
+      }
+      cursor += height;
+      if (!e.measured) prefix_exact = false;
+    }
+    return std::nullopt;
   }
 
   // Measured height comes from the final Box owner layout, after update().
@@ -259,6 +247,62 @@ public:
   }
 
 private:
+  // Staging is reused across previews and commits; only sync() swaps it
+  // into entries_. All error paths preserve previously committed samples.
+  Status prepare_snapshot(const tui_transcript_t* transcript,
+                          float layout_width,
+                          std::uint64_t layout_revision) {
+    if (!transcript || !std::isfinite(layout_width) ||
+        layout_width <= 0.0f)
+      return Status::Invalid;
+    const std::size_t count = tui_transcript_count(transcript);
+    if (count > maximum_) return Status::Capacity;
+    std::size_t written = 0u;
+    if (tui_transcript_window(transcript, 0u, count, scratch_.data(),
+                              scratch_.size(), &written) != TUI_TRANSCRIPT_OK ||
+        written != count)
+      return Status::QueryRejected;
+
+    const bool same_layout = width_ == layout_width &&
+        layout_revision_ == layout_revision;
+    bool changed = !same_layout || count != entries_.size();
+    staged_.clear();
+    std::uint64_t previous_id = 0u;
+    for (std::size_t i = 0u; i < count; ++i) {
+      const tui_transcript_message_t& message = scratch_[i];
+      if (!message.message_id || message.message_id <= previous_id ||
+          message.stream.message_id != message.message_id)
+        return Status::QueryRejected;
+      previous_id = message.message_id;
+      Entry current{};
+      current.message_id = message.message_id;
+      current.generation = message.stream.generation;
+      current.last_sequence = message.stream.last_sequence;
+      const auto found = std::find_if(
+          entries_.begin(), entries_.end(), [&](const Entry& old) {
+            return old.message_id == current.message_id;
+          });
+      if (same_layout && found != entries_.end() &&
+          found->generation == current.generation &&
+          found->last_sequence == current.last_sequence) {
+        current.measured = found->measured;
+        current.height = found->height;
+      } else {
+        changed = true;
+      }
+      if (i >= entries_.size() ||
+          entries_[i].message_id != current.message_id ||
+          entries_[i].generation != current.generation ||
+          entries_[i].last_sequence != current.last_sequence ||
+          entries_[i].measured != current.measured)
+        changed = true;
+      staged_.push_back(current);
+    }
+
+    return changed ? Status::Updated : Status::Unchanged;
+  }
+
+
   std::size_t maximum_;
   float fallback_height_;
   float width_ = 0.0f;

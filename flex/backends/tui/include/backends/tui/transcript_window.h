@@ -180,12 +180,11 @@ public:
     if (!transcript || !heights_ || !leading_spacer_ ||
         !std::isfinite(scroll_y) || scroll_y < 0.0)
       return Status::Invalid;
-    const auto status = heights_->sync(
-        transcript, viewport_.width(), layout_revision_);
-    if (status != TranscriptHeightIndex::Status::Updated &&
-        status != TranscriptHeightIndex::Status::Unchanged)
-      return Status::QueryRejected;
-    const auto located = heights_->locate_offset(scroll_y);
+    // Do not publish the new retained height index before the bounded
+    // Markdown/Slot* plan is admitted. If a staging allocation rejects,
+    // UI identity, layout samples and scroll position all remain old.
+    const auto located = heights_->preview_locate_offset(
+        transcript, viewport_.width(), layout_revision_, scroll_y);
     if (!located || !std::isfinite(located->local_y) ||
         located->local_y > 10000000.0)
       return Status::QueryRejected;
