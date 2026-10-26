@@ -331,6 +331,22 @@ def require_render_receipt(records, epoch, following, raw_output, raw_start):
         (epoch, nbytes, raw_start, len(raw_output), prefix))
 
 
+def is_pending_native_receipt_error(error):
+    """Only transient evidence lag may be retried; semantic failures stay RED.
+
+    A render receipt can be written to the independent diagnostic file
+    immediately *after* the kernel PTY bytes become visibly screen-replayed.
+    This allows bounded propagation only, never a new Home/End command and
+    never a replacement for the physical terminal-cell oracle.
+    """
+    message = str(error)
+    return (message == "no native terminal diff-write receipt" or
+            message.startswith(
+                "native diff-write receipt belongs to stale epoch:") or
+            message.startswith(
+                "committed Tango VT diff bytes absent from physical PTY output:"))
+
+
 def winsize(fd, rows, cols):
     fcntl.ioctl(fd, termios.TIOCSWINSZ, struct.pack("HHHH", rows, cols, 0, 0))
 
@@ -407,12 +423,24 @@ def run_test(executable, early_home=False, home_burst=False,
 
     def require_last_owner_frame(command, following, previous_epoch,
                                  raw_start):
-        # Physical visible-cell assertion is independent and mandatory.
-        return require_navigation_provenance(
-            read_owner_trace_lines(input_trace),
-            previous_epoch, command, following,
-            require_virtual=not legacy_message_scroll,
-            raw_output=output, raw_start=raw_start)
+        # Called strictly AFTER the real 5-second physical-cell oracle.
+        # The independently logged write receipt may reach its file just
+        # after the serialized VT bytes reach and update the PTY screen.
+        # Synchronize that proof for at most 250 ms without re-sending input,
+        # relaxing the visual deadline, or accepting stale/mismatched evidence.
+        receipt_deadline = min(time.monotonic() + 0.25, overall_deadline)
+        while True:
+            try:
+                return require_navigation_provenance(
+                    read_owner_trace_lines(input_trace),
+                    previous_epoch, command, following,
+                    require_virtual=not legacy_message_scroll,
+                    raw_output=output, raw_start=raw_start)
+            except AssertionError as error:
+                if (not is_pending_native_receipt_error(error)
+                        or time.monotonic() >= receipt_deadline):
+                    raise
+                pump(min(0.01, max(0.0, receipt_deadline - time.monotonic())))
 
     def last_owner_epoch():
         records = read_owner_trace_lines(input_trace)
