@@ -1128,7 +1128,11 @@ UiDocumentInstantiateResult UiDocumentInstantiator::instantiate_impl(
       }
     }
 
-    auto next_index = box.elements_by_id_;
+    // Anonymous/local component instances do not require a potentially
+    // O(Box-global IDs) index copy for every chart in a dashboard.
+    auto next_index = options.id_policy == UiIdPolicy::LocalOnly
+                          ? decltype(box.elements_by_id_){}
+                          : box.elements_by_id_;
     std::uint64_t next_generation = box.next_element_generation_;
     for (const auto &[id, element] : detached.elements_by_id) {
       if (options.id_policy == UiIdPolicy::LocalOnly) continue;
@@ -1211,9 +1215,11 @@ UiDocumentInstantiateResult UiDocumentInstantiator::instantiate_impl(
       widget->bind_host_element(detached_widget.host);
       box.active_widgets_.push_back(detached_widget.host);
     }
-    box.elements_by_id_.swap(next_index);
-    box.next_element_generation_ = next_generation;
-    index_committed = true;
+    if (options.id_policy != UiIdPolicy::LocalOnly) {
+      box.elements_by_id_.swap(next_index);
+      box.next_element_generation_ = next_generation;
+      index_committed = true;
+    }
     if (options.mode == UiMountMode::Root) {
       box.set_root(detached.root);
     } else if (options.mode == UiMountMode::Child) {
