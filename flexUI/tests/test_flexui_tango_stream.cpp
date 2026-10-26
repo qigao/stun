@@ -1623,6 +1623,113 @@ spec("FlexUI MarkdownWidget through Tango async transport and cell renderer") {
         check(box.cached_style_element_count() <= owned);
     }
 
+    it("keeps opt-in virtual spacers and fixed hosts bounded for 128 messages") {
+        // Exercise projection churn + explicit scroll-position rewindowing
+        // with the real C11 retainer and only two permanent Markdown hosts.
+        // This is an owner-only qualification, not an input-event loop.
+        flexUI::Box box(nullptr);
+        box.set_viewport(320.0f, 176.0f);
+        box.load_css(
+            "#virtual-root {display:flex;flex-direction:column;"
+            "width:320px;height:176px;} "
+            "#virtual-window {display:flex;flex-direction:column;"
+            "width:200px;height:68px;overflow-y:scroll;} "
+            ".transcript-message {width:200px;flex-shrink:0;} "
+            ".tui-virtual-spacer {width:200px;flex-shrink:0;"
+            "height:var(--tui-virtual-height);}");
+        auto* root = box.create("div", "virtual-root");
+        auto* viewport = box.create("div", "virtual-window");
+        check(root && viewport);
+        if (!root || !viewport) return;
+        root->append(viewport);
+        box.set_root(root);
+        box.update();
+        flex::tui_backend::TranscriptWindow window(box, *viewport, 2u);
+        window.enable_height_tracking(4u, 24.0f);
+        window.enable_virtual_spacers();
+        const auto initial_owned = box.owned_element_count();
+        auto* transcript = tui_transcript_create(4u, 512u, 64u);
+        check(transcript != nullptr);
+        if (!transcript) return;
+        std::uint64_t sequence = 0u;
+        const auto emit = [&](std::uint64_t id, std::uint32_t type,
+                              std::string_view text) {
+            if (text.size() > 64u) return false;
+            std::array<unsigned char,
+                       sizeof(tui_stream_packet_header_t) + 64u> data{};
+            const tui_stream_packet_header_t header{id};
+            std::memcpy(data.data(), &header, sizeof(header));
+            if (!text.empty())
+                std::memcpy(data.data() + sizeof(header),
+                            text.data(), text.size());
+            const tui_async_event_t event{
+                type, 1u, ++sequence, sizeof(header) + text.size()
+            };
+            return tui_transcript_apply(
+                transcript, &event, data.data(), nullptr) ==
+                TUI_TRANSCRIPT_OK;
+        };
+        using Status = flex::tui_backend::TranscriptWindow::Status;
+        bool qualified = true;
+        std::size_t peak_owned = initial_owned;
+        std::size_t peak_styles = 0u;
+        for (std::uint64_t id = 1u; id <= 128u; ++id) {
+            std::uint64_t evicted = 0u;
+            const auto admitted = tui_transcript_open(transcript, id, &evicted);
+            const std::string markdown =
+                "## Response " + std::to_string(id) +
+                "\n\n中 **stream** with fixed slot reuse.\n\n";
+            if (admitted != TUI_TRANSCRIPT_OK ||
+                evicted != (id > 4u ? id - 4u : 0u) ||
+                !emit(id, TUI_STREAM_BEGIN, {}) ||
+                !emit(id, TUI_STREAM_CHUNK, markdown) ||
+                !emit(id, TUI_STREAM_END, {})) {
+                qualified = false;
+                break;
+            }
+            const auto tail = window.show_tail(transcript);
+            if (tail != Status::Updated) {
+                qualified = false;
+                break;
+            }
+            const auto* index = window.tracked_heights();
+            const auto retained = std::min<std::size_t>(
+                4u, static_cast<std::size_t>(id));
+            check(window.slot_capacity() == 2u);
+            check(window.visible_count() ==
+                  std::min<std::size_t>(2u, retained));
+            check(viewport->child_count() == window.visible_count() + 2u);
+            check(window.visible_host(id) != nullptr);
+            check(index && index->size() == retained);
+            check(index && index->lookup(id).has_value());
+            if (id > 4u) check(index && !index->lookup(id - 4u));
+            peak_owned = std::max(peak_owned, box.owned_element_count());
+            peak_styles = std::max(
+                peak_styles, box.cached_style_element_count());
+            check(box.owned_element_count() <= initial_owned + 64u);
+            check(box.cached_style_element_count() <= initial_owned + 64u);
+
+            // Simulate a user seeking to the oldest retained coordinate
+            // while new messages arrive. The owner must not fabricate DOM.
+            const auto browsed = window.show_at_scroll_offset(transcript, 0.0);
+            check(browsed == Status::Updated || browsed == Status::Unchanged);
+            check(viewport->child_count() == window.visible_count() + 2u);
+            check(viewport->scroll_y() < 1.0f);
+            const auto returned = window.show_tail(transcript);
+            check(returned == Status::Updated || returned == Status::Unchanged);
+            check(window.visible_host(id) != nullptr);
+            check(box.owned_element_count() <= initial_owned + 64u);
+            check(box.cached_style_element_count() <= initial_owned + 64u);
+        }
+        check(qualified);
+        check(tui_transcript_count(transcript) == 4u);
+        check(window.visible_count() == 2u);
+        std::printf("TUI_VIRTUAL_STRESS turns=128 peak_elements=%zu "
+                    "peak_styles=%zu visible_hosts=%zu\n",
+                    peak_owned, peak_styles, window.visible_count());
+        check(tui_transcript_destroy(transcript) == TUI_TRANSCRIPT_OK);
+    }
+
     it("bounds real transcript projection ownership over 512 owner turns") {
         // Exercise the actual C11 registry + fixed-slot FlexUI window, not a
         // fake list or benchmark-only renderer. Structural budgets are hard
