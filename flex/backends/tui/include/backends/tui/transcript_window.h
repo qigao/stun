@@ -527,37 +527,55 @@ private:
     std::pmr::vector<Slot*> next(staging_resource_);
     try {
       next.reserve(count);
-    for (const auto& item : desired) {
-      Slot* existing = nullptr;
-      for (auto& slot : slots_)
-        if (slot.message_id == item.id) { existing = &slot; break; }
-      next.push_back(existing);
-    }
-    for (std::size_t i = 0u; i < count; ++i) {
-      if (next[i]) continue;
-      for (auto& slot : slots_) {
-        if (std::find(next.begin(), next.end(), &slot) != next.end())
-          continue;
-        next[i] = &slot;
-        break;
+      for (const auto& item : desired) {
+        Slot* existing = nullptr;
+        for (auto& slot : slots_)
+          if (slot.message_id == item.id) { existing = &slot; break; }
+        next.push_back(existing);
       }
-      if (!next[i]) return Status::QueryRejected;
-    }
+      for (std::size_t i = 0u; i < count; ++i) {
+        if (next[i]) continue;
+        for (auto& slot : slots_) {
+          if (std::find(next.begin(), next.end(), &slot) != next.end())
+            continue;
+          next[i] = &slot;
+          break;
+        }
+        if (!next[i]) return Status::QueryRejected;
+      }
     } catch (const std::bad_alloc&) {
       return Status::ResourceExhausted;
     }
 
+    bool different = count != visible_.size();
+    for (std::size_t i = 0u; i < count && !different; ++i)
+      // Fixed Box slots can be recycled for a different message with
+      // BYTE-IDENTICAL GFM. Pointer and Markdown equality alone cannot
+      // establish presentation identity: skipping this rebind would leave
+      // the old UiHandle/ID live while the height index already locates
+      // the newly requested retained message.
+      if (next[i] != visible_[i] ||
+          next[i]->message_id != desired[i].id ||
+          next[i]->markdown->markdown() != desired[i].text)
+        different = true;
+    // Anchor semantics are independent of the old viewport's scroll tail.
+    // A different first visible message starts at the top; an unchanged
+    // anchor retains its numeric scroll position across streaming reflow.
+    const bool different_anchor = count != 0u &&
+        (visible_.empty() || visible_[0]->message_id != desired[0].id);
     // Preallocate the Box child list before the height-index sync or the
     // first Spacer/UiHandle mutation. Even on a global new failure, the
     // previously projected window, styling, scroll and geometry stay intact.
     std::vector<flexUI::Element*> children;
-    try {
-      children.reserve(count + (leading_spacer_ ? 2u : 0u));
-      if (leading_spacer_) children.push_back(leading_spacer_);
-      for (Slot* slot : next) children.push_back(slot->host);
-      if (trailing_spacer_) children.push_back(trailing_spacer_);
-    } catch (const std::bad_alloc&) {
-      return Status::ResourceExhausted;
+    if (different) {
+      try {
+        children.reserve(count + (leading_spacer_ ? 2u : 0u));
+        if (leading_spacer_) children.push_back(leading_spacer_);
+        for (Slot* slot : next) children.push_back(slot->host);
+        if (trailing_spacer_) children.push_back(trailing_spacer_);
+      } catch (const std::bad_alloc&) {
+        return Status::ResourceExhausted;
+      }
     }
 
     // Reject invalid or over-capacity geometry snapshots before modifying
@@ -577,22 +595,6 @@ private:
     if (!prepare_virtual_spacers(
             count ? desired[0].id : 0u, count, spacers_changed))
       return Status::QueryRejected;
-    bool different = count != visible_.size();
-    for (std::size_t i = 0u; i < count && !different; ++i)
-      // Fixed Box slots can be recycled for a different message with
-      // BYTE-IDENTICAL GFM. Pointer and Markdown equality alone cannot
-      // establish presentation identity: skipping this rebind would leave
-      // the old UiHandle/ID live while the height index already locates
-      // the newly requested retained message.
-      if (next[i] != visible_[i] ||
-          next[i]->message_id != desired[i].id ||
-          next[i]->markdown->markdown() != desired[i].text)
-        different = true;
-    // Anchor semantics are independent of the old viewport's scroll tail.
-    // A different first visible message starts at the top; an unchanged
-    // anchor retains its numeric scroll position across streaming reflow.
-    const bool different_anchor = count != 0u &&
-        (visible_.empty() || visible_[0]->message_id != desired[0].id);
     if (!different) {
       if (policy == ScrollPolicy::PreserveAnchor && anchor) {
         // Reflow can change host geometry even when the Markdown source did
