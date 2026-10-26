@@ -265,9 +265,29 @@ public:
       }
       break;
     }
-    // Crossing a message boundary, an evicted ID, or the end of the
-    // viewport still goes through the conservative bounded map.
-    return scroll_by_offset(transcript, delta_y, resolved);
+    // Crossing a message boundary, an evicted ID, or a temporarily
+    // non-scrollable viewport must NOT reinterpret the user's semantic
+    // message/local anchor as the Box's transient numeric scroll_y.
+    // In particular, a reprojected GFM host can be measured and retained
+    // while Box has briefly clamped scroll_y to zero. That zero is not the
+    // previously admitted 4px message-local anchor. Reconstruct the
+    // retained coordinate AFTER the Box remeasurement above.
+    double base = 0.0;
+    const auto prefix = heights_->height_before(anchor.message_id);
+    const auto own_height = heights_->height_for(anchor.message_id);
+    if (prefix && own_height) {
+      base = *prefix + std::clamp(
+          static_cast<double>(anchor.within_message_y),
+          0.0, *own_height);
+    }
+    // If the original ID was evicted, show_preserving_anchor() has already
+    // clamped to the new oldest retained host; only the zero local origin
+    // is safe. Never resurrect an evicted ID or invent offscreen geometry.
+    const double total = heights_->total_height_estimate();
+    if (!std::isfinite(base) || !std::isfinite(total) || total < 0.0)
+      return Status::QueryRejected;
+    const double target = std::clamp(base + delta_y, 0.0, total);
+    return show_at_scroll_offset(transcript, target, resolved);
   }
 
   float leading_spacer_height() const noexcept {
