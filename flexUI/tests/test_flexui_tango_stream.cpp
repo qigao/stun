@@ -1480,6 +1480,55 @@ spec("FlexUI MarkdownWidget through Tango async transport and cell renderer") {
         check(tui_transcript_destroy(transcript) == TUI_TRANSCRIPT_OK);
     }
 
+    it("resolves value-only virtual spacer heights through real FlexUI CSS") {
+        // Stage-test native CSS custom-property height rendering before any
+        // private transcript virtualization is enabled in the live demo.
+        // Offscreen history must require only two owned spacer Elements,
+        // never one Element per retained C11 message.
+        flexUI::Box box(nullptr);
+        box.set_viewport(320.0f, 176.0f);
+        box.load_css(
+            "#spacer-root {display:flex;flex-direction:column;"
+            "width:320px;height:176px;} "
+            "#spacer-viewport {display:flex;flex-direction:column;"
+            "width:160px;height:70px;overflow-y:scroll;} "
+            ".tui-virtual-spacer {width:160px;flex-shrink:0;"
+            "height:var(--tui-virtual-height);} "
+            ".tui-visible {width:160px;flex-shrink:0;height:30px;}");
+        auto* root = box.create("div", "spacer-root");
+        auto* viewport = box.create("div", "spacer-viewport");
+        auto* before = box.create("div");
+        auto* visible = box.create("div");
+        auto* after = box.create("div");
+        check(root && viewport && before && visible && after);
+        if (!root || !viewport || !before || !visible || !after) return;
+        before->add_class("tui-virtual-spacer");
+        after->add_class("tui-virtual-spacer");
+        visible->add_class("tui-visible");
+        before->set_custom_property("--tui-virtual-height", "120px");
+        after->set_custom_property("--tui-virtual-height", "160px");
+        root->append(viewport);
+        viewport->append(before);
+        viewport->append(visible);
+        viewport->append(after);
+        box.set_root(root);
+        const auto owned = box.owned_element_count();
+        box.update();
+        check(viewport->child_count() == 3u);
+        check(std::fabs(before->height() - 120.0f) < 1.0f);
+        check(std::fabs(visible->height() - 30.0f) < 1.0f);
+        check(std::fabs(after->height() - 160.0f) < 1.0f);
+        check(viewport->max_scroll_y() >= 238.0f);
+        check(viewport->set_scroll_offset(0.0f, 100.0f));
+        before->set_custom_property("--tui-virtual-height", "80px");
+        box.update();
+        check(std::fabs(before->height() - 80.0f) < 1.0f);
+        check(std::fabs(after->height() - 160.0f) < 1.0f);
+        check(std::fabs(viewport->scroll_y() - 100.0f) < 1.0f);
+        check(box.owned_element_count() == owned);
+        check(box.cached_style_element_count() <= owned);
+    }
+
     it("bounds real transcript projection ownership over 512 owner turns") {
         // Exercise the actual C11 registry + fixed-slot FlexUI window, not a
         // fake list or benchmark-only renderer. Structural budgets are hard
