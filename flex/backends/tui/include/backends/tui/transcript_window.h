@@ -187,6 +187,26 @@ public:
     const float scroll_y = viewport_.scroll_y();
     if (viewport_.max_scroll_y() - scroll_y <= tail_tolerance)
       return {0u, 0.0f, true};
+    // The user can scroll into an unprojected spacer before the UI owner
+    // swaps the two bounded hosts. Do not mislabel that position as an
+    // offset inside the first/last VISIBLE host. Locate the retained ID
+    // through the bounded value index; its local offset remains estimated
+    // until the message is projected and measured by Box.
+    if (heights_ && leading_spacer_) {
+      const float first_top = visible_.front()->host->y();
+      const float last_top = visible_.back()->host->y();
+      const float last_height = visible_.back()->host->height();
+      if (std::isfinite(first_top) && std::isfinite(last_top) &&
+          std::isfinite(last_height) && last_height >= 0.0f &&
+          (scroll_y < first_top || scroll_y >= last_top + last_height)) {
+        const auto located = heights_->locate_offset(scroll_y);
+        if (located && located->message_id &&
+            std::isfinite(located->local_y) &&
+            located->local_y >= 0.0 && located->local_y <= 10000000.0)
+          return {located->message_id,
+                  static_cast<float>(located->local_y), false};
+      }
+    }
     for (const Slot* slot : visible_) {
       const float top = slot->host->y();
       const float height = slot->host->height();
