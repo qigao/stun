@@ -33,6 +33,18 @@ public:
     bool measured = false;
   };
 
+  // Virtual geometry is a bounded numeric *plan*, not a renderer. No UI
+  // slots, native borrowed text, or speculative Element heights escape it.
+  struct WindowExtent {
+    double leading = 0.0;
+    double visible = 0.0;
+    double trailing = 0.0;
+    double total = 0.0;
+    bool leading_exact = true;
+    bool visible_exact = true;
+    bool trailing_exact = true;
+  };
+
   // Fixed maximum is determined by the application-owned C11 retainer.
   // Entries are values; only retained message IDs can occupy a slot.
   TranscriptHeightIndex(std::size_t max_retained, float fallback_height)
@@ -160,6 +172,38 @@ public:
     }
     if (all_measured) *all_measured = exact;
     return sum;
+  }
+
+  // A nonempty contiguous window uses only native retained IDs. Reject
+  // gaps/ranges that extend past the retainer rather than manufacturing
+  // virtual rows. Estimated offsets MUST NOT be called exact positions.
+  std::optional<WindowExtent> window_extent(
+      std::uint64_t first_message_id, std::size_t visible_count) const noexcept {
+    if (!first_message_id || visible_count == 0u ||
+        visible_count > entries_.size()) return std::nullopt;
+    std::size_t first = 0u;
+    while (first < entries_.size() &&
+           entries_[first].message_id != first_message_id) ++first;
+    if (first == entries_.size() ||
+        visible_count > entries_.size() - first) return std::nullopt;
+
+    WindowExtent extent{};
+    for (std::size_t i = 0u; i < entries_.size(); ++i) {
+      const Entry& e = entries_[i];
+      const double height = e.measured ? e.height : fallback_height_;
+      if (i < first) {
+        extent.leading += height;
+        if (!e.measured) extent.leading_exact = false;
+      } else if (i - first < visible_count) {
+        extent.visible += height;
+        if (!e.measured) extent.visible_exact = false;
+      } else {
+        extent.trailing += height;
+        if (!e.measured) extent.trailing_exact = false;
+      }
+    }
+    extent.total = extent.leading + extent.visible + extent.trailing;
+    return extent;
   }
 
 private:
