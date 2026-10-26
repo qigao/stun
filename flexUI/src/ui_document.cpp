@@ -1084,6 +1084,10 @@ UiDocumentInstantiateResult UiDocumentInstantiator::instantiate_impl(
   const std::uint64_t original_element_generation =
       box.next_element_generation_;
   bool index_committed = false;
+  // Keep the original ID map as a no-allocation rollback snapshot after
+  // publishing a new global/scoped index. This also handles OOM failure in
+  // Element::replace_children without constructing new scoped IDs in catch.
+  decltype(box.elements_by_id_) next_index;
   bool child_attached = false;
   std::vector<Element *> original_children;
   // Do not open a no-op binding transaction for controller-free fragments:
@@ -1130,9 +1134,9 @@ UiDocumentInstantiateResult UiDocumentInstantiator::instantiate_impl(
 
     // Anonymous/local component instances do not require a potentially
     // O(Box-global IDs) index copy for every chart in a dashboard.
-    auto next_index = options.id_policy == UiIdPolicy::LocalOnly
-                          ? decltype(box.elements_by_id_){}
-                          : box.elements_by_id_;
+    if (options.id_policy != UiIdPolicy::LocalOnly) {
+      next_index = box.elements_by_id_;
+    }
     std::uint64_t next_generation = box.next_element_generation_;
     for (const auto &[id, element] : detached.elements_by_id) {
       if (options.id_policy == UiIdPolicy::LocalOnly) continue;
@@ -1242,14 +1246,9 @@ UiDocumentInstantiateResult UiDocumentInstantiator::instantiate_impl(
     box.active_widgets_.resize(original_active_widget_count);
     box.widgets_.resize(original_widget_count);
     if (index_committed) {
-      for (const auto &[id, element] : detached.elements_by_id) {
-        if (options.id_policy == UiIdPolicy::LocalOnly) continue;
-        auto found = box.elements_by_id_.find(scoped_id(id, options));
-        if (found != box.elements_by_id_.end() &&
-            found->second.element == element) {
-          box.elements_by_id_.erase(found);
-        }
-      }
+      // swap is nonallocating for std::map with its default allocator; the
+      // previous complete index (including handle generations) is restored.
+      box.elements_by_id_.swap(next_index);
     }
     box.elements_.resize(original_element_count);
     const auto code = active_binding_span
