@@ -216,11 +216,41 @@ public:
     if (rebased != Status::Updated && rebased != Status::Unchanged)
       return rebased;
 
-    // The current viewport has been relaid out with real Markdown heights
-    // and its anchor restored. Now the existing bounded offset mapping
-    // can apply the user's relative motion without a stale prefix.
-    // This may perform two Box layout passes on the experimental path,
-    // but Tango still paints only one coalesced Owner frame.
+    // Fast-path an in-message wheel move after the semantic anchor has
+    // already been rebound and measured by Box. No second C11 snapshot,
+    // Markdown projection or height-index sync is needed when the target
+    // remains in the SAME retained host and inside the actual viewport
+    // scroll extent. Boundary crossings still use the full bounded map.
+    // This optimization is private to the experimental C++ adapter.
+    for (const Slot* slot : visible_) {
+      if (slot->message_id != anchor.message_id) continue;
+      const double top = slot->host->y();
+      const double height = slot->host->height();
+      const double maximum = viewport_.max_scroll_y();
+      if (!std::isfinite(top) || !std::isfinite(height) ||
+          !std::isfinite(maximum) || height <= 0.0 ||
+          maximum < 0.0)
+        break;
+      const double local = std::clamp(
+          static_cast<double>(anchor.within_message_y), 0.0, height);
+      const double next_local = local + delta_y;
+      const double next_absolute = top + next_local;
+      if (std::isfinite(next_local) &&
+          std::isfinite(next_absolute) &&
+          next_local >= 0.0 && next_local < height &&
+          next_absolute >= 0.0 && next_absolute <= maximum) {
+        const bool moved = viewport_.set_scroll_offset(
+            viewport_.scroll_x(), static_cast<float>(next_absolute));
+        if (moved) box_.update();
+        if (resolved)
+          *resolved = {anchor.message_id,
+                       static_cast<float>(next_local), false};
+        return moved ? Status::Updated : rebased;
+      }
+      break;
+    }
+    // Crossing a message boundary, an evicted ID, or the end of the
+    // viewport still goes through the conservative bounded map.
     return scroll_by_offset(transcript, delta_y, resolved);
   }
 
