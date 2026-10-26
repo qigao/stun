@@ -5,7 +5,7 @@
 #include <flexUI/element.h>
 #include <flexUI/render_command.h>
 #include <flexUI/render_manager.h>
-#include <tinytest.h>
+#include <tinytest.hpp>
 
 #include <cmath>
 #include <cstdint>
