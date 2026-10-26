@@ -592,14 +592,14 @@ private:
       // the old UiHandle/ID live while the height index already locates
       // the newly requested retained message.
       if (next[i] != visible_[i] ||
-          next[i]->message_id != desired[i].id ||
-          next[i]->markdown->markdown() != desired[i].text)
+          next[i]->message_id != desired.items[i].id ||
+          next[i]->markdown->markdown() != desired.items[i].text)
         different = true;
     // Anchor semantics are independent of the old viewport's scroll tail.
     // A different first visible message starts at the top; an unchanged
     // anchor retains its numeric scroll position across streaming reflow.
     const bool different_anchor = count != 0u &&
-        (visible_.empty() || visible_[0]->message_id != desired[0].id);
+        (visible_.empty() || visible_[0]->message_id != desired.items[0].id);
     // Preallocate the Box child list before the height-index sync or the
     // first Spacer/UiHandle mutation. Even on a global new failure, the
     // previously projected window, styling, scroll and geometry stay intact.
@@ -631,7 +631,7 @@ private:
 
     bool spacers_changed = false;
     if (!prepare_virtual_spacers(
-            count ? desired[0].id : 0u, count, spacers_changed))
+            count ? desired.items[0].id : 0u, count, spacers_changed))
       return Status::QueryRejected;
     if (!different) {
       if (policy == ScrollPolicy::PreserveAnchor && anchor) {
@@ -680,17 +680,17 @@ private:
     // its message identity. A widget must not inherit the previous message's
     // interactions, and old generational UiHandles become unresolvable.
     for (auto& slot : slots_) {
-      const auto it = std::find(next.begin(), next.end(), &slot);
-      const std::size_t index = static_cast<std::size_t>(it - next.begin());
+      const auto it = std::find(next, next + count, &slot);
+      const std::size_t index = static_cast<std::size_t>(it - next);
       const std::uint64_t next_id =
-          it == next.end() ? 0u : desired[index].id;
+          it == next + count ? 0u : desired.items[index].id;
       if (slot.message_id != next_id) {
         if (has_ancestor(box_.focused_element(), slot.host))
           box_.set_focus(nullptr);
         if (has_ancestor(box_.capturing_element(), slot.host))
           box_.release_mouse_capture(box_.capturing_element());
         slot.host->set_element_id(
-            next_id ? desired[index].name : std::string{});
+            next_id ? desired.items[index].name : std::string{});
         slot.message_id = next_id;
       }
       if (!next_id) {
@@ -701,7 +701,7 @@ private:
 
     for (std::size_t i = 0u; i < count; ++i) {
       auto* slot = next[i];
-      slot->markdown->set_markdown(desired[i].text);
+      slot->markdown->set_markdown(desired.items[i].text);
       slot->markdown->update(0.0f, *slot->host);
     }
     viewport_.replace_children(children);
