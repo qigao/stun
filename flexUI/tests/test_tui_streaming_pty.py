@@ -253,7 +253,7 @@ def run_test(executable, early_home=False, home_burst=False,
         # This is the first owned *cell* observation, before Tango serializes
         # its ANSI delta. The existing screen.mode() check remains the only
         # physical-terminal acceptance, and cannot be bypassed by this trace.
-        cell_match = re.search(rb"cell_mode=(-?\\d+) cell_row=(-?\\d+)", last)
+        cell_match = re.search(rb"cell_mode=(-?\d+) cell_row=(-?\d+)", last)
         require(cell_match is not None,
                 "missing post-Box cell-buffer provenance: %r" % last)
         cell_mode, cell_row = int(cell_match[1]), int(cell_match[2])
@@ -485,12 +485,12 @@ def run_test(executable, early_home=False, home_burst=False,
             # A queued resize may coincide with a partial CSI read; neither
             # owner command provenance nor Box-cell evidence substitutes for
             # the actual 52x16 PTY screen.
-            send(b"\\x1b[F")
-            until("post-resize End displays tail", 
+            send(b"\x1b[F")
+            until("post-resize End displays tail",
                   lambda: screen.mode() == "tail"
                   and screen.geometry() == (52, 16), 5.0)
             require_last_owner_frame(4, True)
-            send(b"\\x1b[H")
+            send(b"\x1b[H")
             until("post-resize Home displays scrollback",
                   lambda: screen.mode() == "scrollback"
                   and screen.geometry() == (52, 16), 5.0)
