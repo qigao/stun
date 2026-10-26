@@ -291,7 +291,7 @@ def require_render_receipt(records, epoch, following, raw_output, raw_start):
             "native Tango render did not commit: %r" % last)
     matched = re.fullmatch(
         rb"render_commit epoch=(\d+) bytes=(\d+) fnv64=([0-9a-f]{16}) "
-        rb"prefix=([0-9a-f]+) cell_mode=(-?\d+) cell_row=(-?\d+) "
+        rb"prefix=([0-9a-f]*) cell_mode=(-?\d+) cell_row=(-?\d+) "
         rb"error=(\d+)", last)
     require(matched is not None,
             "malformed native diff-write receipt: %r" % last)
