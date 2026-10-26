@@ -311,7 +311,13 @@ def run_test(executable, early_home=False, home_burst=False,
             environment["STUN_TUI_PTY_BEGIN_GATE_FD"] = str(gate_read)
         argv = [executable]
         if virtual_spacers:
-            argv.append("--experimental-virtual-spacers")
+            # Preserve all 48 normal C11 BEGIN/CHUNK/END transitions, but
+            # use the explicit test-only rapid worker for this additional
+            # settled-history coordinate gate. The ordinary PTY sessions
+            # still exercise the unchanged 28ms concurrent producer. Never
+            # extend the 5s physical Home/End visible-state deadlines.
+            argv.extend(["--experimental-virtual-spacers",
+                         "--ci-rapid-producer"])
         child = subprocess.Popen(
             argv, stdin=slave, stdout=slave, stderr=slave,
             start_new_session=True,
