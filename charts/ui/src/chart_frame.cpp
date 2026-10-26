@@ -5,6 +5,7 @@
 #include <flexUI/ui_document.h>
 #include <flexUI/ui_xml.h>
 #include <flexUI/widget_registry.h>
+#include "chart_frame_xml.inc"
 
 #include <algorithm>
 #include <cmath>
@@ -31,22 +32,7 @@ std::string pixel_value(float value) {
 // same detached UiDocument pipeline as every other registered UI component.
 const flexUI::CompiledUiProgram& chart_frame_template() {
   static auto compiled = [] {
-    const auto result = flexUI::compile_ui_xml(R"xml(
-<ui name="ChartFrame" xmlns:attr="urn:flexui:attribute"
-    xmlns:var="urn:flexui:css-variable">
-  <figure slot="chart" attr:role="figure"
-          class="flex flex-col relative w-full box-border rounded-lg border bg-card text-card-foreground p-4 gap-4">
-    <figcaption slot="chart-title" class="text-sm font-medium"
-                var:overflow-wrap="anywhere" />
-    <div slot="chart-surface" attr:role="img" class="relative w-full" />
-    <div slot="chart-legend" attr:role="list"
-         class="flex items-center justify-center gap-4 text-sm" />
-    <div slot="chart-tooltip" attr:role="status" attr:data-state="inactive"
-         attr:aria-hidden="true"
-         class="absolute hidden rounded-md border bg-popover text-popover-foreground p-2 shadow-md text-sm" />
-  </figure>
-</ui>
-)xml");
+    const auto result = flexUI::compile_ui_xml(kChartFrameXml);
     if (!result) {
       throw std::logic_error("invalid embedded XML ChartFrame: " +
                              result.error.message);
