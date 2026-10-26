@@ -410,6 +410,40 @@ jobs:
             --timeout 120 --output-junit build/xml-runtime/results.xml
           git diff --exit-code
 
+      # LSan must be a separate *real-source* installed-SDK build, not a
+      # relabelled ASan success. Keep ASan/UBSan above independently enabled;
+      # inspect liblsan in the executable so this gate cannot silently run
+      # an uninstrumented test after future CMake refactors.
+      - name: Qualify full headless XML and Streaming runtime under LSan
+        if: needs.changes.outputs.xml_runtime == 'true'
+        shell: bash
+        env:
+          LSAN_OPTIONS: detect_leaks=1:exitcode=23:report_objects=1
+        run: |
+          set -euo pipefail
+          cmake -S flexUI/tests/xml-runtime-standalone \
+            -B build/xml-runtime-lsan -G Ninja \
+            -DCMAKE_BUILD_TYPE=Debug \
+            "-DCMAKE_PREFIX_PATH=$SALTS_ROOT;$RUNNER_TEMP/stun-xml-runtime-deps" \
+            -DSTB_INCLUDE_DIRS=/usr/include/stb \
+            -DENABLE_SANITIZER_ADDRESS=OFF \
+            -DENABLE_SANITIZER_UNDEFINED=OFF \
+            -DENABLE_SANITIZER_LEAK=ON \
+            -DCMAKE_FIND_USE_PACKAGE_REGISTRY=OFF \
+            -DCMAKE_FIND_USE_SYSTEM_PACKAGE_REGISTRY=OFF
+          cmake --build build/xml-runtime-lsan \
+            --target stun_xml_runtime_qualification --parallel 2
+          ldd build/xml-runtime-lsan/test_flexui_tango_stream \
+            | tee build/xml-runtime-lsan/lsan-dependencies.txt
+          grep -q 'liblsan[.]so' \
+            build/xml-runtime-lsan/lsan-dependencies.txt
+          ! grep -q 'not found' \
+            build/xml-runtime-lsan/lsan-dependencies.txt
+          ctest --test-dir build/xml-runtime-lsan \
+            --no-tests=error --verbose --output-on-failure --timeout 120 \
+            --output-junit build/xml-runtime-lsan/results.xml
+          git diff --exit-code
+
       - name: Compile Unicode consumers and run original strict text suite
         if: needs.changes.outputs.unicode == 'true'
         shell: bash
