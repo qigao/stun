@@ -3,7 +3,24 @@
 状态：架构决策已采用，实施与验收按下列工作项推进
 日期：2026-08-31
 
-## 2026-10-27 P4.2 静态组件显式输入别名（Draft）
+## 2026-10-27 P4.3 整代组件集合重组（Draft）
+
+P4.2 已通过 #284 合入 master。P4.3 引入
+`DesktopApplication::recompose_scoped_xml_components(components, input_aliases)`，
+**显式**传入新的完整组件列表与绑定别名列表。它重用现有
+`DesktopApplication::reload` 的候选装配→校验→服务/完成端口 generation 结算→
+单次 `Box`/Controller 原子切换流程。添加、更换或移除 scope 都通过
+完整应用 generation 更新；新程序中的事件和 Binding 表在挂载前统一编译，
+旧组件随整个前代 `PublishedApplicationState` 回收。
+
+它不是运行中对原有 Box 的子树就地 detach/remove，不承诺保留组件内瞬态
+state，不引入逐组件异步取消或独立脚本上下文。传入的映射必须全部显式，
+且目标仍是已声明的 application-global `UiDataContext` 种子输入。
+失败回滚必须保持旧代可操作与配置不变，成功后标准 `reload` 继续沿用
+新的集合。必须以真实作用域 Event/Effect、Typed Binding、generation、
+异常失败及 Windows/macOS/Linux 原生 SDK 测试验证。
+
+## 2026-10-27 P4.2 静态组件显式输入别名（已合并 PR #284）
 
 P4.1 已通过 PR #282 合入 master。本轮为复用的 XML 组件增加编译期、
 **显式**输入映射。例如模板中 `bind:text="$caption"`，可用

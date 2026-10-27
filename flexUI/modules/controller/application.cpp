@@ -491,6 +491,37 @@ struct DesktopApplication::Impl {
   std::unique_ptr<PublishedApplicationState> active;
   std::thread::id owner_thread;
   DesktopApplicationState state = DesktopApplicationState::Ready;
+
+  // Both reload and full component recomposition use one atomic generation
+  // publication contract. This is called only by the application UI Owner
+  // after a detached candidate has fully passed compilation and mounting.
+  DesktopApplicationResult publish_candidate(
+      std::unique_ptr<PublishedApplicationState> candidate) {
+    const auto current_generation = completion_mailbox->generation();
+    if (current_generation == std::numeric_limits<std::uint64_t>::max()) {
+      return {fail(DesktopApplicationErrorCode::GenerationExhausted,
+                   DesktopApplicationStage::CompletionMailbox,
+                   "desktop application completion generation exhausted")};
+    }
+    const auto next_generation = current_generation + 1;
+    auto service_reset = service_requests->validate_generation_reset(next_generation);
+    if (!service_reset) {
+      auto error = fail(DesktopApplicationErrorCode::ServiceRequestFailed,
+                        DesktopApplicationStage::ServiceRequests, service_reset.error.message);
+      error.service_error = std::move(service_reset.error);
+      return {std::move(error)};
+    }
+    auto advanced = completion_mailbox->advance_generation(next_generation);
+    if (!advanced) {
+      auto error = fail(DesktopApplicationErrorCode::CompletionMailboxFailed,
+                        DesktopApplicationStage::CompletionMailbox, advanced.error.message);
+      error.completion_error = std::move(advanced.error);
+      return {std::move(error)};
+    }
+    service_requests->reset_generation(next_generation);
+    active.swap(candidate);  // No allocation after generation publication.
+    return {};
+  }
 };
 
 struct DesktopApplicationBuilder::Impl {
@@ -811,23 +842,64 @@ DesktopApplicationResult DesktopApplication::reload(DesktopApplicationSources so
   if (!candidate) {
     return {std::move(candidate.error)};
   }
-  auto service_reset = impl_->service_requests->validate_generation_reset(current_generation + 1);
-  if (!service_reset) {
-    auto error = fail(DesktopApplicationErrorCode::ServiceRequestFailed,
-                      DesktopApplicationStage::ServiceRequests, service_reset.error.message);
-    error.service_error = std::move(service_reset.error);
-    return {std::move(error)};
+  return impl_->publish_candidate(std::move(candidate.state));
+}
+
+DesktopApplicationResult DesktopApplication::recompose_scoped_xml_components(
+    std::vector<DesktopScopedXmlComponent> components,
+    std::vector<DesktopScopedBindingAlias> input_aliases) {
+  if (!is_owner_thread()) {
+    return {fail(DesktopApplicationErrorCode::WrongThread,
+                 DesktopApplicationStage::Configuration,
+                 "scoped component recomposition requires the application owner thread")};
   }
-  auto advanced = impl_->completion_mailbox->advance_generation(current_generation + 1);
-  if (!advanced) {
-    auto error = fail(DesktopApplicationErrorCode::CompletionMailboxFailed,
-                      DesktopApplicationStage::CompletionMailbox, advanced.error.message);
-    error.completion_error = std::move(advanced.error);
-    return {std::move(error)};
+  if (impl_->state != DesktopApplicationState::Ready) {
+    return {fail(DesktopApplicationErrorCode::InvalidState,
+                 DesktopApplicationStage::Configuration,
+                 "scoped component recomposition requires the ready state")};
   }
-  impl_->service_requests->reset_generation(current_generation + 1);
-  impl_->active.swap(candidate.state);
-  return {};
+  if (impl_->config.entry_format != UiEntryFormat::Xml) {
+    return {fail(DesktopApplicationErrorCode::InvalidConfiguration,
+                 DesktopApplicationStage::Configuration,
+                 "component recomposition requires a compiled XML application")};
+  }
+  if (generation() == std::numeric_limits<std::uint64_t>::max()) {
+    return {fail(DesktopApplicationErrorCode::GenerationExhausted,
+                 DesktopApplicationStage::CompletionMailbox,
+                 "desktop application completion generation exhausted")};
+  }
+
+  try {
+    // Build the proposed complete set in a private configuration. Existing
+    // sources, declared typed inputs, registry, capabilities, command engine
+    // and script factory remain unchanged; no running owner is mutated yet.
+    ApplicationConfig proposed = impl_->config;
+    proposed.scoped_components = std::move(components);
+    proposed.scoped_binding_aliases = std::move(input_aliases);
+    auto candidate = build_candidate(
+        proposed, impl_->active->sources, impl_->command_engine.get());
+    if (!candidate) {
+      return {std::move(candidate.error)};
+    }
+    auto published = impl_->publish_candidate(std::move(candidate.state));
+    if (!published) return published;
+
+    // std::vector::swap (default allocator) is noexcept. Publication already
+    // advanced the generation, and the stored definition now matches the new
+    // active program. The previous composition stays in proposed and retires.
+    impl_->config.scoped_components.swap(proposed.scoped_components);
+    impl_->config.scoped_binding_aliases.swap(proposed.scoped_binding_aliases);
+    return {};
+  } catch (const std::exception &exception) {
+    return {fail(DesktopApplicationErrorCode::CandidateBuildFailed,
+                 DesktopApplicationStage::CandidateBuild,
+                 std::string("scoped component candidate failed: ") +
+                     exception.what())};
+  } catch (...) {
+    return {fail(DesktopApplicationErrorCode::CandidateBuildFailed,
+                 DesktopApplicationStage::CandidateBuild,
+                 "scoped component candidate failed unexpectedly")};
+  }
 }
 
 DesktopApplicationBuilder::DesktopApplicationBuilder(flex::Renderer *renderer)
