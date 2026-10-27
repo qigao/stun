@@ -6,6 +6,7 @@
 #include <cmath>
 #include <limits>
 #include <string>
+#include <thread>
 
 using flexUI::UiDocumentErrorCode;
 
@@ -1216,6 +1217,24 @@ spec("Box structural subtree retirement rejects unsafe lifetime owners") {
     check_null(box.resolve_handle(stale));
     check_equal(box.get_by_id("detached"), detached);
     check_equal(detached->child_count(), std::size_t{0});
+  }
+
+  it("refuses cross-thread destruction before reading mutable Box state") {
+    flexUI::Box box(nullptr);
+    auto *root = box.create("div", "root");
+    auto *victim = box.create("div", "victim");
+    root->append(victim);
+    box.set_root(root);
+    const auto handle = box.handle_for(*victim);
+    bool accepted = true;
+    std::thread worker([&] {
+      accepted = box.retire_unbound_structural_subtree("victim");
+    });
+    worker.join();
+    check_false(accepted);
+    check_equal(box.resolve_handle(handle), victim);
+    check(box.retire_unbound_structural_subtree("victim"));
+    check_null(box.resolve_handle(handle));
   }
 
   it("refuses focused, hovered or captured subtree retirement") {

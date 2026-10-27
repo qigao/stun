@@ -21,6 +21,7 @@
 #include <functional>
 #include <map>
 #include <memory>
+#include <thread>
 #include <unordered_map>
 #include <unordered_set>
 
@@ -282,6 +283,11 @@ private:
   std::unique_ptr<Renderer> renderer_;
   std::unique_ptr<RenderManager> render_mgr_;
   std::unique_ptr<ViewPipeline> pipeline_;
+
+  // Box-owned structural mutations are thread-affine. This immutable token
+  // allows the retirement preflight to reject cross-thread use before it
+  // reads mutable tree/index/widget state.
+  const std::thread::id owning_thread_ = std::this_thread::get_id();
 
   // 元素树
   Element *root_ = nullptr;
