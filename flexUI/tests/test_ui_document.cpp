@@ -1078,6 +1078,120 @@ spec("UiDocument stages native DOT presentation without Box side effects") {
 
 
 spec("Box structural subtree retirement rejects unsafe lifetime owners") {
+  it("retires all doomed string and MIR Binding targets but preserves siblings") {
+    flexUI::Box box(nullptr);
+    auto *root = box.create("div", "root");
+    auto *host = box.create("section", "host");
+    auto *panel = box.create("div", "panel");
+    auto *caption = box.create("div", "panel::caption");
+    auto *badge = box.create("div", "panel::badge");
+    auto *progress = box.create("div", "panel::progress");
+    auto *sibling = box.create("div", "sibling");
+    root->append(host);
+    host->append(panel);
+    panel->append(caption);
+    panel->append(badge);
+    panel->append(progress);
+    host->append(sibling);
+    box.set_root(root);
+
+    auto &inputs = box.bindings().inputs();
+    inputs.set_string("caption", "Revenue");
+    inputs.set_bool("enabled", true);
+    inputs.set_number("quantity", 3.0);
+    inputs.set_string("shared", "Stable");
+    const auto text = box.bindings().targets().bind_text(*caption, "caption");
+    const auto active = box.bindings().targets().bind_class(
+        *badge, "active", "enabled && quantity > 1");
+    const auto numeric = box.bindings().targets().bind_custom_property(
+        *progress, "--progress", "quantity * 10", "%");
+    const auto kept = box.bindings().targets().bind_text(*sibling, "shared");
+    check(text && active && numeric && kept);
+    box.update();
+    check_equal(caption->text(), "Revenue");
+    check(badge->has_class(flexUI::Symbol("active")));
+    check_equal(sibling->text(), "Stable");
+    const auto old_caption = box.handle_for(*caption);
+    const auto old_badge = box.handle_for(*badge);
+    const auto sibling_handle = box.handle_for(*sibling);
+    const auto before_count = box.owned_element_count();
+    check_equal(box.bindings().stats().binding_count, std::size_t{4});
+
+    // M0 is intentionally strict. M1 permits ownership discard only when
+    // the entire candidate subtree is being destroyed atomically.
+    check_false(box.retire_unbound_structural_subtree("panel"));
+    check_equal(box.bindings().stats().binding_count, std::size_t{4});
+    check(box.retire_bound_structural_subtree("panel"));
+    check_equal(box.owned_element_count(), before_count - 4u);
+    check_equal(box.bindings().stats().binding_count, std::size_t{1});
+    check_null(box.get_by_id("panel"));
+    check_null(box.resolve_handle(old_caption));
+    check_null(box.resolve_handle(old_badge));
+    check_equal(box.resolve_handle(sibling_handle), sibling);
+    check_equal(sibling->text(), "Stable");
+    check_false(box.bindings().targets().unbind(text.id));
+    check_false(box.bindings().targets().unbind(active.id));
+    check_false(box.bindings().targets().unbind(numeric.id));
+
+    // Only still-bound inputs remain protected. No retired Binding may
+    // retain a stale Element pointer or stale typed input dependency.
+    check(inputs.erase("caption"));
+    check(inputs.erase("enabled"));
+    check(inputs.erase("quantity"));
+    bool shared_refused = false;
+    try {
+      (void)inputs.erase("shared");
+    } catch (const std::invalid_argument &) {
+      shared_refused = true;
+    }
+    check(shared_refused);
+    inputs.set_string("shared", "Surviving sibling");
+    box.update();
+    check_equal(sibling->text(), "Surviving sibling");
+    check_equal(box.resolve_handle(sibling_handle), sibling);
+
+    auto *reused = box.create("div", "panel::caption");
+    host->append(reused);
+    check(box.handle_for(*reused).generation != old_caption.generation);
+    check_null(box.resolve_handle(old_caption));
+  }
+
+  it("preserves all Binding records on event, callback and Widget rejection") {
+    flexUI::Box box(nullptr);
+    auto *root = box.create("div", "root");
+    auto *panel = box.create("div", "panel");
+    auto *bound = box.create("div", "caption");
+    auto *event = box.create("div", "action");
+    root->append(panel);
+    panel->append(bound);
+    panel->append(event);
+    box.set_root(root);
+    box.bindings().inputs().set_string("caption_value", "First");
+    const auto handle = box.bindings().targets().bind_text(*bound, "caption_value");
+    check(handle);
+    const auto saved = box.handle_for(*bound);
+
+    event->set_attribute("data-flexui-on-click", "save_document");
+    check_false(box.retire_bound_structural_subtree("panel"));
+    check_equal(box.bindings().stats().binding_count, std::size_t{1});
+    event->remove_attribute("data-flexui-on-click");
+    event->on_click([] {});
+    check_false(box.retire_bound_structural_subtree("panel"));
+    check_equal(box.resolve_handle(saved), bound);
+    event->on_click({});
+
+    auto *widget = box.create_widget<flexUI::LabelWidget>(
+        "label", "inline-widget", std::string("Native"));
+    panel->append(widget);
+    check_false(box.retire_bound_structural_subtree("panel"));
+    check_equal(box.bindings().stats().binding_count, std::size_t{1});
+    box.bindings().inputs().set_string("caption_value", "Second");
+    box.update();
+    check_equal(bound->text(), "Second");
+    check_equal(box.resolve_handle(saved), bound);
+    check_false(box.retire_unbound_structural_subtree("panel"));
+  }
+
   it("removes only the selected mounted subtree and retires indexed handles") {
     flexUI::Box box(nullptr);
     auto *root = box.create("div", "root");

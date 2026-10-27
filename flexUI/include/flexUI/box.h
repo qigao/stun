@@ -148,6 +148,17 @@ public:
   /// failure does not remove elements from the tree.
   bool retire_unbound_structural_subtree(const std::string &root_id) noexcept;
 
+  /// M1: retire a manually managed structural subtree AND all Binding targets
+  /// owned by its nodes in one owner-thread commit. Bound values are deliberately
+  /// NOT restored: every target is destroyed immediately after its Binding
+  /// record has been retired. Unaffected bindings and typed input values survive.
+  /// Refuses a Box with any installed CompiledUiProgram, Widget, native click
+  /// or compiled event handler, active repeater lease, active event/tree traversal
+  /// or in-progress Binding mutation. No ScriptController scope unregister or
+  /// service completion cancellation is implied. Failure leaves the original
+  /// tree, binding count and input schema untouched.
+  bool retire_bound_structural_subtree(const std::string &root_id) noexcept;
+
   // Diagnostics only; includes the Box-owned widget projections.
   std::size_t owned_element_count() const noexcept { return elements_.size(); }
   // Diagnostic count of pointer-keyed CSS baseline objects retained in Box.
@@ -261,6 +272,8 @@ private:
   void apply_theme_to_root();
   bool owns_element(const Element *element) const;
   void deactivate_subtree(Element *root);
+  bool retire_structural_subtree_impl(
+      const std::string &root_id, bool discard_owned_bindings) noexcept;
   // Retire precisely the id-less Box-owned projection nodes that have
   // already been detached by a successful MarkdownWidget tree replacement.
   // Failed validation leaves all elements allocated.

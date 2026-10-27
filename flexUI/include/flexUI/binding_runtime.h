@@ -7,6 +7,7 @@
 #include <functional>
 #include <memory>
 #include <string>
+#include <unordered_set>
 #include <vector>
 
 namespace flex {
@@ -136,12 +137,21 @@ class UiBindingRuntime {
  private:
   friend class UiBindingTargets;
   friend class UiDocumentInstantiator;
+  friend class Box;
 
   struct TransactionCheckpoint {
     std::size_t binding_count = 0;
     UiBindingId next_id = 0;
     bool active = false;
   };
+
+  // In-place structural destruction is staged by Box, not by a caller with
+  // free access to Binding handles. A prevalidated target set can be removed
+  // without restoring state only when all target Elements are being destroyed.
+  bool can_retire_target_set(
+      const std::unordered_set<Element *> &targets) const noexcept;
+  void discard_retired_target_set(
+      const std::unordered_set<Element *> &targets) noexcept;
 
   TransactionCheckpoint begin_transaction();
   void commit_transaction(TransactionCheckpoint& checkpoint);

@@ -1132,6 +1132,16 @@ bool Box::retire_detached_elements(const std::vector<Element*>& candidates) noex
 
 bool Box::retire_unbound_structural_subtree(
     const std::string &root_id) noexcept {
+  return retire_structural_subtree_impl(root_id, false);
+}
+
+bool Box::retire_bound_structural_subtree(
+    const std::string &root_id) noexcept {
+  return retire_structural_subtree_impl(root_id, true);
+}
+
+bool Box::retire_structural_subtree_impl(
+    const std::string &root_id, bool discard_owned_bindings) noexcept {
   if (std::this_thread::get_id() != owning_thread_ || root_id.empty() ||
       compiled_program_installed_ || events_.is_dispatching() ||
       borrowed_tree_depth_ != 0) return false;
@@ -1170,7 +1180,7 @@ bool Box::retire_unbound_structural_subtree(
           batch.size() > elements_.size()) return false;
       if (element->owner_box_ != this || element->is_widget_owned() ||
           element->widget || element->click_callback() ||
-          bindings_.has_binding_target(element) ||
+          (!discard_owned_bindings && bindings_.has_binding_target(element)) ||
           keyed_repeater_hosts_.count(element) != 0 ||
           std::find(active_widgets_.begin(), active_widgets_.end(), element) !=
               active_widgets_.end())
@@ -1216,9 +1226,17 @@ bool Box::retire_unbound_structural_subtree(
     std::size_t owned = 0;
     for (const auto &element : elements_)
       if (batch.count(element.get())) ++owned;
-    if (owned != batch.size()) return false;
+    if (owned != batch.size() || !bindings_.can_retire_target_set(batch))
+      return false;
 
-    // Commit: no callbacks, no new container allocations. Detach all parent
+    // Commit: no callbacks, no new container allocations. Binding record
+    // cleanup intentionally does not restore properties into soon-to-be-
+    // destroyed Element targets. Its no-throw erase retires the ownership
+    // keys before old Element pointers can become invalid.
+    if (discard_owned_bindings)
+      bindings_.discard_retired_target_set(batch);
+
+    // Detach all parent
     // pointers first to avoid destruction order depending on vector layout.
     parent->remove_child(root);
     for (auto it = ordered.rbegin(); it != ordered.rend(); ++it) {
