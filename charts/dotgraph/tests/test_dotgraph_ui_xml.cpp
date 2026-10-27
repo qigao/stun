@@ -2,6 +2,8 @@
 
 #include <flexUI/box.h>
 #include <flexUI/element.h>
+#include <flexUI/render_command.h>
+#include <flexUI/render_manager.h>
 #include <flexUI/widget.h>
 #include <tinytest.hpp>
 
@@ -123,6 +125,17 @@ spec("DOT Graph composes semantic node edge cluster Elements via XML") {
         check_equal(box.query_selector_all(".dot-edge").size(), 1U);
         check_not_null(box.query_selector(".dot-edge-label"));
         check_not_null(box.query_selector(".dot-cluster-label"));
+
+        // Real native shape and edge Widgets must issue backend-neutral
+        // render commands; selector-only tests would miss a blank canvas.
+        flexUI::RenderFrame frame;
+        frame.root = root;
+        frame.viewport = {options.width, options.height, 1.0f};
+        flexUI::RenderManager render_manager(nullptr);
+        auto commands = render_manager.build_frame_commands(
+            frame, flex::RendererCapabilities{});
+        check_true(!commands.commands().empty());
+
     }
 
     it("refuses a second global node ID without leaving orphan Elements") {
