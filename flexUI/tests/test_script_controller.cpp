@@ -143,9 +143,10 @@ std::shared_ptr<const flexUI::CompiledUiProgram> scoped_controller_program() {
       "<section id=\"sale_host\"/><section id=\"sales_host\"/></main></ui>");
   const auto panel = flexUI::compile_ui_xml(
       "<ui name=\"Panel\" xmlns:on=\"urn:flexui:event\">"
+      "<div id=\"panel\">"
       "<div id=\"action\" on:click=\"save_document\">Action</div>"
       "<div id=\"nested\" on:key_down=\"parent_handler\">Nested</div>"
-      "</ui>");
+      "</div></ui>");
   check(static_cast<bool>(base));
   check(static_cast<bool>(panel));
   if (!base || !panel) return {};
