@@ -89,6 +89,41 @@ add_dependencies(stun_xml_runtime_qualification
     stun_infographic_ui_adapter_compile)
 add_dependencies(chart_ui_test stun_infographic_ui_adapter_compile)
 
+# Compile and RUN the actual native DOT LayoutSnapshot→Xml→Element/Widget
+# projection without linking a separate parser or GraphLayout implementation.
+# The DOT parser source adapter is still owned by charts/dotgraph; this test
+# verifies every node, edge, cluster, label, CSS selector and rollback through
+# the production snapshot builder on Linux ASan/LSan and Windows/macOS.
+add_library(stun_dotgraph_xml_snapshot OBJECT
+    "${STUN_ROOT}/charts/dotgraph/src/flexui_dotgraph_snapshot.cpp")
+target_include_directories(stun_dotgraph_xml_snapshot PRIVATE
+    "${STUN_ROOT}/charts/dotgraph/include")
+target_link_libraries(stun_dotgraph_xml_snapshot PRIVATE chart_ui flex)
+add_executable(test_dotgraph_ui_xml
+    "${STUN_ROOT}/charts/dotgraph/tests/test_dotgraph_ui_xml.cpp"
+    $<TARGET_OBJECTS:stun_dotgraph_xml_snapshot>)
+target_include_directories(test_dotgraph_ui_xml PRIVATE
+    "${STUN_ROOT}/charts/dotgraph/include")
+target_link_libraries(test_dotgraph_ui_xml PRIVATE
+    chart_ui flex Salts::TinyTest)
+add_test(NAME DotGraphXmlTest COMMAND test_dotgraph_ui_xml)
+set_tests_properties(DotGraphXmlTest PROPERTIES TIMEOUT 120)
+add_dependencies(stun_xml_runtime_qualification test_dotgraph_ui_xml)
+add_dependencies(chart_ui_test test_dotgraph_ui_xml)
+
+# The public DOT-source parsing facade remains a separate production source
+# file after extracting snapshot composition. Compile it across every
+# installed-SDK host, even where the full C DOT parser/GraphLayout libraries
+# are not linked into the minimal headless test executable.
+add_library(stun_dotgraph_source_facade_compile OBJECT
+    "${STUN_ROOT}/charts/dotgraph/src/flexui_dotgraph.cpp")
+target_include_directories(stun_dotgraph_source_facade_compile PRIVATE
+    "${STUN_ROOT}/charts/dotgraph/include")
+target_link_libraries(stun_dotgraph_source_facade_compile PRIVATE chart_ui flex)
+add_dependencies(stun_xml_runtime_qualification
+    stun_dotgraph_source_facade_compile)
+add_dependencies(chart_ui_test stun_dotgraph_source_facade_compile)
+
 # The MarkdownWidget streaming consumer contract must run in the focused
 # headless production-runtime gate; parser conformance alone does not exercise
 # the FlexUI projection/lifecycle path.

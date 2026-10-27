@@ -285,7 +285,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          targets=(chart_ui_test test_markdown_widget test_flexui_tango_stream flexui_tui_streaming_demo)
+          targets=(chart_ui_test test_dotgraph_ui_xml test_markdown_widget test_flexui_tango_stream flexui_tui_streaming_demo)
           if [[ "$RUNNER_OS" == Windows ]]; then
             targets+=(test_tui_win32_console test_tui_win32_conpty)
           fi
@@ -311,7 +311,7 @@ jobs:
           fi
           ctest --test-dir build/flexui-tango-cross -C Debug \
             --no-tests=error --output-on-failure --timeout 120 \
-            -R "^(ChartUiTest|test_(markdown_widget|flexui_tango_stream)|tui_streaming_demo_(smoke|posix_pty|win32_console|win32_conpty(_plain)?))"
+            -R "^(ChartUiTest|DotGraphXmlTest|test_(markdown_widget|flexui_tango_stream)|tui_streaming_demo_(smoke|posix_pty|win32_console|win32_conpty(_plain)?))"
 
       - name: Repeat real POSIX PTY Home End and resize sessions
         if: runner.os == 'macOS'

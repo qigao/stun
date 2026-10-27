@@ -1,7 +1,10 @@
 #pragma once
 
+#include "types.h"
+
 #include <cstddef>
 #include <memory>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -22,6 +25,33 @@ struct SourceSpan {
   std::size_t length = 0;
 };
 
+/// Prevalidated native layout/paint snapshot used by semantic components
+/// whose dynamic geometry is produced by a domain layout engine (e.g. DOT).
+/// It is staged on detached Elements BEFORE Box publication. XML-authored
+/// classes, variables and normal CSS cascade remain available afterwards.
+/// Never store Element pointers or duplicate a runtime UI ownership tree.
+struct UiNodePresentation {
+  bool has_bounds = false;
+  bool absolute = false;
+  bool relative = false;
+  bool clipped = false;
+  float x = 0.0f;
+  float y = 0.0f;
+  float width = 0.0f;
+  float height = 0.0f;
+  std::optional<Color> background_color;
+  std::optional<Color> border_color;
+  std::optional<Color> text_color;
+  std::optional<float> border_width;
+  std::optional<BorderStyle> border_style;
+  std::optional<float> border_radius;
+  std::optional<float> opacity;
+  std::optional<float> font_size;
+  std::optional<std::string> font_family;
+  std::optional<TextAlign> text_align;
+  std::optional<int> z_index;
+};
+
 /// Parser-independent description of one UI element and its ordered children.
 struct UiNodeDefinition {
   std::string tag;
@@ -31,6 +61,11 @@ struct UiNodeDefinition {
   std::vector<UiNodeDefinition> children;
   /// Owning tag location; appended to preserve existing aggregate field order.
   SourceSpan source;
+  /// Domain-native prepublication style/geometry; absent for XML-only nodes.
+  std::optional<UiNodePresentation> presentation;
+  /// Internal lookup key used by registered native widget factories.
+  /// Never becomes an Element ID, class, attribute or slot.
+  std::string native_widget_key;
 };
 
 struct UiDocumentDefinition {
