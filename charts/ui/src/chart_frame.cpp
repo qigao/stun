@@ -4,6 +4,7 @@
 #include <flexUI/element.h>
 #include <flexUI/ui_document.h>
 #include <flexUI/ui_xml.h>
+#include <flexUI/widget.h>
 #include <flexUI/widget_registry.h>
 #include "chart_frame_xml.inc"
 
