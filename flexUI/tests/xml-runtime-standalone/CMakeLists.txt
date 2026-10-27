@@ -63,6 +63,20 @@ endforeach()
 add_subdirectory("${STUN_ROOT}/charts/ui" chart_ui)
 add_dependencies(stun_xml_runtime_qualification chart_ui_test)
 
+# Compile the real production FlexChart→XML adapter against published SDKs,
+# even though parser/mark DSL test assets are deliberately not linked into
+# this minimal headless runtime. ChartUI's native binding/rollback suites
+# execute separately in ChartUiTest; this target checks the actual consumer.
+add_library(stun_flexchart_ui_adapter_compile OBJECT
+    "${STUN_ROOT}/charts/flexchart/src/flexui_chart.cpp")
+target_include_directories(stun_flexchart_ui_adapter_compile PRIVATE
+    "${STUN_ROOT}/charts/flexchart/include"
+    "${STUN_ROOT}/charts/flexchart/src")
+target_link_libraries(stun_flexchart_ui_adapter_compile PRIVATE chart_ui flex)
+add_dependencies(stun_xml_runtime_qualification
+    stun_flexchart_ui_adapter_compile)
+add_dependencies(chart_ui_test stun_flexchart_ui_adapter_compile)
+
 # The MarkdownWidget streaming consumer contract must run in the focused
 # headless production-runtime gate; parser conformance alone does not exercise
 # the FlexUI projection/lifecycle path.
