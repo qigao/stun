@@ -1156,6 +1156,12 @@ spec("Box structural subtree retirement rejects unsafe lifetime owners") {
     event->set_attribute("data-flexui-on-click", "save_document");
     check_false(box.retire_unbound_structural_subtree("event"));
     event->remove_attribute("data-flexui-on-click");
+    // Native callback closures are also long-lived event ownership and
+    // must be explicitly unregistered before deleting a whole subtree.
+    event->on_click([] {});
+    check_false(box.retire_unbound_structural_subtree("event"));
+    check_equal(box.get_by_id("event"), event);
+    event->on_click({});
     check(box.retire_unbound_structural_subtree("event"));
 
     auto *widget = box.create_widget<flexUI::LabelWidget>(

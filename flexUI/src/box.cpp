@@ -1169,7 +1169,8 @@ bool Box::retire_unbound_structural_subtree(
       if (!element || !batch.insert(element).second ||
           batch.size() > elements_.size()) return false;
       if (element->owner_box_ != this || element->is_widget_owned() ||
-          element->widget || bindings_.has_binding_target(element) ||
+          element->widget || element->click_callback() ||
+          bindings_.has_binding_target(element) ||
           keyed_repeater_hosts_.count(element) != 0 ||
           std::find(active_widgets_.begin(), active_widgets_.end(), element) !=
               active_widgets_.end())

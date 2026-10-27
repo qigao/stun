@@ -8,7 +8,8 @@
 此阶段先为 Box 添加 `retire_unbound_structural_subtree(id)`，提供
 **真正原地删除**应用自有结构子树的底层生命周期原语。执行前完整审计
 Box 所有权、父子指针、ID 索引、Binding 目标、Widget、编译事件属性、
-鼠标/键盘活动指针和事件分发深度；任何一个条件不满足都必须拒绝。
+鼠标/键盘活动指针、Element 原生 ClickCallback 与事件分发深度；
+任何一个条件不满足都必须拒绝。
 成功后撤销索引、清理 CSS/动画/过渡缓存，所有旧 `UiHandle` 失效，
 不改变未删除兄弟节点的对象地址和 generation。
 
