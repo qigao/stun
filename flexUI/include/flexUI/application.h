@@ -39,6 +39,16 @@ struct DesktopApplicationSources {
   std::string script_module_name = "flexui-application";
 };
 
+/// Registered before the UI is built. The component's XML is compiled
+/// in the same detached candidate as the base application; event/binding
+/// IDs become `scope::local_id`, but all callbacks still use ONE script
+/// module and the existing ordered Mutation/Command engines.
+struct DesktopScopedXmlComponent {
+  std::string scope;
+  std::string host_id;
+  std::string source;
+};
+
 struct DesktopApplicationLimits {
   UiDocumentLimits document;
   ControllerLimits controller;
@@ -254,6 +264,15 @@ public:
   DesktopApplicationBuilder &operator=(DesktopApplicationBuilder &&) noexcept;
 
   DesktopApplicationBuilder &xml_entry(std::string source);
+
+  /// Statically compose an XML fragment below a structural host element ID.
+  /// Scopes must be unique; local element IDs are requalified before
+  /// event/binding compilation and share the one application ScriptController.
+  /// Components are recompiled for each atomic application reload.
+  /// Dynamic per-component script registration/unmount is intentionally
+  /// unsupported until it has its own ownership and cancellation contract.
+  DesktopApplicationBuilder &scoped_xml_component(
+      std::string scope, std::string host_id, std::string source);
 
   /// Explicit migration-only entry for the retired `.flex` UI syntax.
   DesktopApplicationBuilder &legacy_flex_entry_compatibility(std::string source);
