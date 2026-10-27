@@ -1,0 +1,9 @@
+<ui name="ChartLegendItem" xmlns:attr="urn:flexui:attribute"
+    xmlns:var="urn:flexui:css-variable">
+  <span attr:data-slot="chart-legend-item" attr:role="listitem"
+        attr:data-state="normal" class="flex items-center gap-2">
+    <span attr:data-slot="chart-legend-indicator" attr:aria-hidden="true"
+          class="h-2 w-2 rounded-full bg-muted" />
+    <span attr:data-slot="chart-legend-label" />
+  </span>
+</ui>
