@@ -1595,6 +1595,183 @@ spec("FlexUI natural text obeys content models during reload") {
 }
 
 
+spec("Desktop XML component full-generation recomposition") {
+  it("adds, replaces and removes component scopes through one candidate owner") {
+    auto probe = std::make_shared<ModuleProbe>();
+    probe->emit_valid_mutation = true;
+    const std::string root =
+        "<ui name=\"Dashboard\"><main id=\"root\">"
+        "<section id=\"left\"/><section id=\"right\"/></main></ui>";
+    const std::string panel = R"xml(
+      <ui name="Panel" xmlns:on="urn:flexui:event"
+          xmlns:bind="urn:flexui:binding">
+        <div id="panel">
+          <div id="action" on:click="save_document">Original</div>
+          <label id="caption" bind:text="$caption">Initial</label>
+        </div>
+      </ui>
+    )xml";
+    const std::string replacement = R"xml(
+      <ui name="Panel" xmlns:on="urn:flexui:event"
+          xmlns:bind="urn:flexui:binding">
+        <div id="panel">
+          <div id="action" on:click="save_document">New action</div>
+          <label id="caption" bind:text="$caption">Updated template</label>
+        </div>
+      </ui>
+    )xml";
+
+    flexUI::DesktopApplicationBuilder builder(nullptr);
+    builder.xml_entry(root)
+        .scoped_xml_component("sales", "left", panel)
+        .scoped_binding_alias("sales", "caption", "sales_caption")
+        .binding_input_string("sales_caption", "Revenue")
+        .binding_input_string("costs_caption", "Expenses")
+        .script("valid-controller", fake_factory(probe));
+    auto built = builder.build();
+    check(static_cast<bool>(built));
+    if (!built) return;
+    auto &app = *built.application;
+    const auto first_generation = app.generation();
+    app.box().update();
+    check_equal(app.box().get_by_id("sales::caption")->text(), "Revenue");
+    check_null(app.box().get_by_id("costs::caption"));
+
+    // Staging a second complete candidate admits a new scope and its event
+    // handler without registering handlers against the current controller.
+    const auto added = app.recompose_scoped_xml_components(
+        {{"sales", "left", panel}, {"costs", "right", panel}},
+        {{"sales", "caption", "sales_caption"},
+         {"costs", "caption", "costs_caption"}});
+    check(static_cast<bool>(added));
+    if (!added) return;
+    check_equal(app.generation(), first_generation + 1);
+    check_equal(app.program().bindings().size(), std::size_t{2});
+    check_equal(app.program().event_bindings().size(), std::size_t{2});
+    app.box().update();
+    check_equal(app.box().get_by_id("sales::caption")->text(), "Revenue");
+    check_equal(app.box().get_by_id("costs::caption")->text(), "Expenses");
+    auto *costs_action = app.box().get_by_id("costs::action");
+    check_not_null(costs_action);
+    check_not_null(app.program().find_event_binding(
+        "costs::action", flexUI::UiEventKind::Click));
+    if (!costs_action) return;
+    flexUI::ScriptEventSnapshot click;
+    click.event = flexUI::UiEventKind::Click;
+    click.target = app.box().handle_for(*costs_action);
+    click.current_target = click.target;
+    check(app.controller()->dispatch(click));
+    check_equal(costs_action->text(), "Saved");
+    check_equal(probe->events.back().current_target.id, "costs::action");
+
+    // Standard reload must now use the newly committed component set, and
+    // reconstruct typed input values from immutable application seed inputs.
+    app.box().bindings().inputs().set_string("costs_caption", "Running");
+    app.box().update();
+    check_equal(app.box().get_by_id("costs::caption")->text(), "Running");
+    check(app.reload({root, "", "valid-controller", "after-recompose"}));
+    app.box().update();
+    check_equal(app.box().get_by_id("costs::caption")->text(), "Expenses");
+    check_not_null(app.box().get_by_id("sales::action"));
+
+    // Remove one scope and replace the remaining template atomically. The
+    // removed element, binding and compiled event must all disappear together.
+    const auto before_remove = app.generation();
+    const auto removed = app.recompose_scoped_xml_components(
+        {{"costs", "right", replacement}},
+        {{"costs", "caption", "costs_caption"}});
+    check(static_cast<bool>(removed));
+    if (!removed) return;
+    check_equal(app.generation(), before_remove + 1);
+    app.box().update();
+    check_null(app.box().get_by_id("sales::action"));
+    check_null(app.box().get_by_id("sales::caption"));
+    check_null(app.program().find_event_binding(
+        "sales::action", flexUI::UiEventKind::Click));
+    check_equal(app.program().bindings().size(), std::size_t{1});
+    check_equal(app.program().event_bindings().size(), std::size_t{1});
+    check_equal(app.box().get_by_id("costs::action")->text(), "New action");
+    check_equal(app.box().get_by_id("costs::caption")->text(), "Expenses");
+
+    // The empty desired set is not an in-place detach: it publishes a new
+    // complete root application generation with no component handlers.
+    const auto emptied = app.recompose_scoped_xml_components({}, {});
+    check(static_cast<bool>(emptied));
+    if (!emptied) return;
+    check_null(app.box().get_by_id("costs::action"));
+    check_null(app.box().get_by_id("costs::caption"));
+    check_equal(app.program().event_bindings().size(), std::size_t{0});
+    check_equal(app.program().bindings().size(), std::size_t{0});
+    check_not_null(app.box().get_by_id("left"));
+    check_not_null(app.box().get_by_id("right"));
+    check(app.reload({root, "", "valid-controller", "empty-reload"}));
+    check_null(app.box().get_by_id("costs::action"));
+  }
+
+  it("fails closed on invalid sources, undeclared aliases and wrong owner") {
+    auto probe = std::make_shared<ModuleProbe>();
+    const std::string root =
+        "<ui name=\"App\"><main id=\"root\"><section id=\"host\"/></main></ui>";
+    const std::string panel =
+        "<ui name=\"Panel\" xmlns:bind=\"urn:flexui:binding\">"
+        "<label id=\"caption\" bind:text=\"$caption\">Initial</label></ui>";
+    flexUI::DesktopApplicationBuilder builder(nullptr);
+    builder.xml_entry(root)
+        .scoped_xml_component("only", "host", panel)
+        .scoped_binding_alias("only", "caption", "seed")
+        .binding_input_string("seed", "Original");
+    auto built = builder.build();
+    check(static_cast<bool>(built));
+    if (!built) return;
+    auto &app = *built.application;
+    auto *original_box = &app.box();
+    auto *original_program = &app.program();
+    const auto original_generation = app.generation();
+
+    const auto malformed = app.recompose_scoped_xml_components(
+        {{"only", "host", "<ui name=\"Bad\"><label"}},
+        {{"only", "caption", "seed"}});
+    check_false(static_cast<bool>(malformed));
+    check(malformed.error.code == flexUI::DesktopApplicationErrorCode::UiCompileFailed);
+    check_equal(app.generation(), original_generation);
+    check_equal(&app.box(), original_box);
+    check_equal(&app.program(), original_program);
+
+    // The proposed aliases belong to the proposed component set. Removing
+    // the component while leaving an alias is never accepted as a fallback.
+    const auto dangling = app.recompose_scoped_xml_components(
+        {}, {{"only", "caption", "seed"}});
+    check_false(static_cast<bool>(dangling));
+    check(dangling.error.code ==
+          flexUI::DesktopApplicationErrorCode::InvalidConfiguration);
+    check_equal(app.generation(), original_generation);
+    check_equal(&app.box(), original_box);
+
+    flexUI::DesktopApplicationErrorCode other_thread =
+        flexUI::DesktopApplicationErrorCode::None;
+    std::thread worker([&] {
+      other_thread = app.recompose_scoped_xml_components({}, {}).error.code;
+    });
+    worker.join();
+    check(other_thread == flexUI::DesktopApplicationErrorCode::WrongThread);
+    check_equal(app.generation(), original_generation);
+
+    // A normal reload after rejected candidates must still compile the old
+    // configuration, including its input alias and original component.
+    check(app.reload({root, "", "", "after-invalid-recompose"}));
+    app.box().update();
+    check_not_null(app.box().get_by_id("only::caption"));
+    check_equal(app.box().get_by_id("only::caption")->text(), "Original");
+
+    check(app.request_close());
+    const auto rejected_closed = app.recompose_scoped_xml_components({}, {});
+    check_false(static_cast<bool>(rejected_closed));
+    check(rejected_closed.error.code ==
+          flexUI::DesktopApplicationErrorCode::InvalidState);
+    check(app.shutdown());
+  }
+}
+
 spec("Desktop XML components share one native ScriptController and Effects engine") {
   it("redirects per-instance String Bool Number and resets on full reload") {
     const std::string root =

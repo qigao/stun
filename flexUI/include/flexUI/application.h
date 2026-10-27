@@ -260,6 +260,24 @@ public:
   ///         while the current Box, program and controller remain unchanged.
   DesktopApplicationResult reload(DesktopApplicationSources sources);
 
+  /// Atomically replace the complete set of statically compiled XML
+  /// components at the next application generation boundary. The supplied
+  /// vector is the full desired set (including an empty set for removal);
+  /// input aliases are also supplied in full and must refer to explicitly
+  /// declared application inputs. Candidate compile, registry, typed binding,
+  /// controller and service preflight complete before publication. Failure
+  /// preserves the active generation, Box, program and stored composition.
+  ///
+  /// This is a FULL generation-scoped recomposition, not in-place fragment
+  /// insertion/removal, live handler registration, component-private state or
+  /// an independently owned script context. Current app source, CSS, script,
+  /// input initial seeds and capability manifest are reused.
+  /// Requires owner thread and Ready state; successful publication resets
+  /// completion/service generations exactly like reload().
+  DesktopApplicationResult recompose_scoped_xml_components(
+      std::vector<DesktopScopedXmlComponent> components,
+      std::vector<DesktopScopedBindingAlias> input_aliases);
+
 private:
   struct Impl;
   explicit DesktopApplication(std::unique_ptr<Impl> impl);
