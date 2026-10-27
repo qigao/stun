@@ -1,0 +1,5 @@
+<ui name="DotGraphFrame" xmlns:attr="urn:flexui:attribute">
+  <dotgraph slot="dotgraph" attr:role="graphics-document"
+            attr:data-render-mode="tree" class="dotgraph"
+            utility="relative overflow-hidden" />
+</ui>
