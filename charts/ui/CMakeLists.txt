@@ -1,5 +1,6 @@
 add_library(chart_ui STATIC
     src/chart_frame.cpp
+    src/infographic_frame.cpp
     src/flex_node_plot_widget.cpp
 )
 
@@ -7,7 +8,8 @@ add_library(chart_ui STATIC
 # time and never loads templates from the current working directory.
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
     "${CMAKE_CURRENT_SOURCE_DIR}/assets/chart_frame.ui.xml"
-    "${CMAKE_CURRENT_SOURCE_DIR}/assets/chart_legend_item.ui.xml")
+    "${CMAKE_CURRENT_SOURCE_DIR}/assets/chart_legend_item.ui.xml"
+    "${CMAKE_CURRENT_SOURCE_DIR}/assets/infographic_frame.ui.xml")
 file(READ "${CMAKE_CURRENT_SOURCE_DIR}/assets/chart_frame.ui.xml"
     CHART_FRAME_XML_SOURCE)
 file(READ "${CMAKE_CURRENT_SOURCE_DIR}/assets/chart_legend_item.ui.xml"
@@ -15,6 +17,11 @@ file(READ "${CMAKE_CURRENT_SOURCE_DIR}/assets/chart_legend_item.ui.xml"
 configure_file(
     "${CMAKE_CURRENT_SOURCE_DIR}/src/chart_frame_xml.inc.in"
     "${CMAKE_CURRENT_BINARY_DIR}/chart_frame_xml.inc" @ONLY)
+file(READ "${CMAKE_CURRENT_SOURCE_DIR}/assets/infographic_frame.ui.xml"
+    INFOGRAPHIC_FRAME_XML_SOURCE)
+configure_file(
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/infographic_frame_xml.inc.in"
+    "${CMAKE_CURRENT_BINARY_DIR}/infographic_frame_xml.inc" @ONLY)
 target_include_directories(chart_ui PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")
 
 target_include_directories(chart_ui
