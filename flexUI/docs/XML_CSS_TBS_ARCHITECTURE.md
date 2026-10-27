@@ -12,6 +12,9 @@ Box 所有权、父子指针、ID 索引、Binding 目标、Widget、编译事�
 成功后撤销索引、清理 CSS/动画/过渡缓存，所有旧 `UiHandle` 失效，
 不改变未删除兄弟节点的对象地址和 generation。
 
+已经由 `UiDocumentInstantiator` 挂载了不可变 `CompiledUiProgram` 的 Box
+也一律拒绝此底层操作：否则即便目标节点没有绑定，程序的静态定义也会
+与运行时树分叉。M0 的准入还要求由 Box 构造线程执行。
 **严禁**把这个 M0 API 直接当成已有脚本组件的通用 `unmount(scope)`：
 它不修改编译期 `CompiledUiProgram` 的 handler/binding 清单，也不承担
 外部 service lease 或 pending callback 的取消。带有 Binding、Widget

@@ -288,6 +288,10 @@ private:
   // allows the retirement preflight to reject cross-thread use before it
   // reads mutable tree/index/widget state.
   const std::thread::id owning_thread_ = std::this_thread::get_id();
+  // Publishing any CompiledUiProgram makes the app immutable program table
+  // authoritative. Retiring arbitrary Element IDs without rewriting that
+  // table would leave stale script/binding/type definitions. M0 refuses it.
+  bool compiled_program_installed_ = false;
 
   // 元素树
   Element *root_ = nullptr;

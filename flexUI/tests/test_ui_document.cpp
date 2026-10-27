@@ -1237,6 +1237,23 @@ spec("Box structural subtree retirement rejects unsafe lifetime owners") {
     check_null(box.resolve_handle(handle));
   }
 
+  it("refuses retirement from Boxes with immutable compiled UI programs") {
+    const auto compiled = flexUI::compile_ui_xml(
+        "<ui name=\"Compiled\"><div id=\"root\"><div id=\"child\"/></div></ui>");
+    check(static_cast<bool>(compiled));
+    if (!compiled) return;
+    flexUI::Box box(nullptr);
+    const auto mounted = flexUI::UiDocumentInstantiator::instantiate(
+        box, *compiled.program);
+    check(static_cast<bool>(mounted));
+    if (!mounted) return;
+    const auto child = box.handle_for(*box.get_by_id("child"));
+    check(child);
+    check_false(box.retire_unbound_structural_subtree("child"));
+    check_equal(box.resolve_handle(child), box.get_by_id("child"));
+    check_equal(box.owned_element_count(), std::size_t{2});
+  }
+
   it("refuses focused, hovered or captured subtree retirement") {
     flexUI::Box box(nullptr);
     auto *root = box.create("div", "root");

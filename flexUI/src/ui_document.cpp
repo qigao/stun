@@ -1719,6 +1719,9 @@ UiDocumentInstantiateResult UiDocumentInstantiator::instantiate_impl(
     if (binding_transaction) {
       box.bindings_.commit_transaction(*binding_transaction);
     }
+    // A compiled program remains the identity/event/binding authority for
+    // its entire Box lifetime. Structural-only retirement cannot change it.
+    if (program != nullptr) box.compiled_program_installed_ = true;
   } catch (const std::exception &exception) {
     if (child_attached) {
       try { options.parent->replace_children(original_children); }

@@ -1133,7 +1133,7 @@ bool Box::retire_detached_elements(const std::vector<Element*>& candidates) noex
 bool Box::retire_unbound_structural_subtree(
     const std::string &root_id) noexcept {
   if (std::this_thread::get_id() != owning_thread_ || root_id.empty() ||
-      events_.is_dispatching()) return false;
+      compiled_program_installed_ || events_.is_dispatching()) return false;
   try {
     const auto indexed = elements_by_id_.find(root_id);
     if (indexed == elements_by_id_.end()) return false;
