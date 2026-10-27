@@ -1071,6 +1071,111 @@ spec("UiDocument stages native DOT presentation without Box side effects") {
 
 
 spec("Scoped XML components are compiled into one owner/controller program") {
+  it("maps each scoped template input to an explicit global typed source") {
+    const auto base = flexUI::compile_ui_xml(
+        "<ui name=\"Root\"><main id=\"root\"><section id=\"left\"/>"
+        "<section id=\"right\"/></main></ui>");
+    const auto component = flexUI::compile_ui_xml(R"xml(
+      <ui name="Panel" xmlns:bind="urn:flexui:binding">
+        <div id="panel">
+          <label id="caption" bind:text="$caption">Initial</label>
+          <div id="badge" bind:class_active="${enabled &amp;&amp; count &gt; 1}">
+            Badge
+          </div>
+          <label id="shared" bind:text="$footer">Shared</label>
+        </div>
+      </ui>
+    )xml");
+    check(static_cast<bool>(base));
+    check(static_cast<bool>(component));
+    if (!base || !component) return;
+    const auto registry = flexUI::WidgetRegistry::builtins();
+    const auto combined = flexUI::compile_scoped_ui_components(
+        *base.program,
+        {{"sales", "left", component.program,
+          {{"caption", "sales_caption"}, {"enabled", "sales_enabled"},
+           {"count", "sales_count"}}},
+         {"costs", "right", component.program,
+          {{"caption", "costs_caption"}, {"enabled", "costs_enabled"},
+           {"count", "costs_count"}}}},
+        registry);
+    check(static_cast<bool>(combined));
+    if (!combined) return;
+    check_equal(combined.program->bindings().size(), std::size_t{6});
+    bool saw_sales_bool = false;
+    bool saw_costs_bool = false;
+    for (const auto &binding : combined.program->bindings()) {
+      if (binding.element_id == "sales::caption")
+        check_equal(binding.expression, "sales_caption");
+      if (binding.element_id == "costs::caption")
+        check_equal(binding.expression, "costs_caption");
+      if (binding.element_id == "sales::badge") {
+        saw_sales_bool = true;
+        check_equal(binding.expression, "sales_enabled && sales_count > 1");
+      }
+      if (binding.element_id == "costs::badge") {
+        saw_costs_bool = true;
+        check_equal(binding.expression, "costs_enabled && costs_count > 1");
+      }
+      if (binding.element_id == "sales::shared" ||
+          binding.element_id == "costs::shared")
+        check_equal(binding.expression, "footer");
+    }
+    check(saw_sales_bool && saw_costs_bool);
+    flexUI::Box box(nullptr);
+    box.bindings().inputs().set_string("sales_caption", "Revenue");
+    box.bindings().inputs().set_string("costs_caption", "Expenses");
+    box.bindings().inputs().set_string("footer", "Common");
+    box.bindings().inputs().set_bool("sales_enabled", true);
+    box.bindings().inputs().set_bool("costs_enabled", true);
+    box.bindings().inputs().set_number("sales_count", 5);
+    box.bindings().inputs().set_number("costs_count", 0);
+    const auto installed = flexUI::UiDocumentInstantiator::instantiate(
+        box, *combined.program, registry);
+    check(static_cast<bool>(installed));
+    if (!installed) return;
+    box.update();
+    check_equal(box.get_by_id("sales::caption")->text(), "Revenue");
+    check_equal(box.get_by_id("costs::caption")->text(), "Expenses");
+    check_equal(box.get_by_id("sales::shared")->text(), "Common");
+    check_equal(box.get_by_id("costs::shared")->text(), "Common");
+    check(box.get_by_id("sales::badge")->has_class(flexUI::Symbol("active")));
+    check_false(box.get_by_id("costs::badge")->has_class(flexUI::Symbol("active")));
+    box.bindings().inputs().set_number("costs_count", 3);
+    box.bindings().inputs().set_string("sales_caption", "Sales Updated");
+    box.update();
+    check(box.get_by_id("costs::badge")->has_class(flexUI::Symbol("active")));
+    check_equal(box.get_by_id("sales::caption")->text(), "Sales Updated");
+    check_equal(box.get_by_id("costs::caption")->text(), "Expenses");
+  }
+
+  it("refuses duplicate unused or invalid source aliases before Box ownership") {
+    const auto base = flexUI::compile_ui_xml(
+        "<ui name=\"App\"><main id=\"root\"><div id=\"host\"/></main></ui>");
+    const auto component = flexUI::compile_ui_xml(
+        "<ui name=\"Panel\" xmlns:bind=\"urn:flexui:binding\">"
+        "<label id=\"caption\" bind:text=\"$caption\">Initial</label></ui>");
+    check(static_cast<bool>(base));
+    check(static_cast<bool>(component));
+    if (!base || !component) return;
+    const auto registry = flexUI::WidgetRegistry::builtins();
+    const auto validate = [&](std::vector<flexUI::UiScopedInputAlias> aliases) {
+      return flexUI::compile_scoped_ui_components(
+          *base.program, {{"scope", "host", component.program, std::move(aliases)}},
+          registry);
+    };
+    const auto duplicate = validate({{"caption", "one"}, {"caption", "two"}});
+    check_false(static_cast<bool>(duplicate));
+    check(duplicate.error.code == UiDocumentErrorCode::InvalidComponentScope);
+    const auto unused = validate({{"missing", "one"}});
+    check_false(static_cast<bool>(unused));
+    check(unused.error.code == UiDocumentErrorCode::InvalidComponentScope);
+    const auto invalid = validate({{"caption", "invalid-source"}});
+    check_false(static_cast<bool>(invalid));
+    check(invalid.error.code == UiDocumentErrorCode::InvalidComponentScope);
+    check_equal(base.program->definition().root.children.size(), std::size_t{1});
+  }
+
   it("rewrites two identical local event and binding IDs without a second tree") {
     const auto app = flexUI::compile_ui_xml(R"xml(
       <ui name="Dashboard">
