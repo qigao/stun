@@ -1283,6 +1283,40 @@ spec("Box structural subtree retirement rejects unsafe lifetime owners") {
     check_equal(box.get_by_id("outer"), outer);
   }
 
+  it("refuses retirement of a pending focus target during focus-out callbacks") {
+    flexUI::Box box(nullptr);
+    auto *root = box.create("div", "root");
+    auto *old_focus = box.create("div", "old-focus");
+    auto *incoming = box.create("div", "incoming");
+    root->append(old_focus);
+    root->append(incoming);
+    box.set_root(root);
+    const auto incoming_handle = box.handle_for(*incoming);
+    box.set_focus(old_focus);
+
+    bool observed = false;
+    bool rejected = false;
+    box.set_framework_event_callback([&](flexUI::Element &element,
+                                         const flexUI::Event &event) {
+      if (&element == old_focus &&
+          event.type == flexUI::EventType::FocusOut) {
+        observed = true;
+        rejected = !box.retire_unbound_structural_subtree("incoming");
+      }
+    });
+
+    // The incoming node is not focused until after focus_out returns. The
+    // borrowed-pointer dispatch barrier, rather than state bits, protects it.
+    box.set_focus(incoming);
+    check(observed);
+    check(rejected);
+    check_equal(box.focused_element(), incoming);
+    check_equal(box.resolve_handle(incoming_handle), incoming);
+    box.set_focus(nullptr);
+    check(box.retire_unbound_structural_subtree("incoming"));
+    check_null(box.resolve_handle(incoming_handle));
+  }
+
   it("refuses focused, hovered or captured subtree retirement") {
     flexUI::Box box(nullptr);
     auto *root = box.create("div", "root");
