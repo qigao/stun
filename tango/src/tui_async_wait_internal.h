@@ -19,6 +19,13 @@ typedef enum tui_async_wait_result {
  */
 tui_async_wait_result_t tui_async_wait_io(
     tui_async_queue_t *queue, intptr_t native_input, int timeout_ms);
+#ifndef _WIN32
+/* POSIX only: borrowed nonblocking wake pipe writer for SIGWINCH.
+ * Resolve on the queue owner. The terminal handler may only write one
+ * byte (async-signal-safe); it must never lock, post, or access queue state.
+ * Disarm before queue destruction. No public Tango API is introduced. */
+int tui_async_queue_signal_wake_fd(tui_async_queue_t *queue);
+#endif
 #ifdef __cplusplus
 }
 #endif

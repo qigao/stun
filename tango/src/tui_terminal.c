@@ -27,9 +27,53 @@
 
 #ifndef _WIN32
 static volatile sig_atomic_t g_resize_pending = 0;
+static volatile sig_atomic_t g_resize_wake_fd = -1;
+
+/* SIGWINCH is process-directed and may run on a producer thread while
+ * UI Owner sleeps indefinitely in select(). Wake the SAME queue pipe that
+ * the Owner already multiplexes. write() is async-signal-safe, and any
+ * EAGAIN implies the pipe is already readable. Preserve interrupted errno. */
 static void handle_sigwinch(int sig) {
     (void)sig;
+    const int saved_errno = errno;
     g_resize_pending = 1;
+    const sig_atomic_t fd = g_resize_wake_fd;
+    if (fd >= 0) {
+        const unsigned char byte = 1u;
+        (void)write((int)fd, &byte, 1u);
+    }
+    errno = saved_errno;
+}
+
+void tui_terminal_sigwinch_set_wake_fd(int fd) {
+    g_resize_wake_fd = (sig_atomic_t)fd;
+}
+
+/* Install/restore exactly the same real process SIGWINCH handler from
+ * both the terminal platform lifecycle and isolated native C11 gate. */
+bool tui_terminal_sigwinch_install(tui_terminal_t *term) {
+    if (!term) return false;
+    if (term->sigwinch_installed) return true;
+    struct sigaction sa;
+    memset(&sa, 0, sizeof(sa));
+    sa.sa_handler = handle_sigwinch;
+    sigemptyset(&sa.sa_mask);
+    if (sigaction(SIGWINCH, &sa, &term->orig_sigwinch) != 0)
+        return false;
+    term->sigwinch_installed = true;
+    g_resize_pending = 0;
+    tui_terminal_sigwinch_set_wake_fd(-1);
+    return true;
+}
+
+bool tui_terminal_sigwinch_uninstall(tui_terminal_t *term) {
+    if (!term) return false;
+    tui_terminal_sigwinch_set_wake_fd(-1);
+    if (!term->sigwinch_installed) return true;
+    if (sigaction(SIGWINCH, &term->orig_sigwinch, NULL) != 0)
+        return false;
+    term->sigwinch_installed = false;
+    return true;
 }
 
 /* Keep the signal flag private to this translation unit. */
@@ -341,13 +385,8 @@ failed:
 #else
 static bool platform_leave(tui_terminal_t* term) {
     bool ok = true;
-    if (term->sigwinch_installed) {
-        if (sigaction(SIGWINCH, &term->orig_sigwinch, NULL) == 0) {
-            term->sigwinch_installed = false;
-        } else {
-            ok = false;
-        }
-    }
+    /* Disarm before cleanup closes the mailbox wake pipe. */
+    if (!tui_terminal_sigwinch_uninstall(term)) ok = false;
     if (term->terminal_mode_changed) {
         if (tcsetattr(STDIN_FILENO, TCSAFLUSH, &term->orig_termios) == 0) {
             term->terminal_mode_changed = false;
@@ -371,16 +410,10 @@ static bool platform_enter(tui_terminal_t* term) {
     if (tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw) != 0) return false;
     term->terminal_mode_changed = true;
 
-    struct sigaction sa;
-    memset(&sa, 0, sizeof(sa));
-    sa.sa_handler = handle_sigwinch;
-    sigemptyset(&sa.sa_mask);
-    if (sigaction(SIGWINCH, &sa, &term->orig_sigwinch) != 0) {
+    if (!tui_terminal_sigwinch_install(term)) {
         if (!platform_leave(term)) term->platform_active = true;
         return false;
     }
-    term->sigwinch_installed = true;
-    g_resize_pending = 0;
     return true;
 }
 #endif

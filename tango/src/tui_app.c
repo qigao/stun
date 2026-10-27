@@ -154,6 +154,12 @@ void tui_app_run(tui_app_t* app) {
         !tui_async_queue_is_owner(app->async_queue))
         return;
     if (!tui_terminal_init(app->terminal)) return;
+#ifndef _WIN32
+    /* Register the private existing wake pipe before entering the Owner
+     * loop. A process-directed SIGWINCH on ANY thread must wake the Owner. */
+    tui_terminal_sigwinch_set_wake_fd(
+        tui_async_queue_signal_wake_fd(app->async_queue));
+#endif
     if (!tui_terminal_enable_mouse(app->terminal)) {
         (void)tui_terminal_cleanup(app->terminal);
         return;
