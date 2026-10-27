@@ -73,6 +73,11 @@ UiDocumentError validate_node_fields(
                       "UI node contains conflicting property aliases: " + id);
   }
 
+  if ((properties.count("layout_width") != 0) !=
+      (properties.count("layout_height") != 0)) {
+    return make_error(UiDocumentErrorCode::InvalidProperty,
+                      "explicit layout size requires width and height together");
+  }
   if (properties.count("slot") &&
       (properties.count("attr.data-slot") || properties.count("data-slot"))) {
     return make_error(UiDocumentErrorCode::InvalidProperty,
@@ -100,6 +105,13 @@ UiDocumentError validate_node_fields(
     }
     if (name == "focusable" && !std::holds_alternative<bool>(value)) {
       return make_error(UiDocumentErrorCode::InvalidProperty, "focusable requires a bool value");
+    }
+    if (name == "layout_width" || name == "layout_height") {
+      const auto *number = std::get_if<float>(&value);
+      if (!number || !std::isfinite(*number) || *number <= 0.0F) {
+        return make_error(UiDocumentErrorCode::InvalidProperty,
+                          "explicit layout size requires finite positive floats");
+      }
     }
     if (name == "tab_index") {
       const auto *number = std::get_if<float>(&value);
@@ -630,6 +642,12 @@ void apply_properties(Element &element, const UiNodeDefinition &definition,
   if (const auto *slot = find_property("slot")) {
     element.set_attribute("data-slot", std::get<std::string>(*slot));
   }
+  if (const auto *width = find_property("layout_width")) {
+    const auto *height = find_property("layout_height");
+    // Both fields were validated during whole-tree preflight. Stage layout
+    // before ownership publication, including the prepared native Plot host.
+    element.set_layout_size(std::get<float>(*width), std::get<float>(*height));
+  }
   if (const auto *focusable = find_property("focusable")) {
     element.focusable = std::get<bool>(*focusable);
   }
@@ -640,6 +658,7 @@ void apply_properties(Element &element, const UiNodeDefinition &definition,
   for (const auto &[name, value] : definition.properties) {
     if (name == "class" || name == "classes" || name == "utility" || name == "utilities" ||
         name == "text" || name == "content" || name == "slot" ||
+        name == "layout_width" || name == "layout_height" ||
         name == "focusable" || name == "tab_index") {
       continue;
     }
