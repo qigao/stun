@@ -133,6 +133,9 @@ enum class UiDocumentErrorCode {
   DuplicateSlot,
   UnsupportedFragmentBindings,
   MissingSlot,
+  InvalidComponentScope,
+  MissingComponentHost,
+  UnsupportedComponentResources,
 };
 
 struct UiDocumentError {
@@ -306,6 +309,28 @@ UiDocumentCompileResult compile_ui_definition(
     UiDocumentDefinition definition,
     std::vector<UiResourceDefinition> resources = {},
     const UiDocumentLimits &limits = {});
+
+/// One statically registered XML component compiled into an application
+/// before mount. The local component Element IDs are qualified as
+/// `scope::local_id`. Component events and bindings use the SAME immutable
+/// app program, ScriptController and UI/Command effect engines. This is
+/// pre-mount composition; dynamic fragment handler registration is NOT opened.
+struct UiScopedComponent {
+  std::string scope;
+  /// ID of an existing structural host in the application's BASE document.
+  /// Components cannot target a widget host or another component.
+  std::string host_id;
+  std::shared_ptr<const CompiledUiProgram> program;
+};
+
+/// Build a single immutable UI program from an XML application and statically
+/// declared component instances. All IDs/event handlers and binding targets
+/// are qualified before the normal compile, registry preflight or Box mount.
+/// Failed composition cannot mutate an application or its Box.
+UiDocumentCompileResult compile_scoped_ui_components(
+    const CompiledUiProgram &application,
+    const std::vector<UiScopedComponent> &components,
+    const WidgetRegistry &registry, const UiDocumentLimits &limits = {});
 
 /// Builds a validated definition as a detached tree and commits ownership to `box`.
 ///
