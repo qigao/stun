@@ -57,6 +57,12 @@ foreach(test IN ITEMS test_ui_content_models test_ui_xml_admission test_ui_xml
   add_dependencies(stun_xml_runtime_qualification ${test})
 endforeach()
 
+# Reuse the production ChartFrame XML/component adapter and its real
+# TinyTest/snapshot suite in the installed-SDK ASan/UBSan and LSan gate.
+# Avoid a chart-specific implementation or mock Box in qualification.
+add_subdirectory("${STUN_ROOT}/charts/ui" chart_ui)
+add_dependencies(stun_xml_runtime_qualification chart_ui_test)
+
 # The MarkdownWidget streaming consumer contract must run in the focused
 # headless production-runtime gate; parser conformance alone does not exercise
 # the FlexUI projection/lifecycle path.

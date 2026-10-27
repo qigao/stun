@@ -45,7 +45,7 @@ The application umbrella is [#1](https://github.com/qigao/stun/issues/1).
 - `shared/gcanvas/`: native canvas/window/GPU substrate.
 - `shared/layout/`: independently consumable graph layout algorithms.
 - `shared/markdown/`: canonical Markdown parsing shared by its consumers.
-- `charts/`: chart engines and UI adapters; see the [Mermaid documentation](charts/mermaid/README.md).
+- `charts/`: domain chart languages/renderers and reusable XML ChartFrame shells via `UiDocument` Fragment/Slot composition; plot/widgets remain native. See the [Mermaid documentation](charts/mermaid/README.md) and [chart composition design](flexUI/docs/CHART_UI_DOCUMENT_COMPOSITION_DESIGN.md).
 - `tango/`: terminal UI support.
 
 The legacy `.flex` source path remains during migration. Its deletion requires

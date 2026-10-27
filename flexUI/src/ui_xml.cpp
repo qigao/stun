@@ -48,13 +48,14 @@ bool has_non_whitespace(std::string_view text) {
 
 bool is_string_property(std::string_view name) {
   return name == "class" || name == "classes" || name == "utility" || name == "utilities" ||
-         name == "text" || name == "content" || name.rfind("on.", 0) == 0 ||
+         name == "text" || name == "content" || name == "slot" ||
+         name.rfind("var.", 0) == 0 || name.rfind("on.", 0) == 0 ||
          name.rfind("bind.", 0) == 0 || name.rfind("attr.", 0) == 0;
 }
 
 bool canonical_property_name(std::string_view xml_name, std::string &result) {
   static constexpr std::pair<std::string_view, std::string_view> prefixes[] = {
-      {"on:", "on."}, {"bind:", "bind."}, {"attr:", "attr."}};
+      {"on:", "on."}, {"bind:", "bind."}, {"attr:", "attr."}, {"var:", "var."}};
   for (const auto &[xml_prefix, canonical_prefix] : prefixes) {
     if (xml_name.rfind(xml_prefix, 0) == 0) {
       if (xml_name.size() == xml_prefix.size()) {
@@ -66,7 +67,8 @@ bool canonical_property_name(std::string_view xml_name, std::string &result) {
     }
   }
   if (xml_name.find(':') != std::string_view::npos || xml_name.rfind("on.", 0) == 0 ||
-      xml_name.rfind("bind.", 0) == 0 || xml_name.rfind("attr.", 0) == 0) {
+      xml_name.rfind("bind.", 0) == 0 || xml_name.rfind("attr.", 0) == 0 ||
+      xml_name.rfind("var.", 0) == 0) {
     return false;
   }
   result.assign(xml_name);

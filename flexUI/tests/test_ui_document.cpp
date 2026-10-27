@@ -761,3 +761,206 @@ spec("Flex UI documents instantiate Box-owned Element trees") {
     check_null(box.get_by_id("root"));
   }
 }
+
+
+spec("FlexUI XML fragments stage local slots without a parallel UI tree") {
+  it("reuses the same XML component twice with local slots and no global ids") {
+    const auto compiled = flexUI::compile_ui_xml(R"xml(
+      <ui name="Panel">
+        <figure id="panel" slot="frame" class="flex rounded-lg border">
+          <figcaption id="caption" slot="caption">Revenue</figcaption>
+          <div slot="surface" class="relative w-full" />
+        </figure>
+      </ui>
+    )xml");
+    check(static_cast<bool>(compiled));
+    auto registry = flexUI::WidgetRegistry::builtins();
+    flexUI::Box box(nullptr);
+    flexUI::UiMountOptions opts;
+    opts.mode = flexUI::UiMountMode::DetachedFragment;
+    opts.id_policy = flexUI::UiIdPolicy::LocalOnly;
+
+    const auto first = flexUI::UiDocumentInstantiator::instantiate(
+        box, *compiled.program, registry, opts);
+    const auto second = flexUI::UiDocumentInstantiator::instantiate(
+        box, *compiled.program, registry, opts);
+    check(static_cast<bool>(first));
+    check(static_cast<bool>(second));
+    check(first.tree.root != second.tree.root);
+    check_null(box.root());
+    check_null(box.get_by_id("panel"));
+    check_equal(first.tree.slots_by_name.size(), 3U);
+    check_equal(first.tree.slots_by_name.at("frame"), first.tree.root);
+    check_equal(*first.tree.slots_by_name.at("surface")->attribute("data-slot"), "surface");
+    check_equal(second.tree.elements_by_id.at("caption")->id(), "caption");
+
+    auto* page = box.create("main");
+    page->append(first.tree.root);
+    page->append(second.tree.root);
+    box.set_root(page);
+    box.update();
+    check_equal(page->child_count(), 2U);
+    check(first.tree.root->computed_style != nullptr);
+    check(second.tree.root->computed_style != nullptr);
+    check(first.tree.root->computed_style->display == flexUI::Display::Flex);
+  }
+
+  it("atomically mounts a scoped fragment under an existing Box-owned parent") {
+    const auto compiled = flexUI::compile_ui_xml(R"xml(
+      <ui name="ScopedPanel">
+        <div id="panel" slot="frame">
+          <span id="caption" slot="title">Quarterly revenue</span>
+        </div>
+      </ui>
+    )xml");
+    check(static_cast<bool>(compiled));
+    auto registry = flexUI::WidgetRegistry::builtins();
+    flexUI::Box box(nullptr);
+    auto* page = box.create("main", "page");
+    auto* existing = box.create("span", "older");
+    page->append(existing);
+    box.set_root(page);
+    const auto before = box.owned_element_count();
+
+    flexUI::UiMountOptions opts;
+    opts.mode = flexUI::UiMountMode::Child;
+    opts.id_policy = flexUI::UiIdPolicy::Scoped;
+    opts.parent = page;
+    opts.id_scope = "sales";
+    const auto result = flexUI::UiDocumentInstantiator::instantiate(
+        box, *compiled.program, registry, opts);
+    check(static_cast<bool>(result));
+    check_equal(page, box.root());
+    check_equal(page->child_at(0), existing);
+    check_equal(page->child_at(1), result.tree.root);
+    check_equal(page->child_count(), 2U);
+    check_equal(box.get_by_id("sales::panel"), result.tree.root);
+    check_equal(box.get_by_id("sales::caption"), result.tree.elements_by_id.at("caption"));
+    check_null(box.get_by_id("panel"));
+    check_equal(box.owned_element_count(), before + 2);
+    check_equal(result.tree.slots_by_name.at("title"),
+                result.tree.elements_by_id.at("caption"));
+
+    const auto collision = flexUI::UiDocumentInstantiator::instantiate(
+        box, *compiled.program, registry, opts);
+    check_false(static_cast<bool>(collision));
+    check(collision.error.code == UiDocumentErrorCode::ElementIdConflict);
+    check_equal(box.owned_element_count(), before + 2);
+    check_equal(page->child_count(), 2U);
+  }
+
+  it("rejects duplicate slots before factory invocation or Box mutation") {
+    const auto compiled = flexUI::compile_ui_xml(R"xml(
+      <ui name="DuplicateSlot">
+        <div slot="plot"><span slot="plot" /></div>
+      </ui>
+    )xml");
+    check(static_cast<bool>(compiled));
+    flexUI::Box box(nullptr);
+    auto* page = box.create("main");
+    box.set_root(page);
+    const auto before = box.owned_element_count();
+    flexUI::UiMountOptions opts;
+    opts.mode = flexUI::UiMountMode::Child;
+    opts.parent = page;
+    const auto result = flexUI::UiDocumentInstantiator::instantiate(
+        box, *compiled.program, flexUI::WidgetRegistry::builtins(), opts);
+    check_false(static_cast<bool>(result));
+    check(result.error.code == UiDocumentErrorCode::DuplicateSlot);
+    check_equal(box.root(), page);
+    check_equal(box.owned_element_count(), before);
+    check_equal(page->child_count(), 0U);
+  }
+
+  it("rejects a missing required XML slot before owning any new nodes") {
+    const auto compiled = flexUI::compile_ui_xml(
+        "<ui name=\"Missing\"><div slot=\"frame\"><span slot=\"title\" /></div></ui>");
+    check(static_cast<bool>(compiled));
+    flexUI::Box box(nullptr);
+    auto *page = box.create("main", "existing");
+    box.set_root(page);
+    const auto before = box.owned_element_count();
+
+    flexUI::UiMountOptions opts;
+    opts.mode = flexUI::UiMountMode::Child;
+    opts.parent = page;
+    opts.required_slots = {"frame", "title", "plot"};
+    const auto failed = flexUI::UiDocumentInstantiator::instantiate(
+        box, *compiled.program, flexUI::WidgetRegistry::builtins(), opts);
+    check_false(static_cast<bool>(failed));
+    check(failed.error.code == UiDocumentErrorCode::MissingSlot);
+    check_equal(box.root(), page);
+    check_equal(page->child_count(), 0U);
+    check_equal(box.owned_element_count(), before);
+    check_null(box.get_by_id("plot"));
+  }
+
+  it("rejects invalid parent, incomplete ID policy and controller exports") {
+    auto registry = flexUI::WidgetRegistry::builtins();
+    const auto ui = flexUI::compile_ui_xml(
+        "<ui name=\"Child\"><div id=\"panel\" slot=\"panel\" /></ui>");
+    check(static_cast<bool>(ui));
+    flexUI::Box box(nullptr);
+    flexUI::Box foreign(nullptr);
+    auto* root = box.create("main", "root");
+    box.set_root(root);
+    auto* outside = foreign.create("main");
+
+    flexUI::UiMountOptions opts;
+    opts.mode = flexUI::UiMountMode::Child;
+    opts.parent = outside;
+    auto wrong_parent = flexUI::UiDocumentInstantiator::instantiate(
+        box, *ui.program, registry, opts);
+    check_false(static_cast<bool>(wrong_parent));
+    check(wrong_parent.error.code == UiDocumentErrorCode::InvalidMountTarget);
+
+    opts.parent = root;
+    opts.id_policy = flexUI::UiIdPolicy::Scoped;
+    auto invalid_scope = flexUI::UiDocumentInstantiator::instantiate(
+        box, *ui.program, registry, opts);
+    check_false(static_cast<bool>(invalid_scope));
+    check(invalid_scope.error.code == UiDocumentErrorCode::InvalidIdScope);
+
+    const auto with_event = flexUI::compile_ui_xml(R"xml(
+      <ui name="Button" xmlns:on="urn:flexui:event">
+        <div><button id="go" on:click="run">Go</button></div>
+      </ui>
+    )xml");
+    check(static_cast<bool>(with_event));
+    opts.id_scope = "sales";
+    const auto not_yet_scoped = flexUI::UiDocumentInstantiator::instantiate(
+        box, *with_event.program, registry, opts);
+    check_false(static_cast<bool>(not_yet_scoped));
+    check(not_yet_scoped.error.code ==
+          UiDocumentErrorCode::UnsupportedFragmentBindings);
+    check_equal(box.root(), root);
+    check_equal(root->child_count(), 0U);
+    check_equal(box.owned_element_count(), 1U);
+  }
+
+  it("leaves an existing parent unchanged when a widget factory fails") {
+    auto registry = flexUI::WidgetRegistry::builtins();
+    check(registry.register_widget("broken", [](const flexUI::UiNodeDefinition&) ->
+         std::unique_ptr<flexUI::Widget> {
+      throw std::runtime_error("intentional chart widget factory failure");
+    }).code == flexUI::WidgetRegistryErrorCode::None);
+    const auto broken = flexUI::compile_ui_xml(
+        "<ui name=\"Broken\"><div slot=\"frame\"><broken /></div></ui>");
+    check(static_cast<bool>(broken));
+    flexUI::Box box(nullptr);
+    auto* page = box.create("main", "page");
+    box.set_root(page);
+    const auto before = box.owned_element_count();
+    flexUI::UiMountOptions opts;
+    opts.mode = flexUI::UiMountMode::Child;
+    opts.parent = page;
+    const auto result = flexUI::UiDocumentInstantiator::instantiate(
+        box, *broken.program, registry, opts);
+    check_false(static_cast<bool>(result));
+    check(result.error.code == UiDocumentErrorCode::WidgetFactoryFailed);
+    check_equal(box.root(), page);
+    check_equal(page->child_count(), 0U);
+    check_equal(box.owned_element_count(), before);
+    check_null(box.get_by_id("frame"));
+  }
+}

@@ -93,6 +93,11 @@ enum class UiDocumentErrorCode {
   WidgetFactoryFailed,
   InvalidUtf8,
   RequiredElementId,
+  InvalidMountTarget,
+  InvalidIdScope,
+  DuplicateSlot,
+  UnsupportedFragmentBindings,
+  MissingSlot,
 };
 
 struct UiDocumentError {
@@ -208,9 +213,26 @@ struct UiDocumentCompileResult {
   explicit operator bool() const { return program != nullptr && !static_cast<bool>(error); }
 };
 
+/// Root installation, unattached Box-owned fragment or atomic child insertion.
+enum class UiMountMode { Root, DetachedFragment, Child };
+
+/// Public element IDs may be globally indexed, local-only, or prefixed by an
+/// explicit, nonempty scope. Slot names remain local in all three policies.
+enum class UiIdPolicy { Global, LocalOnly, Scoped };
+
+struct UiMountOptions {
+  UiMountMode mode = UiMountMode::Root;
+  UiIdPolicy id_policy = UiIdPolicy::Global;
+  Element *parent = nullptr; // Required only for Child; must belong to Box.
+  std::string id_scope;       // Required only for Scoped.
+  std::vector<std::string> required_slots; // Checked before any factory or Box mutation.
+};
+
 struct UiDocumentTree {
   Element *root = nullptr;
   std::unordered_map<std::string, Element *> elements_by_id;
+  /// Instance-local slot lookup; slot is never a global Element ID.
+  std::unordered_map<std::string, Element *> slots_by_name;
 };
 
 struct UiDocumentInstantiateResult {
@@ -276,10 +298,27 @@ public:
       Box &box, const CompiledUiProgram &program,
       const WidgetRegistry &registry);
 
+  /// Instantiates a registered UI component into an existing Box without a
+  /// second runtime tree. DetachedFragment publishes ownership but not a view
+  /// parent; Child appends atomically after preflight and staging.
+  ///
+  /// Fragment mode currently rejects compiled event/binding exports: scoped
+  /// local-ID lookup must not masquerade as a global controller binding.
+  /// All errors before publication preserve the previous Box state.
+  static UiDocumentInstantiateResult instantiate(
+      Box &box, const CompiledUiProgram &program,
+      const WidgetRegistry &registry, const UiMountOptions &options);
+
+  /// For chart/compiler prepared definitions without controller exports.
+  static UiDocumentInstantiateResult instantiate(
+      Box &box, const UiDocumentDefinition &definition,
+      const WidgetRegistry &registry, const UiMountOptions &options);
+
 private:
   static UiDocumentInstantiateResult instantiate_impl(
       Box &box, const UiDocumentDefinition &definition,
-      const CompiledUiProgram *program, const WidgetRegistry *registry);
+      const CompiledUiProgram *program, const WidgetRegistry *registry,
+      const UiMountOptions &options);
 };
 
 } // namespace flexUI

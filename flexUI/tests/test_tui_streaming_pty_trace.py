@@ -12,6 +12,7 @@ import unittest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from test_tui_streaming_pty import (PTY_TRACE_LIMIT, fnv1a64,
+                                    is_pending_native_receipt_error,
                                     read_owner_trace_lines,
                                     require_navigation_provenance,
                                     require_render_receipt)
@@ -185,6 +186,33 @@ class PtyNativeWriteReceiptTest(unittest.TestCase):
             require_navigation_provenance(
                 records, 8, 5, False, True, raw, len(b"already drained")), 9)
 
+
+
+
+class PtyNativeReceiptSynchronizationPolicyTest(unittest.TestCase):
+    def test_only_pending_post_write_evidence_may_be_awaited(self):
+        # Genuine Home/End is already required to be physically visible.
+        for message in (
+            "no native terminal diff-write receipt",
+            "native diff-write receipt belongs to stale epoch: b'epoch=8'",
+            "committed Tango VT diff bytes absent from physical PTY output: epoch=9",
+        ):
+            self.assertTrue(is_pending_native_receipt_error(
+                AssertionError(message)), message)
+
+    def test_native_failure_and_wrong_owner_are_never_retryable(self):
+        # A bounded evidence-propagation window must not disguise an
+        # incorrect command, mismatched front cells, or rejected native I/O.
+        for message in (
+            "native Tango render did not commit",
+            "native committed front cells differ from Owner or write failed",
+            "post-Box owner state mismatch",
+            "no new on_key admission since command epoch 8",
+            "malformed native diff-write receipt",
+            "PTY command trace saturated; latest input provenance unknown",
+        ):
+            self.assertFalse(is_pending_native_receipt_error(
+                AssertionError(message)), message)
 
 
 if __name__ == "__main__":

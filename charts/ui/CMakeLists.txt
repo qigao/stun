@@ -3,6 +3,17 @@ add_library(chart_ui STATIC
     src/flex_node_plot_widget.cpp
 )
 
+# XML remains the authoring asset; the native SDK embeds its bytes at configure
+# time and never loads templates from the current working directory.
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+    "${CMAKE_CURRENT_SOURCE_DIR}/assets/chart_frame.ui.xml")
+file(READ "${CMAKE_CURRENT_SOURCE_DIR}/assets/chart_frame.ui.xml"
+    CHART_FRAME_XML_SOURCE)
+configure_file(
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/chart_frame_xml.inc.in"
+    "${CMAKE_CURRENT_BINARY_DIR}/chart_frame_xml.inc" @ONLY)
+target_include_directories(chart_ui PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")
+
 target_include_directories(chart_ui
     PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
 )

@@ -93,7 +93,7 @@ jobs:
         shell: bash
         run: |
           bash .github/scripts/ci-affected.sh \
-            'flexUI/*' 'flex/*' 'shared/markdown/*' 'shared/gcanvas/*' \
+            'flexUI/*' 'flex/*' 'charts/ui/*' 'shared/markdown/*' 'shared/gcanvas/*' \
             'tango/*' 'tango/src/*' 'tango/include/*' 'tango/tests/*' \
             '.github/workflows/tango-core.yml' \
             'vendor/mir/*' 'vendor/miniblas/*' 'vendor/tinyfsm/*' \

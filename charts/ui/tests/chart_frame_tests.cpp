@@ -5,7 +5,7 @@
 #include <flexUI/element.h>
 #include <flexUI/render_command.h>
 #include <flexUI/render_manager.h>
-#include <tinytest.h>
+#include <tinytest.hpp>
 
 #include <cmath>
 #include <cstdint>
@@ -163,7 +163,7 @@ spec("ChartFrame provides a Box-owned utility styled semantic shell") {
         render_theme_snapshot(flexUI::ThemeMode::System, true);
 
     check_true(light.command_count > 0);
-    check_size_eq(light.command_count, dark.command_count);
+    check_true(light.command_count == dark.command_count);
     check_false(color_near(light.card, dark.card));
     check_false(color_near(light.text, dark.text));
     check_false(color_near(light.tooltip, dark.tooltip));
@@ -176,6 +176,42 @@ spec("ChartFrame provides a Box-owned utility styled semantic shell") {
     check(system_dark.command_signature == dark.command_signature);
   }
 
+  it("keeps XML ChartFrame preparation fail-closed before Box ownership") {
+    flexUI::Box box(nullptr);
+    auto* page = box.create("main", "page");
+    box.set_root(page);
+    const auto before = box.owned_element_count();
+
+    ChartFrameOptions empty_label;
+    empty_label.accessible_label.clear();
+    check_throws_as(charts::ui::create_chart_frame(box, empty_label),
+                    std::invalid_argument);
+    check_equal(box.owned_element_count(), before);
+    check_equal(box.root(), page);
+    check_equal(page->child_count(), 0U);
+
+    ChartFrameOptions excessive_id;
+    excessive_id.chart_id.assign(70 * 1024, 'x');
+    check_throws_as(charts::ui::create_chart_frame(box, excessive_id),
+                    std::invalid_argument);
+    check_equal(box.owned_element_count(), before);
+    check_equal(page->child_count(), 0U);
+  }
+
+  it("projects XML-defined CSS custom properties before element publication") {
+    flexUI::Box box(nullptr);
+    ChartFrameOptions opts;
+    opts.title = "A long descriptive revenue title";
+    const auto frame = charts::ui::create_chart_frame(box, opts);
+    check_not_null(frame.title);
+    check_null(box.root());
+    box.set_root(frame.root);
+    box.update();
+    check(frame.title->computed_style->get_variable(
+              flex::Symbol("--overflow-wrap")) == "anywhere");
+    check_equal(*frame.title->attribute("data-slot"), "chart-title");
+  }
+
   it("reflows deterministic render snapshots when the viewport changes") {
     const auto narrow =
         render_theme_snapshot(flexUI::ThemeMode::Light, false, 320.0f);
@@ -184,11 +220,11 @@ spec("ChartFrame provides a Box-owned utility styled semantic shell") {
     const auto wide_repeat =
         render_theme_snapshot(flexUI::ThemeMode::Light, false, 640.0f);
 
-    check_float_eq(narrow.root_width, 320.0f, 0.001f);
-    check_float_eq(wide.root_width, 640.0f, 0.001f);
+    check_true(std::abs(narrow.root_width - 320.0f) <= 0.001f);
+    check_true(std::abs(wide.root_width - 640.0f) <= 0.001f);
     check_true(wide.surface_width > narrow.surface_width);
     check(narrow.command_signature != wide.command_signature);
     check(wide.command_signature == wide_repeat.command_signature);
-    check_size_eq(wide.command_count, wide_repeat.command_count);
+    check_true(wide.command_count == wide_repeat.command_count);
   }
 }

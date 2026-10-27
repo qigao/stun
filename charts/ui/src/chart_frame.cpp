@@ -2,7 +2,12 @@
 
 #include <flexUI/box.h>
 #include <flexUI/element.h>
+#include <flexUI/ui_document.h>
+#include <flexUI/ui_xml.h>
+#include <flexUI/widget_registry.h>
+#include "chart_frame_xml.inc"
 
+#include <algorithm>
 #include <cmath>
 #include <sstream>
 #include <stdexcept>
@@ -21,60 +26,93 @@ std::string pixel_value(float value) {
 
 }  // namespace
 
+// The UI shell is a normal XML component. The chart grammar continues to
+// own data/marks/layout; this template owns only semantics, CSS and slots.
+// Parse once, specialize the immutable definition copy, then commit via the
+// same detached UiDocument pipeline as every other registered UI component.
+const flexUI::CompiledUiProgram& chart_frame_template() {
+  static auto compiled = [] {
+    const auto result = flexUI::compile_ui_xml(kChartFrameXml);
+    if (!result) {
+      throw std::logic_error("invalid embedded XML ChartFrame: " +
+                             result.error.message);
+    }
+    return result.program;
+  }();
+  return *compiled;
+}
+
+std::string_view slot_name(const flexUI::UiNodeDefinition& node) {
+  const auto it = node.properties.find("slot");
+  if (it == node.properties.end()) return {};
+  const auto *name = std::get_if<std::string>(&it->second);
+  return name ? std::string_view(*name) : std::string_view{};
+}
+
+flexUI::Element* optional_slot(
+    const flexUI::UiDocumentTree& tree, std::string_view slot) {
+  const auto found = tree.slots_by_name.find(std::string(slot));
+  return found == tree.slots_by_name.end() ? nullptr : found->second;
+}
+
 ChartFrame create_chart_frame(flexUI::Box& box,
                               const ChartFrameOptions& options) {
   if (options.accessible_label.empty()) {
     throw std::invalid_argument("chart accessible label must not be empty");
   }
 
-  ChartFrame frame;
-  frame.root = box.create("figure");
-  frame.root->set_attribute("data-slot", "chart");
-  frame.root->set_attribute("role", "figure");
+  auto definition = chart_frame_template().definition();
   if (!options.chart_id.empty()) {
-    frame.root->set_attribute("data-chart", options.chart_id);
+    definition.root.properties["attr.data-chart"] = options.chart_id;
   }
-  frame.root->add_utilities(
-      "flex flex-col relative w-full box-border rounded-lg border bg-card "
-      "text-card-foreground p-4 gap-4");
-
-  if (!options.title.empty()) {
-    frame.title = box.create("figcaption");
-    frame.title->set_attribute("data-slot", "chart-title");
-    frame.title->set_text(options.title);
-    frame.title->add_utilities("text-sm font-medium");
-    frame.title->set_custom_property("--overflow-wrap", "anywhere");
-    frame.root->append(frame.title);
+  auto &children = definition.root.children;
+  for (auto &child : children) {
+    const auto name = slot_name(child);
+    if (name == "chart-title") {
+      child.properties["text"] = options.title;
+    } else if (name == "chart-surface") {
+      child.properties["attr.aria-label"] = options.accessible_label;
+    }
   }
+  children.erase(std::remove_if(children.begin(), children.end(),
+        [&](const flexUI::UiNodeDefinition& child) {
+          const auto name = slot_name(child);
+          return (name == "chart-title" && options.title.empty()) ||
+                 (name == "chart-legend" && !options.create_legend) ||
+                 (name == "chart-tooltip" && !options.create_tooltip);
+        }), children.end());
 
-  frame.surface = box.create("div");
-  frame.surface->set_attribute("data-slot", "chart-surface");
-  frame.surface->set_attribute("role", "img");
-  frame.surface->set_attribute("aria-label", options.accessible_label);
-  frame.surface->add_utilities("relative w-full");
-  frame.root->append(frame.surface);
-
-  if (options.create_legend) {
-    frame.legend = box.create("div");
-    frame.legend->set_attribute("data-slot", "chart-legend");
-    frame.legend->set_attribute("role", "list");
-    frame.legend->add_utilities(
-        "flex items-center justify-center gap-4 text-sm");
-    frame.root->append(frame.legend);
+  auto compiled = flexUI::compile_ui_definition(std::move(definition));
+  if (!compiled) {
+    throw std::invalid_argument("ChartFrame XML specialization failed: " +
+                                compiled.error.message);
   }
-
-  if (options.create_tooltip) {
-    frame.tooltip = box.create("div");
-    frame.tooltip->set_attribute("data-slot", "chart-tooltip");
-    frame.tooltip->set_attribute("role", "status");
-    frame.tooltip->set_attribute("data-state", "inactive");
-    frame.tooltip->set_attribute("aria-hidden", "true");
-    frame.tooltip->add_utilities(
-        "absolute hidden rounded-md border bg-popover "
-        "text-popover-foreground p-2 shadow-md text-sm");
-    frame.root->append(frame.tooltip);
+  // The compiled XML program and immutable factory catalog are shared;
+  // neither caches a Box/Element or any chart-specific mutable state.
+  static const auto registry = flexUI::WidgetRegistry::builtins();
+  flexUI::UiMountOptions mount;
+  mount.mode = flexUI::UiMountMode::DetachedFragment;
+  mount.id_policy = flexUI::UiIdPolicy::LocalOnly;
+  mount.required_slots = {"chart", "chart-surface"};
+  if (!options.title.empty()) mount.required_slots.emplace_back("chart-title");
+  if (options.create_legend) mount.required_slots.emplace_back("chart-legend");
+  if (options.create_tooltip) mount.required_slots.emplace_back("chart-tooltip");
+  auto installed = flexUI::UiDocumentInstantiator::instantiate(
+      box, *compiled.program, registry, mount);
+  if (!installed) {
+    throw std::invalid_argument("ChartFrame XML instantiation failed: " +
+                                installed.error.message);
   }
 
+  ChartFrame frame;
+  frame.root = installed.tree.root;
+  frame.title = optional_slot(installed.tree, "chart-title");
+  frame.surface = optional_slot(installed.tree, "chart-surface");
+  frame.legend = optional_slot(installed.tree, "chart-legend");
+  frame.tooltip = optional_slot(installed.tree, "chart-tooltip");
+  if (!frame.root || !frame.surface) {
+    throw std::logic_error("ChartFrame missing mandatory XML slots");
+  }
   return frame;
 }
 

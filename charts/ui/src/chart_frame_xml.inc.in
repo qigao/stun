@@ -1,0 +1,5 @@
+// CMake-generated from assets/chart_frame.ui.xml.
+#pragma once
+static constexpr char kChartFrameXml[] = R"stunxml(
+@CHART_FRAME_XML_SOURCE@
+)stunxml";
