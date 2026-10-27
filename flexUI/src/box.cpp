@@ -1141,6 +1141,15 @@ bool Box::retire_unbound_structural_subtree(
     Element *parent = root->parent_elem();
     if (!parent || !owns_element(parent) || parent->is_widget_owned() ||
         parent->widget) return false;
+    // An indexed, Box-owned Element is not necessarily mounted: callers may
+    // have staged detached nodes using Box::create(). Retire only a subtree
+    // with an ancestry chain that actually reaches this Box's live root.
+    Element *ancestor = parent;
+    std::size_t steps = 0;
+    while (ancestor != root_) {
+      if (!ancestor || ++steps > elements_.size()) return false;
+      ancestor = ancestor->parent_elem();
+    }
 
     // Prepare a complete ownership ledger before changing the live tree.
     // Detect foreign/shared nodes and cycles instead of deleting a prefix.
@@ -1152,7 +1161,9 @@ bool Box::retire_unbound_structural_subtree(
       if (!element || !batch.insert(element).second ||
           batch.size() > elements_.size()) return false;
       if (element->owner_box_ != this || element->is_widget_owned() ||
-          element->widget || bindings_.has_binding_target(element))
+          element->widget || bindings_.has_binding_target(element) ||
+          std::find(active_widgets_.begin(), active_widgets_.end(), element) !=
+              active_widgets_.end())
         return false;
       // The immutable application-wide controller handler table cannot be
       // edited in place. Refuse ANY compiled event-bearing node instead of

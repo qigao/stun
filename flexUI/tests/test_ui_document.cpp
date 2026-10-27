@@ -1190,6 +1190,34 @@ spec("Box structural subtree retirement rejects unsafe lifetime owners") {
     check_equal(box.get_by_id("target"), target);
   }
 
+  it("rejects detached indexed subtrees and active-widget projections") {
+    flexUI::Box box(nullptr);
+    auto *root = box.create("div", "root");
+    auto *host = box.create("div", "host");
+    root->append(host);
+    box.set_root(root);
+
+    // Box::create() registers an ID before its Element is necessarily
+    // attached to the visible application tree.
+    auto *detached = box.create("div", "detached");
+    auto *detached_child = box.create("div", "detached::child");
+    detached->append(detached_child);
+    check_false(box.retire_unbound_structural_subtree("detached::child"));
+    check_equal(box.get_by_id("detached::child"), detached_child);
+    host->append(detached);
+
+    box.register_active_widget(detached_child);
+    check_false(box.retire_unbound_structural_subtree("detached::child"));
+    check_equal(box.get_by_id("detached::child"), detached_child);
+    box.unregister_active_widget(detached_child);
+
+    const auto stale = box.handle_for(*detached_child);
+    check(box.retire_unbound_structural_subtree("detached::child"));
+    check_null(box.resolve_handle(stale));
+    check_equal(box.get_by_id("detached"), detached);
+    check_equal(detached->child_count(), std::size_t{0});
+  }
+
   it("refuses focused, hovered or captured subtree retirement") {
     flexUI::Box box(nullptr);
     auto *root = box.create("div", "root");
