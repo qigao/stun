@@ -17,6 +17,7 @@
 #include <optional>
 #include <sstream>
 #include <stdexcept>
+#include <string_view>
 #include <unordered_set>
 #include <utility>
 
@@ -1259,15 +1260,35 @@ UiDocumentCompileResult compile_scoped_ui_components(
       // must point to this component's OWN known IDs. External URLs remain
       // ordinary URLs; fragment links (#id) refer to qualified local IDs.
       for (auto &[name, value] : node->properties) {
-        const bool multiple = name == "attr.aria-labelledby" ||
-                              name == "attr.aria-describedby" ||
-                              name == "attr.aria-controls" ||
-                              name == "attr.aria-owns";
-        const bool single = name == "attr.for" ||
-                            name == "attr.list" ||
-                            name == "attr.aria-activedescendant";
-        const bool href = name == "attr.href";
+        const bool namespaced = name.rfind("attr.", 0) == 0;
+        const std::string_view key = namespaced
+                                         ? std::string_view(name).substr(5)
+                                         : std::string_view(name);
+        const bool multiple = key == "aria-labelledby" ||
+                              key == "aria-describedby" ||
+                              key == "aria-controls" ||
+                              key == "aria-owns" ||
+                              key == "aria-flowto" ||
+                              key == "headers";
+        const bool single = key == "for" || key == "list" ||
+                            key == "form" ||
+                            key == "aria-activedescendant" ||
+                            key == "aria-details" ||
+                            key == "aria-errormessage";
+        const bool href = key == "href";
         if (!multiple && !single && !href) continue;
+        // The plain and attr:-prefixed spellings map to the same Element
+        // attribute. Never allow one to override the scoped IDREF of another.
+        const std::string alias = namespaced
+                                      ? std::string(key)
+                                      : "attr." + name;
+        if (node->properties.count(alias) != 0) {
+          result.error = make_error(
+              UiDocumentErrorCode::InvalidProperty,
+              "component IDREF attribute has conflicting XML aliases: " +
+                  std::string(key));
+          return result;
+        }
         const auto *ref = std::get_if<std::string>(&value);
         if (!ref) {
           result.error = make_error(UiDocumentErrorCode::InvalidProperty,
