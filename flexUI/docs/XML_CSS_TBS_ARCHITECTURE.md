@@ -12,6 +12,8 @@
   **首次挂载/完整 reload 前**组合组件；宿主必须是根 XML 中已存在的结构节点。
   各个组件的 `id="action"` 编译为 `sales::action` / `costs::action`；
   事件、binding 目标、`for`、局部 `href="#id"` 和 ARIA IDREF 同步限定作用域。
+  普通 XML 属性与 `attr:` 命名空间形式都处理同一个 IDREF 规则，二者同时
+  声明同一语义属性会拒绝，避免不受作用域约束的值覆盖安全值；外部 URL 不改写。
 - 所有 `on:*` 事件归于**同一个** `CompiledUiProgram` 和 `ScriptController`；
   UI Mutation / Application Command 仍按原本预留→提交→发布的顺序进行。
 - 对跨实例输入共享采用**显式应用级**声明，例如
@@ -19,7 +21,9 @@
   `UiDataContext` 的类型化输入。组件的 `bind:text="$caption"` 指向该应用级输入；
   两个组件若要独立值应声明不同输入名称，而非假定存在隐式组件私有数据源。
   还提供 `binding_input_number` 和 `binding_input_bool`。配置中的同名输入、
-  超限字符串、非有限数字在候选发布前拒绝。
+  超限字符串、非有限数字、与 Binding 不匹配的输入类型在候选发布前拒绝。
+  布尔/数值输入可供编译后的 MIR 表达式使用；成功 reload 会按声明的初始输入
+  重新构建候选，运行中修改的输入值**不会被隐式继承**，应用如需保留状态应显式重放。
 - `slot` 保持实例局部语义，静态组合仅把重复的 slot 降为 `data-slot`，
   不在全局建立重复 Slot 键。每个节点的真实身份仍归 Box 唯一索引管理。
 - **禁止**动态逐组件脚本注册/卸载、组件独立权限、安全隔离、未声明资源跨实例
