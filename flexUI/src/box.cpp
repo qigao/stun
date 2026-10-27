@@ -1130,6 +1130,125 @@ bool Box::retire_detached_elements(const std::vector<Element*>& candidates) noex
   }
 }
 
+bool Box::retire_unbound_structural_subtree(
+    const std::string &root_id) noexcept {
+  if (std::this_thread::get_id() != owning_thread_ || root_id.empty() ||
+      compiled_program_installed_ || events_.is_dispatching() ||
+      borrowed_tree_depth_ != 0) return false;
+  try {
+    const auto indexed = elements_by_id_.find(root_id);
+    if (indexed == elements_by_id_.end()) return false;
+    Element *root = indexed->second.element;
+    if (!root || root == root_ || !owns_element(root)) return false;
+    Element *parent = root->parent_elem();
+    if (!parent || !owns_element(parent) || parent->is_widget_owned() ||
+        parent->widget) return false;
+    // An indexed, Box-owned Element is not necessarily mounted: callers may
+    // have staged detached nodes using Box::create(). Retire only a subtree
+    // with an ancestry chain that actually reaches this Box's live root.
+    Element *ancestor = parent;
+    std::size_t steps = 0;
+    while (ancestor != root_) {
+      if (!ancestor || ++steps > elements_.size()) return false;
+      ancestor = ancestor->parent_elem();
+    }
+    // The preceding bounded chain validation proves root reaches root_.
+    // Never inspect ancestors above the UI root, even in malformed graphs.
+    for (Element *current = root;; current = current->parent_elem()) {
+      if (keyed_repeater_hosts_.count(current) != 0) return false;
+      if (current == root_) break;
+    }
+
+    // Prepare a complete ownership ledger before changing the live tree.
+    // Detect foreign/shared nodes and cycles instead of deleting a prefix.
+    std::unordered_set<Element *> batch;
+    std::vector<Element *> ordered{root};
+    batch.reserve(elements_.size());
+    for (std::size_t i = 0; i < ordered.size(); ++i) {
+      Element *element = ordered[i];
+      if (!element || !batch.insert(element).second ||
+          batch.size() > elements_.size()) return false;
+      if (element->owner_box_ != this || element->is_widget_owned() ||
+          element->widget || element->click_callback() ||
+          bindings_.has_binding_target(element) ||
+          keyed_repeater_hosts_.count(element) != 0 ||
+          std::find(active_widgets_.begin(), active_widgets_.end(), element) !=
+              active_widgets_.end())
+        return false;
+      // The immutable application-wide controller handler table cannot be
+      // edited in place. Refuse ANY compiled event-bearing node instead of
+      // leaving a handler which can address a retired Element ID.
+      static constexpr const char *handlers[] = {
+          "data-flexui-on-click", "data-flexui-on-mouse_move",
+          "data-flexui-on-mouse_down", "data-flexui-on-mouse_up",
+          "data-flexui-on-mouse_wheel", "data-flexui-on-key_down",
+          "data-flexui-on-key_up", "data-flexui-on-text_input",
+          "data-flexui-on-focus_in", "data-flexui-on-focus_out",
+          "data-flexui-on-composition_start",
+          "data-flexui-on-composition_update",
+          "data-flexui-on-composition_end"};
+      for (const char *handler : handlers)
+        if (element->has_attribute(handler)) return false;
+      if (element->is_focus() || element->is_active() ||
+          element->is_hover()) return false;
+      if (!element->id().empty()) {
+        const auto entry = elements_by_id_.find(element->id());
+        if (entry == elements_by_id_.end() ||
+            entry->second.element != element) return false;
+      }
+      if (i != 0 && !batch.count(element->parent_elem())) return false;
+      for (auto *node : element->children()) {
+        auto *child = dynamic_cast<Element *>(node);
+        if (!child || child->parent_elem() != element) return false;
+        ordered.push_back(child);
+      }
+    }
+
+    const auto live_event_pointer = [&batch](Element *element) {
+      return element != nullptr && batch.count(element) != 0;
+    };
+    if (live_event_pointer(events_.focused_element()) ||
+        live_event_pointer(events_.hovered_element()) ||
+        live_event_pointer(events_.active_element()) ||
+        live_event_pointer(events_.capturing_element()))
+      return false;
+
+    std::size_t owned = 0;
+    for (const auto &element : elements_)
+      if (batch.count(element.get())) ++owned;
+    if (owned != batch.size()) return false;
+
+    // Commit: no callbacks, no new container allocations. Detach all parent
+    // pointers first to avoid destruction order depending on vector layout.
+    parent->remove_child(root);
+    for (auto it = ordered.rbegin(); it != ordered.rend(); ++it) {
+      Element *element = *it;
+      while (element->child_count() != 0)
+        element->remove_child_at(element->child_count() - 1);
+    }
+    for (Element *element : ordered) {
+      if (!element->id().empty())
+        elements_by_id_.erase(element->id());
+      const auto address = reinterpret_cast<std::uintptr_t>(element);
+      transitions_.clear_element(address);
+      animations_.clear_element(address);
+      styled_elements_.erase(address);
+      container_widths_.erase(element);
+      style_engine_.forget_element(element);
+    }
+    elements_.erase(std::remove_if(elements_.begin(), elements_.end(),
+                     [&batch](const std::unique_ptr<Element> &element) {
+                       return batch.count(element.get()) != 0;
+                     }), elements_.end());
+    notify_utility_tree_changed();
+    return true;
+  } catch (...) {
+    // All operations that may allocate are confined to the read-only
+    // preflight. Do not publish a partially admitted retirement.
+    return false;
+  }
+}
+
 Element* Box::create(const std::string& tag, const std::string& id) {
   auto elem = std::make_unique<Element>();
   elem->set_tag(tag);
@@ -1362,6 +1481,11 @@ bool Box::style_state_affects_selectors(Symbol state) const {
 }
 
 void Box::update() {
+  struct TreeBorrowScope {
+    std::size_t &depth;
+    explicit TreeBorrowScope(std::size_t &value) noexcept : depth(value) { ++depth; }
+    ~TreeBorrowScope() { --depth; }
+  } guard(borrowed_tree_depth_);
   bindings_.update();
   pipeline_->update(*this);
 }
@@ -1379,6 +1503,13 @@ void Box::dispatch_event(Event& event) {
 }
 
 void Box::update_time(float delta_ms) {
+  // Widget::update() is application-extensible and may synchronously attempt
+  // mutation while active_widgets_ and animation state borrow pointers.
+  struct TreeBorrowScope {
+    std::size_t &depth;
+    explicit TreeBorrowScope(std::size_t &value) noexcept : depth(value) { ++depth; }
+    ~TreeBorrowScope() { --depth; }
+  } guard(borrowed_tree_depth_);
   time_ms_ += delta_ms;
   transitions_.update(time_ms_);
   animations_.update(time_ms_);

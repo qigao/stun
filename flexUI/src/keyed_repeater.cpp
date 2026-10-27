@@ -61,6 +61,10 @@ UiKeyedRepeater::UiKeyedRepeater(Box& box, Element& container,
     throw std::invalid_argument(
         "keyed repeater requires an initially empty container");
   }
+  if (!box.keyed_repeater_hosts_.insert(&container).second) {
+    throw std::invalid_argument(
+        "keyed repeater container already has an active lease");
+  }
 }
 
 UiKeyedRepeater::~UiKeyedRepeater() noexcept {
@@ -81,6 +85,9 @@ UiKeyedRepeater::~UiKeyedRepeater() noexcept {
     }
     impl_->container->remove(active->second);
   }
+  // Release the container lease only AFTER the repeater has detached all
+  // children whose pointers it borrowed. Box must outlive this repeater.
+  impl_->box->keyed_repeater_hosts_.erase(impl_->container);
 }
 
 Box& UiKeyedRepeater::box() { return *impl_->box; }

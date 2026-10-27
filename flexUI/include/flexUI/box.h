@@ -21,6 +21,7 @@
 #include <functional>
 #include <map>
 #include <memory>
+#include <thread>
 #include <unordered_map>
 #include <unordered_set>
 
@@ -130,6 +131,23 @@ public:
   // detached roots using Element::replace_children(). On admission failure,
   // the caller retains and destroys the staged nodes.
   void adopt_detached_elements(std::vector<std::unique_ptr<Element>> &&elements);
+
+  /// Retire exactly one currently mounted, application-owned structural
+  /// subtree in place. This M0 lifetime primitive is ONLY for unbound,
+  /// widget-free, compiled-event-free nodes. All other cases fail closed:
+  /// a mounted ScriptController / binding / Widget cannot be retired through
+  /// this API. It also refuses during event dispatch or if any node holds
+  /// focus, hover, active input or mouse capture.
+  ///
+  /// After success, borrowed Element pointers are invalid and any previous
+  /// UiHandles (including descendant IDs) fail resolution. Sibling pointers
+  /// and their handle generations remain unchanged. This operation does
+  /// not update a CompiledUiProgram or component configuration and MUST NOT
+  /// be used as dynamic script-component unregister.
+  /// Preflight allocates before the non-allocating detach/index/cache commit;
+  /// failure does not remove elements from the tree.
+  bool retire_unbound_structural_subtree(const std::string &root_id) noexcept;
+
   // Diagnostics only; includes the Box-owned widget projections.
   std::size_t owned_element_count() const noexcept { return elements_.size(); }
   // Diagnostic count of pointer-keyed CSS baseline objects retained in Box.
@@ -266,6 +284,18 @@ private:
   std::unique_ptr<RenderManager> render_mgr_;
   std::unique_ptr<ViewPipeline> pipeline_;
 
+  // Box-owned structural mutations are thread-affine. This immutable token
+  // allows the retirement preflight to reject cross-thread use before it
+  // reads mutable tree/index/widget state.
+  const std::thread::id owning_thread_ = std::this_thread::get_id();
+  // Publishing any CompiledUiProgram makes the app immutable program table
+  // authoritative. Retiring arbitrary Element IDs without rewriting that
+  // table would leave stale script/binding/type definitions. M0 refuses it.
+  bool compiled_program_installed_ = false;
+  // Layout/render and widget-frame traversal borrow Element* across
+  // callback boundaries; retirement must wait until those walks finish.
+  std::size_t borrowed_tree_depth_ = 0;
+
   // 元素树
   Element *root_ = nullptr;
   std::vector<std::unique_ptr<Element>> elements_;
@@ -292,6 +322,10 @@ private:
 
   // 活跃 Widget
   std::vector<Element *> active_widgets_;
+  // Keyed repeaters borrow their container for their entire lifetime,
+  // including when empty. A structural retire must refuse a leased host
+  // or its descendants, not just nodes with a Widget or Binding target.
+  std::unordered_set<Element *> keyed_repeater_hosts_;
 
   // 子系统
   EventDispatcher events_{this};

@@ -1,10 +1,16 @@
 #include <flexUI.h>
+#include <flexUI/widgets/label_widget.h>
+#include <flexUI/widget.h>
+#include <flexUI/keyed_repeater.h>
 
 #include <tinytest.hpp>
 
 #include <cmath>
 #include <limits>
+#include <memory>
+#include <stdexcept>
 #include <string>
+#include <thread>
 
 using flexUI::UiDocumentErrorCode;
 
@@ -1069,6 +1075,328 @@ spec("UiDocument stages native DOT presentation without Box side effects") {
   }
 }
 
+
+
+spec("Box structural subtree retirement rejects unsafe lifetime owners") {
+  it("removes only the selected mounted subtree and retires indexed handles") {
+    flexUI::Box box(nullptr);
+    auto *root = box.create("div", "root");
+    auto *host = box.create("section", "host");
+    auto *left = box.create("div", "left");
+    auto *panel = box.create("div", "scope::panel");
+    auto *inner = box.create("div", "scope::inner");
+    auto *anonymous = box.create("div");
+    auto *right = box.create("div", "right");
+    root->append(host);
+    host->append(left);
+    host->append(panel);
+    panel->append(inner);
+    inner->append(anonymous);
+    host->append(right);
+    box.set_root(root);
+    box.update();
+
+    const auto old_panel = box.handle_for(*panel);
+    const auto old_inner = box.handle_for(*inner);
+    const auto right_handle = box.handle_for(*right);
+    const auto count = box.owned_element_count();
+    const auto styled_count = box.cached_style_element_count();
+    check(old_panel && old_inner && right_handle);
+    check_false(box.retire_unbound_structural_subtree("root"));
+    check_false(box.retire_unbound_structural_subtree("not-present"));
+    check_equal(box.owned_element_count(), count);
+
+    check(box.retire_unbound_structural_subtree("scope::panel"));
+    check_equal(box.owned_element_count(), count - 3u);
+    check_equal(host->child_count(), std::size_t{2});
+    check_equal(host->child_at(0), left);
+    check_equal(host->child_at(1), right);
+    check_null(box.get_by_id("scope::panel"));
+    check_null(box.get_by_id("scope::inner"));
+    check_null(box.resolve_handle(old_panel));
+    check_null(box.resolve_handle(old_inner));
+    check_equal(box.resolve_handle(right_handle), right);
+    check_equal(box.get_by_id("left"), left);
+    check_equal(box.cached_style_element_count() <= styled_count, true);
+    check_false(box.retire_unbound_structural_subtree("scope::panel"));
+
+    // Reusing an ID must not resurrect an old handle even if the allocator
+    // recycles the exact Element address.
+    auto *next_panel = box.create("div", "scope::panel");
+    host->append(next_panel);
+    const auto reincarnated = box.handle_for(*next_panel);
+    check(reincarnated);
+    check(reincarnated.generation != old_panel.generation);
+    check_null(box.resolve_handle(old_panel));
+    check_equal(box.resolve_handle(reincarnated), next_panel);
+    box.update();
+  }
+
+  it("refuses bound, widget-owned and script-handler subtrees") {
+    flexUI::Box box(nullptr);
+    auto *root = box.create("div", "root");
+    auto *host = box.create("div", "host");
+    auto *bound = box.create("div", "bound");
+    auto *event = box.create("div", "event");
+    root->append(host);
+    host->append(bound);
+    host->append(event);
+    box.set_root(root);
+    box.bindings().inputs().set_string("caption", "Ready");
+    const auto bound_handle = box.bindings().targets().bind_text(*bound, "caption");
+    check(bound_handle);
+    const auto old_bound = box.handle_for(*bound);
+    check_false(box.retire_unbound_structural_subtree("bound"));
+    check_equal(box.resolve_handle(old_bound), bound);
+    check(box.bindings().targets().unbind(bound_handle.id));
+    check(box.retire_unbound_structural_subtree("bound"));
+    check_null(box.resolve_handle(old_bound));
+    check_equal(box.bindings().stats().binding_count, std::size_t{0});
+
+    event->set_attribute("data-flexui-on-click", "save_document");
+    check_false(box.retire_unbound_structural_subtree("event"));
+    event->remove_attribute("data-flexui-on-click");
+    // Native callback closures are also long-lived event ownership and
+    // must be explicitly unregistered before deleting a whole subtree.
+    event->on_click([] {});
+    check_false(box.retire_unbound_structural_subtree("event"));
+    check_equal(box.get_by_id("event"), event);
+    event->on_click({});
+    check(box.retire_unbound_structural_subtree("event"));
+
+    auto *widget = box.create_widget<flexUI::LabelWidget>(
+        "label", "widget", std::string("Widget"));
+    host->append(widget);
+    check_false(box.retire_unbound_structural_subtree("widget"));
+    check_equal(box.get_by_id("widget"), widget);
+    check_equal(host->child_count(), std::size_t{1});
+  }
+
+  it("blocks reentrant subtree deletion inside native event propagation") {
+    flexUI::Box box(nullptr);
+    auto *root = box.create("div", "root");
+    auto *target = box.create("div", "target");
+    auto *victim = box.create("div", "victim");
+    root->append(target);
+    root->append(victim);
+    box.set_root(root);
+    box.set_focus(target);
+    const auto victim_handle = box.handle_for(*victim);
+    bool observed = false;
+    bool rejected = false;
+    box.set_event_callback([&](flexUI::Element &element,
+                               const flexUI::Event &) {
+      if (&element == target) {
+        observed = true;
+        rejected = !box.retire_unbound_structural_subtree("victim");
+      }
+    });
+    auto event = flexUI::Event::key_down(flexUI::KeyCode::A);
+    box.dispatch_event(event);
+    check(observed);
+    check(rejected);
+    check_equal(box.resolve_handle(victim_handle), victim);
+    check(box.retire_unbound_structural_subtree("victim"));
+    check_null(box.resolve_handle(victim_handle));
+    check_equal(box.get_by_id("target"), target);
+  }
+
+  it("rejects detached indexed subtrees and active-widget projections") {
+    flexUI::Box box(nullptr);
+    auto *root = box.create("div", "root");
+    auto *host = box.create("div", "host");
+    root->append(host);
+    box.set_root(root);
+
+    // Box::create() registers an ID before its Element is necessarily
+    // attached to the visible application tree.
+    auto *detached = box.create("div", "detached");
+    auto *detached_child = box.create("div", "detached::child");
+    detached->append(detached_child);
+    check_false(box.retire_unbound_structural_subtree("detached::child"));
+    check_equal(box.get_by_id("detached::child"), detached_child);
+    host->append(detached);
+
+    box.register_active_widget(detached_child);
+    check_false(box.retire_unbound_structural_subtree("detached::child"));
+    check_equal(box.get_by_id("detached::child"), detached_child);
+    box.unregister_active_widget(detached_child);
+
+    const auto stale = box.handle_for(*detached_child);
+    check(box.retire_unbound_structural_subtree("detached::child"));
+    check_null(box.resolve_handle(stale));
+    check_equal(box.get_by_id("detached"), detached);
+    check_equal(detached->child_count(), std::size_t{0});
+  }
+
+  it("refuses cross-thread destruction before reading mutable Box state") {
+    flexUI::Box box(nullptr);
+    auto *root = box.create("div", "root");
+    auto *victim = box.create("div", "victim");
+    root->append(victim);
+    box.set_root(root);
+    const auto handle = box.handle_for(*victim);
+    bool accepted = true;
+    std::thread worker([&] {
+      accepted = box.retire_unbound_structural_subtree("victim");
+    });
+    worker.join();
+    check_false(accepted);
+    check_equal(box.resolve_handle(handle), victim);
+    check(box.retire_unbound_structural_subtree("victim"));
+    check_null(box.resolve_handle(handle));
+  }
+
+  it("refuses retirement from Boxes with immutable compiled UI programs") {
+    const auto compiled = flexUI::compile_ui_xml(
+        "<ui name=\"Compiled\"><div id=\"root\"><div id=\"child\"/></div></ui>");
+    check(static_cast<bool>(compiled));
+    if (!compiled) return;
+    flexUI::Box box(nullptr);
+    const auto mounted = flexUI::UiDocumentInstantiator::instantiate(
+        box, *compiled.program);
+    check(static_cast<bool>(mounted));
+    if (!mounted) return;
+    const auto child = box.handle_for(*box.get_by_id("child"));
+    check(child);
+    check_false(box.retire_unbound_structural_subtree("child"));
+    check_equal(box.resolve_handle(child), box.get_by_id("child"));
+    check_equal(box.owned_element_count(), std::size_t{2});
+  }
+
+  it("protects live keyed-repeater container leases even when empty") {
+    flexUI::Box box(nullptr);
+    auto *root = box.create("div", "root");
+    auto *host = box.create("div", "repeater-host");
+    auto *outer = box.create("div", "outer");
+    root->append(outer);
+    outer->append(host);
+    box.set_root(root);
+    {
+      flexUI::UiKeyedRepeater repeater(box, *host, 8u);
+      check_false(box.retire_unbound_structural_subtree("repeater-host"));
+      check_false(box.retire_unbound_structural_subtree("outer"));
+      check_equal(box.get_by_id("repeater-host"), host);
+      bool refused = false;
+      try {
+        flexUI::UiKeyedRepeater duplicate(box, *host, 8u);
+      } catch (const std::invalid_argument &) {
+        refused = true;
+      }
+      check(refused);
+    }
+    const auto retired = box.handle_for(*host);
+    check(box.retire_unbound_structural_subtree("repeater-host"));
+    check_null(box.resolve_handle(retired));
+    check_equal(box.get_by_id("outer"), outer);
+  }
+
+  it("refuses retirement of a pending focus target during focus-out callbacks") {
+    flexUI::Box box(nullptr);
+    auto *root = box.create("div", "root");
+    auto *old_focus = box.create("div", "old-focus");
+    auto *incoming = box.create("div", "incoming");
+    root->append(old_focus);
+    root->append(incoming);
+    box.set_root(root);
+    const auto incoming_handle = box.handle_for(*incoming);
+    box.set_focus(old_focus);
+
+    bool observed = false;
+    bool rejected = false;
+    box.set_framework_event_callback([&](flexUI::Element &element,
+                                         const flexUI::Event &event) {
+      if (&element == old_focus &&
+          event.type == flexUI::EventType::FocusOut) {
+        observed = true;
+        rejected = !box.retire_unbound_structural_subtree("incoming");
+      }
+    });
+
+    // The incoming node is not focused until after focus_out returns. The
+    // borrowed-pointer dispatch barrier, rather than state bits, protects it.
+    box.set_focus(incoming);
+    check(observed);
+    check(rejected);
+    check_equal(box.focused_element(), incoming);
+    check_equal(box.resolve_handle(incoming_handle), incoming);
+    box.set_focus(nullptr);
+    check(box.retire_unbound_structural_subtree("incoming"));
+    check_null(box.resolve_handle(incoming_handle));
+  }
+
+  it("blocks retirement from widget layout and frame callbacks") {
+    struct ReentrantWidget final : flexUI::Widget {
+      flexUI::Box *box = nullptr;
+      bool *layout_called = nullptr;
+      bool *layout_rejected = nullptr;
+      bool *frame_called = nullptr;
+      bool *frame_rejected = nullptr;
+
+      void emit_render_commands(const flexUI::Element &,
+                                flexUI::RenderCommandList &) override {}
+      const char *type_name() const override { return "ReentrantWidget"; }
+
+      void sync_host_semantics_for_layout(flexUI::Element &) override {
+        *layout_called = true;
+        *layout_rejected =
+            !box->retire_unbound_structural_subtree("victim");
+      }
+      void update(float, flexUI::Element &) override {
+        *frame_called = true;
+        *frame_rejected =
+            !box->retire_unbound_structural_subtree("victim");
+      }
+    };
+
+    flexUI::Box box(nullptr);
+    bool layout_called = false;
+    bool layout_rejected = false;
+    bool frame_called = false;
+    bool frame_rejected = false;
+    auto widget = std::make_unique<ReentrantWidget>();
+    widget->box = &box;
+    widget->layout_called = &layout_called;
+    widget->layout_rejected = &layout_rejected;
+    widget->frame_called = &frame_called;
+    widget->frame_rejected = &frame_rejected;
+
+    auto *root = box.create("div", "root");
+    auto *host = box.create_with_widget("label", std::move(widget), "host");
+    auto *victim = box.create("div", "victim");
+    root->append(host);
+    root->append(victim);
+    box.set_root(root);
+    const auto old_handle = box.handle_for(*victim);
+    box.update();
+    check(layout_called);
+    check(layout_rejected);
+    check_equal(box.resolve_handle(old_handle), victim);
+    box.update_time(16.0f);
+    check(frame_called);
+    check(frame_rejected);
+    check_equal(box.resolve_handle(old_handle), victim);
+    check(box.retire_unbound_structural_subtree("victim"));
+    check_null(box.resolve_handle(old_handle));
+  }
+
+  it("refuses focused, hovered or captured subtree retirement") {
+    flexUI::Box box(nullptr);
+    auto *root = box.create("div", "root");
+    auto *focus = box.create("div", "focus");
+    root->append(focus);
+    box.set_root(root);
+    box.set_focus(focus);
+    check_false(box.retire_unbound_structural_subtree("focus"));
+    check_equal(box.get_by_id("focus"), focus);
+    box.set_focus(nullptr);
+    box.set_mouse_capture(focus);
+    check_false(box.retire_unbound_structural_subtree("focus"));
+    box.release_mouse_capture(focus);
+    check(box.retire_unbound_structural_subtree("focus"));
+    check_null(box.get_by_id("focus"));
+  }
+}
 
 spec("Scoped XML components are compiled into one owner/controller program") {
   it("maps each scoped template input to an explicit global typed source") {

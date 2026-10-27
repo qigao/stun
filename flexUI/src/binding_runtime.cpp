@@ -892,6 +892,14 @@ void UiBindingTargets::clear() {
   }
 }
 
+bool UiBindingRuntime::has_binding_target(const Element *element) const noexcept {
+  return element != nullptr &&
+         std::any_of(impl_->bindings.begin(), impl_->bindings.end(),
+                     [element](const auto &binding) {
+                       return binding.element == element;
+                     });
+}
+
 bool UiBindingRuntime::update() {
   ++impl_->update_count;
   bool changed = false;

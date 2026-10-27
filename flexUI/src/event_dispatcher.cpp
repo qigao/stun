@@ -22,6 +22,16 @@ using flex::operator*;
 constexpr float kWheelScrollStep = 40.0f;
 constexpr float kScrollEpsilon = 0.001f;
 
+// Prevent retiring borrowed Element pointers during ANY synchronous native
+// event callback, including direct set_focus() focus-out/focus-in callbacks.
+// Counting nested scopes preserves the barrier under recursive event calls.
+struct BorrowedEventPointerScope {
+  std::size_t &depth;
+  explicit BorrowedEventPointerScope(std::size_t &value) noexcept
+      : depth(value) { ++depth; }
+  ~BorrowedEventPointerScope() { --depth; }
+};
+
 struct ScrollInsets {
   float top = 0.0f;
   float right = 0.0f;
@@ -364,6 +374,11 @@ void EventDispatcher::dispatch(Event &event, Element *root) {
   if (!root)
     return;
 
+  // Any native callback may synchronously reenter application code. Keep
+  // destructive Box retirement disabled until ALL ancestors and widget
+  // pointers used by this event have returned, including on exceptions.
+  BorrowedEventPointerScope guard(dispatch_depth_);
+
   if (event.type == EventType::KeyDown || event.type == EventType::KeyUp ||
       event.type == EventType::TextInput || event.type == EventType::CompositionStart ||
       event.type == EventType::CompositionUpdate || event.type == EventType::CompositionEnd) {
@@ -516,6 +531,10 @@ void EventDispatcher::set_focus(Element *elem) {
   if (focused_ == elem)
     return;
 
+  // Focus callbacks may synchronously run the application while the target
+  // and its ancestors are still borrowed but not yet stored in focused_.
+  // In-place retirement of even an apparently unfocused target would UAF.
+  BorrowedEventPointerScope guard(dispatch_depth_);
   std::unordered_set<Element *> next_focus_chain;
   for (Element *current = elem; current; current = current->parent_elem()) {
     next_focus_chain.insert(current);

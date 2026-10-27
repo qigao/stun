@@ -51,6 +51,7 @@ public:
   Element *hovered_element() const { return hovered_; }
   Element *active_element() const { return active_; }
   void detach_subtree(Element *root);
+  bool is_dispatching() const noexcept { return dispatch_depth_ != 0; }
 
   // 全局事件回调
   void set_event_callback(EventCallback cb) { callback_ = cb; }
@@ -80,6 +81,7 @@ private:
   Element *focused_ = nullptr;
   Element *capturing_ = nullptr;
   bool prefers_focus_visible_ = false;
+  std::size_t dispatch_depth_ = 0;
 
   EventCallback callback_;
   EventCallback framework_callback_;

@@ -3,7 +3,27 @@
 状态：架构决策已采用，实施与验收按下列工作项推进
 日期：2026-08-31
 
-## 2026-10-27 P4.3 整代组件集合重组（Draft）
+## 2026-10-27 P4.4 M0 有界 Box 子树回收（Draft）
+
+此阶段先为 Box 添加 `retire_unbound_structural_subtree(id)`，提供
+**真正原地删除**应用自有结构子树的底层生命周期原语。执行前完整审计
+Box 所有权、父子指针、ID 索引、Binding 目标、Widget、编译事件属性、
+鼠标/键盘活动指针、Element 原生 ClickCallback 与事件分发深度；
+任何一个条件不满足都必须拒绝。
+成功后撤销索引、清理 CSS/动画/过渡缓存，所有旧 `UiHandle` 失效，
+不改变未删除兄弟节点的对象地址和 generation。
+
+已经由 `UiDocumentInstantiator` 挂载了不可变 `CompiledUiProgram` 的 Box
+也一律拒绝此底层操作：否则即便目标节点没有绑定，程序的静态定义也会
+与运行时树分叉。M0 的准入还要求由 Box 构造线程执行。
+**严禁**把这个 M0 API 直接当成已有脚本组件的通用 `unmount(scope)`：
+它不修改编译期 `CompiledUiProgram` 的 handler/binding 清单，也不承担
+外部 service lease 或 pending callback 的取消。带有 Binding、Widget
+或 on: 事件的组件仍拒绝原地销毁；这些能力属于 P4.4 后续门禁。
+当前已合并的整代重组 #285 继续作为需要完整组件功能时的权威路径。
+没有新增 UI Owner、DOM/BytesVM、fallback。
+
+## 2026-10-27 P4.3 整代组件集合重组（已合并 PR #285）
 
 P4.2 已通过 #284 合入 master。P4.3 引入
 `DesktopApplication::recompose_scoped_xml_components(components, input_aliases)`，
