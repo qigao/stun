@@ -81,10 +81,13 @@ jobs:
           mkdir -p "$cache"
           echo "VCPKG_BINARY_CACHE=$cache" >> "$GITHUB_ENV"
 
-      - name: Configure shared vcpkg cache
-        uses: qigao/vcpkg-cache/.github/actions/setup-vcpkg-cache@master
+      - name: Configure exact-ABI curl GitHub Packages cache
+        uses: qigao/vcpkg-cache/.github/actions/setup-vcpkg-curl-cache@b744e960ff69ac9b2372261c472f3f548258c8e5
         with:
           mode: read
+          triplet: x64-linux
+          host-triplet: x64-linux
+          manifest-root: .ci/gcanvas-shader-tools
 
       - name: Prepare host build tools
         shell: bash
@@ -114,7 +117,7 @@ jobs:
             --only-binarycaching 2>&1 | tee "$log"
 
           ! grep -Eq '^Building [^:]+:x64-linux' "$log"
-          grep -Eq 'Restored [1-9][0-9]* package\(s\) from NuGet' "$log"
+          grep -Eq 'Restored [1-9][0-9]* package\(s\)' "$log"
 
           status="$install_root/vcpkg/status"
           test -f "$status"
@@ -129,10 +132,16 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          # The local files provider is writable only inside this runner.
+          # Remote GitHub Packages transport is an authenticated curl GET.
           case "$VCPKG_BINARY_SOURCES" in
-            *,read) ;;
+            "clear;files,$VCPKG_BINARY_CACHE,readwrite") ;;
             *)
-              echo "shared NuGet cache source is not read-only: $VCPKG_BINARY_SOURCES" >&2
+              echo "unexpected non-local vcpkg binary provider: $VCPKG_BINARY_SOURCES" >&2
               exit 1
               ;;
           esac
+          if printf '%s' "$VCPKG_BINARY_SOURCES" | grep -Eiq 'nuget|http|azblob'; then
+            echo "remote vcpkg binary providers are forbidden" >&2
+            exit 1
+          fi
