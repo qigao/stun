@@ -328,6 +328,21 @@ jobs:
             --repeat until-fail:5 \
             -R "^tui_streaming_demo_posix_pty$"
 
+      - name: Repeat real virtual-spacer SIGWINCH after settled producer
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          set -euo pipefail
+          export DYLD_LIBRARY_PATH="$SALTS_ROOT/lib:$SALTS_ROOT/bin:${DYLD_LIBRARY_PATH:-}"
+          # A process-directed SIGWINCH after the 48-message producer settles
+          # must wake an otherwise idle UI Owner and render 52x16 physically.
+          # Repeat the ORIGINAL strict six-second visible-cell assertion;
+          # do not substitute a synthetic resize or relax the deadline.
+          ctest --test-dir build/flexui-tango-cross -C Debug \
+            --no-tests=error --output-on-failure --timeout 65 \
+            --repeat until-fail:5 \
+            -R "^tui_streaming_demo_posix_pty_virtual_spacers$"
+
       - name: Repeat uninstrumented real Win32 ConPTY sessions
         if: runner.os == 'Windows'
         shell: bash
