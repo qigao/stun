@@ -381,6 +381,9 @@ flexUI::UiNodeDefinition make_label_definition(
     result.properties["utility"] = std::string(
         "absolute flex items-center justify-center text-sm");
     result.properties["text"] = text;
+    // Preserve the native DOT label's CSS customization hook as well as its
+    // typed font color; downstream theme rules may inspect this variable.
+    result.properties["var.dot-label-color"] = css_color(color);
     auto p = dot_bounds(x, y, width, height);
     p.font_family = font_family;
     p.font_size = font_size;
