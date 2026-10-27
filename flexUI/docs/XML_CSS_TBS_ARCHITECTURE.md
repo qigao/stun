@@ -3,7 +3,22 @@
 状态：架构决策已采用，实施与验收按下列工作项推进
 日期：2026-08-31
 
-## 2026-10-27 P4.4 M0 有界 Box 子树回收（Draft）
+## 2026-10-28 P4.4 M1 结构子树及其 Binding 所有权原子退休（Draft）
+
+本轮增加 `Box::retire_bound_structural_subtree(id)`，显式处理手工管理的
+**结构子树和它独占的 Binding target 记录**。Box 的既有预检完整验证
+节点归属、编译程序、脚本事件、Widget、租约、线程及活动指针，并确认
+UiBindingRuntime 没有正在执行的 `update` 或安装事务。提交时先解除本子树
+Binding 所有权键及依赖表，**不把值恢复到将要析构的 Element**，
+再执行无分配的子树回收。未删除兄弟节点和其 Binding 不受影响，
+应用级输入仍由原单一 `UiDataContext` 持有；旧 BindingHandle 失效。
+拒绝回调、Widget value observer 和全部 `CompiledUiProgram` 实例。
+
+现有 `retire_unbound_structural_subtree` 仍是仅无 Binding 子树的严格入口。
+M1 也**不是**动态 XML 组件 `unmount(scope)`，因为不能擅自修改不可变
+事件表、Controller、服务完成/租约或组件资源。此边界仍由 #275 后续追踪。
+
+## 2026-10-27 P4.4 M0 有界 Box 子树回收（已合并 PR #286）
 
 此阶段先为 Box 添加 `retire_unbound_structural_subtree(id)`，提供
 **真正原地删除**应用自有结构子树的底层生命周期原语。执行前完整审计

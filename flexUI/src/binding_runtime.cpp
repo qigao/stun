@@ -16,6 +16,7 @@
 #include <optional>
 #include <sstream>
 #include <stdexcept>
+#include <type_traits>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
@@ -569,6 +570,7 @@ struct UiBindingRuntime::Impl {
   std::unordered_set<std::string> owned_targets;
   UiBindingId next_id = 1;
   bool transaction_active = false;
+  std::size_t evaluation_depth = 0;
   std::uint64_t update_count = 0;
   std::uint64_t evaluation_count = 0;
   std::uint64_t expression_compile_count = 0;
@@ -900,7 +902,49 @@ bool UiBindingRuntime::has_binding_target(const Element *element) const noexcept
                      });
 }
 
+bool UiBindingRuntime::can_retire_target_set(
+    const std::unordered_set<Element *> &targets) const noexcept {
+  if (impl_->transaction_active || impl_->evaluation_depth != 0) return false;
+  for (const auto &binding : impl_->bindings) {
+    if (targets.count(binding.element) == 0) continue;
+    // ValueTarget installs a two-way observer on a Widget. The Box structural
+    // retirement contract rejects Widgets, so silently detaching an observer
+    // here would violate component/widget lifecycle.
+    if (std::holds_alternative<ValueTarget>(binding.target) ||
+        impl_->owned_targets.count(binding.owned_target_key) == 0)
+      return false;
+  }
+  return true;
+}
+
+void UiBindingRuntime::discard_retired_target_set(
+    const std::unordered_set<Element *> &targets) noexcept {
+  // This commit is only called after the Box successfully validates the full
+  // target set and ownership ledger. No Element is mutated or restored.
+  static_assert(std::is_nothrow_move_assignable_v<Impl::Binding>,
+                "Binding retirement requires no-throw vector compaction");
+  for (const auto &binding : impl_->bindings) {
+    if (targets.count(binding.element) == 0) continue;
+    const auto entry = impl_->owned_targets.find(binding.owned_target_key);
+    if (entry != impl_->owned_targets.end())
+      impl_->owned_targets.erase(entry);
+  }
+  auto kept = std::remove_if(
+      impl_->bindings.begin(), impl_->bindings.end(),
+      [&targets](const Impl::Binding &binding) {
+        return targets.count(binding.element) != 0;
+      });
+  impl_->bindings.erase(kept, impl_->bindings.end());
+}
+
 bool UiBindingRuntime::update() {
+  if (impl_->evaluation_depth != 0)
+    throw std::logic_error("UI Binding update cannot reenter itself");
+  struct EvaluationScope {
+    std::size_t &depth;
+    explicit EvaluationScope(std::size_t &value) noexcept : depth(value) { ++depth; }
+    ~EvaluationScope() { --depth; }
+  } scope(impl_->evaluation_depth);
   ++impl_->update_count;
   bool changed = false;
   for (auto& binding : impl_->bindings) {
