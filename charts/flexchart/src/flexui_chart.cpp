@@ -66,22 +66,20 @@ FlexUiChartResult create_flexui_chart(
     chart_copy->width = std::to_string(options.width) + "px";
     chart_copy->height = std::to_string(options.height) + "px";
 
-    charts::ui::ChartFrameOptions frame_options;
-    frame_options.title = chart.title;
-    frame_options.chart_id = options.chart_id;
-    frame_options.accessible_label = options.accessible_label;
-    auto frame = charts::ui::create_chart_frame(box, frame_options);
-
     static const std::vector<std::string> palette = {
         "#3b82f6", "#10b981", "#f59e0b",
         "#ef4444", "#8b5cf6", "#06b6d4"};
     const auto series = legend_series(chart_copy);
+    std::vector<charts::ui::ChartLegendEntry> legends;
+    legends.reserve(series.size());
     for (std::size_t index = 0; index < series.size(); ++index) {
-      charts::ui::create_chart_legend_item(
-          box, frame, series[index], series[index],
-          palette[index % palette.size()]);
+      legends.push_back({series[index], series[index],
+                         palette[index % palette.size()]});
     }
 
+    // Never publish a ChartFrame before native AST/mark/plot preparation.
+    // ChartFrame + typed XML legend + the prebuilt Widget are installed by
+    // the same UiDocument detached transaction or not installed at all.
     auto instance = flex::Instance::create(options.width, options.height);
     flex::chart::ChartComponentBuildOptions build_options;
     build_options.show_title = false;
@@ -91,16 +89,17 @@ FlexUiChartResult create_flexui_chart(
     if (!legacy_plot) {
       return {nullptr, nullptr, "FlexChart mark renderer returned no plot"};
     }
-
     auto plot_widget = charts::ui::create_flex_node_plot_widget(
         instance, legacy_plot, options.width, options.height);
-    auto* plot = box.create_with_widget("div", std::move(plot_widget));
-    plot->set_attribute("data-slot", "chart-plot");
-    plot->set_attribute("data-renderer", "flexchart");
-    plot->add_utilities("relative w-full overflow-hidden");
-    plot->set_layout_size(options.width, options.height);
-    frame.surface->append(plot);
-    return {frame.root, plot, {}};
+
+    charts::ui::ChartFrameOptions frame_options;
+    frame_options.title = chart.title;
+    frame_options.chart_id = options.chart_id;
+    frame_options.accessible_label = options.accessible_label;
+    const auto assembled = charts::ui::create_chart_frame_with_plot(
+        box, frame_options, legends, std::move(plot_widget),
+        options.width, options.height, "flexchart");
+    return {assembled.frame.root, assembled.plot, {}};
   } catch (const std::exception& error) {
     return {nullptr, nullptr, error.what()};
   }

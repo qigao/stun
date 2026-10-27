@@ -3,3 +3,7 @@
 static constexpr char kChartFrameXml[] = R"stunxml(
 @CHART_FRAME_XML_SOURCE@
 )stunxml";
+
+static constexpr char kChartLegendItemXml[] = R"stunxml(
+@CHART_LEGEND_ITEM_XML_SOURCE@
+)stunxml";

@@ -5,6 +5,7 @@
 #include <flexUI/element.h>
 #include <flexUI/render_command.h>
 #include <flexUI/render_manager.h>
+#include <flexUI/widget.h>
 #include <tinytest.hpp>
 
 #include <cmath>
@@ -15,6 +16,26 @@ using charts::ui::ChartFrameOptions;
 using charts::ui::ChartTooltipState;
 
 namespace {
+
+
+class ProbePlotWidget final : public flexUI::Widget {
+ public:
+  void emit_render_commands(const flexUI::Element&,
+                            flexUI::RenderCommandList&) override {}
+  const char* type_name() const override { return "ProbePlotWidget"; }
+};
+
+class RejectingPlotWidget final : public flexUI::Widget {
+ public:
+  void emit_render_commands(const flexUI::Element&,
+                            flexUI::RenderCommandList&) override {}
+  const char* type_name() const override { return "RejectingPlotWidget"; }
+
+ private:
+  void sync_host_semantics() override {
+    throw std::runtime_error("intentional chart plot bind failure");
+  }
+};
 
 struct ThemeSnapshot {
   flexUI::Color card;
@@ -226,5 +247,110 @@ spec("ChartFrame provides a Box-owned utility styled semantic shell") {
     check(narrow.command_signature != wide.command_signature);
     check(wide.command_signature == wide_repeat.command_signature);
     check_true(wide.command_count == wide_repeat.command_count);
+  }
+}
+
+
+spec("ChartFrame and native Plot share one XML publication transaction") {
+  it("installs plot, legend and shell as one Box-owned typed component") {
+    flexUI::Box box(nullptr);
+    auto* page = box.create("main", "page");
+    box.set_root(page);
+    const auto before = box.owned_element_count();
+    ChartFrameOptions options;
+    options.title = "Sales";
+    options.chart_id = "sales";
+    options.accessible_label = "Sales chart";
+    const std::vector<charts::ui::ChartLegendEntry> series = {
+        {"desktop", "Desktop", "#3b82f6"},
+        {"mobile", "Mobile", "#10b981"}};
+
+    auto assembled = charts::ui::create_chart_frame_with_plot(
+        box, options, series, std::make_unique<ProbePlotWidget>(),
+        420.0f, 180.0f, "native-probe");
+
+    check(static_cast<bool>(assembled));
+    check_null(box.get_by_id("chart-plot"));
+    check_equal(box.root(), page);
+    check_equal(page->child_count(), 0U);
+    check(assembled.plot->parent_elem() == assembled.frame.surface);
+    check_not_null(assembled.plot->widget);
+    check_equal(*assembled.plot->attribute("data-slot"), "chart-plot");
+    check_equal(*assembled.plot->attribute("data-renderer"), "native-probe");
+    check_true(std::abs(assembled.plot->layout_width() - 420.0f) <= 0.001f);
+    check_true(std::abs(assembled.plot->layout_height() - 180.0f) <= 0.001f);
+    check(assembled.frame.legend->child_count() == 2U);
+    auto* first = assembled.frame.legend->child_at(0);
+    check_equal(*first->attribute("data-series"), "desktop");
+    check_equal(*first->attribute("data-slot"), "chart-legend-item");
+    check_equal(*first->child_at(1)->attribute("data-slot"), "chart-legend-label");
+    check_equal(first->child_at(1)->text(), "Desktop");
+    check_true(box.owned_element_count() > before);
+
+    page->append(assembled.frame.root);
+    box.update();
+    check(assembled.frame.root->computed_style->display == flexUI::Display::Flex);
+    check(first->child_at(0)->computed_style->get_variable(
+          flex::Symbol("--series-color")) == "#3b82f6");
+    charts::ui::set_chart_legend_highlighted(*first, true);
+    box.update();
+    check_equal(*first->attribute("data-state"), "highlighted");
+    check(first->utility_names().count("font-medium") == 1);
+  }
+
+  it("does not publish a shell if the prepared native plot rejects binding") {
+    flexUI::Box box(nullptr);
+    auto* page = box.create("main", "page");
+    box.set_root(page);
+    const auto before = box.owned_element_count();
+    ChartFrameOptions options;
+    options.title = "Must not appear";
+    std::vector<charts::ui::ChartLegendEntry> series = {
+        {"desktop", "Desktop", "#3b82f6"}};
+
+    check_throws_as(
+        charts::ui::create_chart_frame_with_plot(
+            box, options, series, std::make_unique<RejectingPlotWidget>(),
+            300.0f, 150.0f, "native-probe"),
+        std::invalid_argument);
+    check_equal(box.root(), page);
+    check_equal(page->child_count(), 0U);
+    check_equal(box.owned_element_count(), before);
+    check_null(box.get_by_id("chart-plot"));
+
+    // The same Box remains usable; a failed plot factory never poisons the
+    // subsequent XML fragment or its component-local slot index.
+    const auto recovered = charts::ui::create_chart_frame_with_plot(
+        box, options, series, std::make_unique<ProbePlotWidget>(),
+        300.0f, 150.0f, "native-probe");
+    check(static_cast<bool>(recovered));
+    check_equal(box.root(), page);
+  }
+
+  it("rejects invalid plot and legend arguments without altering Box") {
+    flexUI::Box box(nullptr);
+    auto* page = box.create("main", "page");
+    box.set_root(page);
+    const auto before = box.owned_element_count();
+    const ChartFrameOptions valid;
+    check_throws_as(charts::ui::create_chart_frame_with_plot(
+                        box, valid, {}, {}, 300.0f, 150.0f, "native-probe"),
+                    std::invalid_argument);
+    check_throws_as(charts::ui::create_chart_frame_with_plot(
+                        box, valid, {}, std::make_unique<ProbePlotWidget>(),
+                        -1.0f, 150.0f, "native-probe"), std::invalid_argument);
+    check_throws_as(charts::ui::create_chart_frame_with_plot(
+                        box, valid, {{"", "No ID", ""}},
+                        std::make_unique<ProbePlotWidget>(),
+                        300.0f, 150.0f, "native-probe"), std::invalid_argument);
+    auto no_legend = valid;
+    no_legend.create_legend = false;
+    check_throws_as(charts::ui::create_chart_frame_with_plot(
+                        box, no_legend, {{"series", "Label", ""}},
+                        std::make_unique<ProbePlotWidget>(),
+                        300.0f, 150.0f, "native-probe"), std::invalid_argument);
+    check_equal(box.root(), page);
+    check_equal(page->child_count(), 0U);
+    check_equal(box.owned_element_count(), before);
   }
 }

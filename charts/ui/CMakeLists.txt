@@ -6,9 +6,12 @@ add_library(chart_ui STATIC
 # XML remains the authoring asset; the native SDK embeds its bytes at configure
 # time and never loads templates from the current working directory.
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
-    "${CMAKE_CURRENT_SOURCE_DIR}/assets/chart_frame.ui.xml")
+    "${CMAKE_CURRENT_SOURCE_DIR}/assets/chart_frame.ui.xml"
+    "${CMAKE_CURRENT_SOURCE_DIR}/assets/chart_legend_item.ui.xml")
 file(READ "${CMAKE_CURRENT_SOURCE_DIR}/assets/chart_frame.ui.xml"
     CHART_FRAME_XML_SOURCE)
+file(READ "${CMAKE_CURRENT_SOURCE_DIR}/assets/chart_legend_item.ui.xml"
+    CHART_LEGEND_ITEM_XML_SOURCE)
 configure_file(
     "${CMAKE_CURRENT_SOURCE_DIR}/src/chart_frame_xml.inc.in"
     "${CMAKE_CURRENT_BINARY_DIR}/chart_frame_xml.inc" @ONLY)
