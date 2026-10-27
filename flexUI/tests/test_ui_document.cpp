@@ -1130,6 +1130,34 @@ spec("Scoped XML components are compiled into one owner/controller program") {
     check_equal(box.get_by_id("costs::caption")->text(), "Revenue");
   }
 
+  it("charges repeated components against one total node budget before copying") {
+    const auto app = flexUI::compile_ui_xml(
+        "<ui name=\"App\"><main id=\"root\"><div id=\"left\"/>"
+        "<div id=\"right\"/></main></ui>");
+    const auto component = flexUI::compile_ui_xml(
+        "<ui name=\"Panel\"><div id=\"panel\"><span id=\"inner\"/>"
+        "</div></ui>");
+    check(static_cast<bool>(app));
+    check(static_cast<bool>(component));
+    flexUI::UiDocumentLimits limits;
+    limits.max_nodes = 6;  // base=3, each component=2, total=7.
+    const auto oversized = flexUI::compile_scoped_ui_components(
+        *app.program, {{"sales", "left", component.program},
+                       {"costs", "right", component.program}},
+        flexUI::WidgetRegistry::builtins(), limits);
+    check_false(static_cast<bool>(oversized));
+    check(oversized.error.code == UiDocumentErrorCode::NodeLimitExceeded);
+    check_equal(app.program->definition().root.children.size(),
+                std::size_t{2});
+    // The same input is accepted when the *aggregate* budget is sufficient.
+    limits.max_nodes = 7;
+    const auto admitted = flexUI::compile_scoped_ui_components(
+        *app.program, {{"sales", "left", component.program},
+                       {"costs", "right", component.program}},
+        flexUI::WidgetRegistry::builtins(), limits);
+    check(static_cast<bool>(admitted));
+  }
+
   it("fails closed on duplicate scopes, unknown hosts, and widget hosts") {
     const auto base = flexUI::compile_ui_xml(
         "<ui name=\"Root\"><main id=\"root\"><div id=\"host\"/>"
