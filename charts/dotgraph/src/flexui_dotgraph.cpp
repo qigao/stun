@@ -1,6 +1,9 @@
 #include "dotgraph/flexui_dotgraph.h"
 
 #include "dotgraph/dotgraph_parser_wrapper.h"
+#include <charts/ui/dotgraph_frame.h>
+#include <flexUI/ui_document.h>
+#include <flexUI/widget_registry.h>
 #include "flex/core/text.h"
 #include "flexUI/box.h"
 #include "flexUI/computed_style.h"
@@ -68,46 +71,27 @@ struct ContentBounds {
     }
 };
 
-void set_length(flexUI::CssSize& size, float value) {
-    size.kind = flexUI::CssSizeKind::Length;
-    size.value = value;
-    size.expression.clear();
+// All DOT geometry/paint is projected into the immutable typed UiDocument
+// before any Box ownership; no live Element setters or hidden second tree.
+flexUI::UiNodePresentation dot_bounds(float x, float y, float w, float h,
+                                     bool absolute = true) {
+    flexUI::UiNodePresentation p;
+    p.has_bounds = true;
+    p.absolute = absolute;
+    p.relative = !absolute;
+    p.x = x;
+    p.y = y;
+    p.width = w;
+    p.height = h;
+    return p;
 }
 
-void set_box_size(flexUI::Element& element, float width, float height) {
-    auto& style = element.style_;
-    set_length(style.width_size, width);
-    set_length(style.height_size, height);
-    style.width = width;
-    style.height = height;
-    style.width_is_percent = false;
-    style.height_is_percent = false;
-    element.set_layout_size(width, height);
-}
-
-void set_absolute_box(flexUI::Element& element, float x, float y,
-                      float width, float height) {
-    auto& style = element.style_;
-    style.position = flexUI::Position::Absolute;
-    style.left = x;
-    style.top = y;
-    style.right = NAN;
-    style.bottom = NAN;
-    set_box_size(element, width, height);
-    element.set_position_mode(flex::PositionMode::Absolute);
-    element.set_position_offsets(y, NAN, NAN, x);
-    element.set_position(x, y);
-}
-
-void set_uniform_border(flexUI::ComputedStyle& style, const flex::Color& color,
-                        float width, flexUI::BorderStyle border_style) {
-    style.border_color = color;
-    style.has_border_side_colors = true;
-    for (size_t i = 0; i < 4; ++i) {
-        style.border_colors[i] = color;
-        style.border_width[i] = width;
-        style.border_style[i] = border_style;
-    }
+void set_border(flexUI::UiNodePresentation& p,
+                const flex::Color& color, float width,
+                flexUI::BorderStyle style) {
+    p.border_color = color;
+    p.border_width = width;
+    p.border_style = style;
 }
 
 flexUI::BorderStyle resolve_border_style(const std::string& style) {
@@ -385,24 +369,73 @@ ViewTransform make_view_transform(const LayoutSnapshot& snapshot,
     };
 }
 
-flexUI::Element* create_label(flexUI::Box& box, const char* tag,
-                              const std::string& text, float x, float y,
-                              float width, float height,
-                              const std::string& font_family, float font_size,
-                              const flex::Color& color) {
-    auto* label = box.create(tag);
-    label->add_class("dot-label");
-    label->set_attribute("data-slot", tag);
-    label->add_utilities("absolute flex items-center justify-center text-sm");
-    label->set_text(text);
-    set_absolute_box(*label, x, y, width, height);
-    label->style_.font_family = font_family;
-    label->style_.font_size = font_size;
-    label->style_.text_color = color;
-    label->set_custom_property("--dot-label-color", css_color(color));
-    label->style_.text_align = flexUI::TextAlign::Center;
-    label->set_z_index(1);
-    return label;
+flexUI::UiNodeDefinition make_label_definition(
+    const char* tag, const std::string& text, float x, float y,
+    float width, float height, const std::string& font_family,
+    float font_size, const flex::Color& color) {
+    flexUI::UiNodeDefinition result;
+    result.tag = tag;
+    result.properties["class"] = "dot-label " + std::string(tag);
+    result.properties["attr.data-slot"] = std::string(tag);
+    result.properties["utility"] = std::string(
+        "absolute flex items-center justify-center text-sm");
+    result.properties["text"] = text;
+    auto p = dot_bounds(x, y, width, height);
+    p.font_family = font_family;
+    p.font_size = font_size;
+    p.text_color = color;
+    p.text_align = flexUI::TextAlign::Center;
+    p.z_index = 1;
+    result.presentation = std::move(p);
+    return result;
+}
+
+struct DotEdgePrepared {
+    std::vector<Point> points;
+    bool directed = false;
+};
+
+struct DotWidgetCatalog {
+    std::unordered_map<std::string, DotGraphShape> nodes;
+    std::unordered_map<std::string, DotEdgePrepared> edges;
+};
+
+void require_registered(flexUI::WidgetRegistryError error) {
+    if (error) {
+        throw std::logic_error("DOT native UI registry: " + error.message);
+    }
+}
+
+flexUI::WidgetRegistry dotgraph_registry(
+    const std::shared_ptr<const DotWidgetCatalog>& catalog) {
+    auto registry = flexUI::WidgetRegistry::builtins();
+    require_registered(registry.register_element(
+        "dotgraph", flexUI::UiContentModel::Children));
+    require_registered(registry.register_element(
+        "dot-cluster", flexUI::UiContentModel::Children));
+    for (const auto* tag : {
+             "dot-cluster-label", "dot-edge-label", "dot-node-label"}) {
+        require_registered(registry.register_element(
+            tag, flexUI::UiContentModel::Text));
+    }
+    require_registered(registry.register_widget(
+        "dot-node", [catalog](const flexUI::UiNodeDefinition &node) {
+            auto found = catalog->nodes.find(node.native_widget_key);
+            if (found == catalog->nodes.end()) {
+                throw std::invalid_argument("DOT native node shape missing");
+            }
+            return std::make_unique<DotNodeWidget>(found->second);
+        }, flexUI::UiContentModel::Children));
+    require_registered(registry.register_widget(
+        "dot-edge", [catalog](const flexUI::UiNodeDefinition &node) {
+            auto found = catalog->edges.find(node.native_widget_key);
+            if (found == catalog->edges.end()) {
+                throw std::invalid_argument("DOT native edge path missing");
+            }
+            return std::make_unique<DotEdgeWidget>(
+                found->second.points, found->second.directed);
+        }, flexUI::UiContentModel::Children));
+    return registry;
 }
 
 void validate_options(const FlexUiDotGraphOptions& options) {
@@ -425,52 +458,54 @@ flexUI::Element* create_flexui_dotgraph(
     const FlexUiDotGraphOptions& options) {
     validate_options(options);
     const ViewTransform transform = make_view_transform(snapshot, options);
-
-    auto* root = box.create("dotgraph");
-    root->add_class("dotgraph");
-    root->set_attribute("data-slot", "dotgraph");
-    root->set_attribute("role", "graphics-document");
-    root->set_attribute("data-render-mode", "tree");
-    root->add_utilities("relative overflow-hidden");
-    root->style_.position = flexUI::Position::Relative;
-    root->style_.overflow_x = flexUI::Overflow::Hidden;
-    root->style_.overflow_y = flexUI::Overflow::Hidden;
+    auto definition = charts::ui::dotgraph_frame_definition();
+    auto& root = definition.root;
+    auto root_style = dot_bounds(0.0f, 0.0f, options.width, options.height, false);
+    root_style.clipped = true;
     if (const auto background = snapshot.graph_extra.find("bgcolor");
         background != snapshot.graph_extra.end()) {
-        root->set_attribute("data-dot-bgcolor", background->second);
-        root->set_custom_property("--dot-background", background->second);
-        root->style_.background_color = parse_dot_color(
+        root.properties["attr.data-dot-bgcolor"] = background->second;
+        root.properties["var.dot-background"] = background->second;
+        root_style.background_color = parse_dot_color(
             background->second, flex::Color::White);
     }
-    set_box_size(*root, options.width, options.height);
-    root->set_clip(true);
+    root.presentation = std::move(root_style);
+
+    // Registry factories receive only immutable native identifiers and
+    // precomputed shapes/edge paths. Multiple graph instances never share
+    // mutable layout/Widget maps or a second Element ownership tree.
+    auto catalog = std::make_shared<DotWidgetCatalog>();
+    root.children.reserve(snapshot.clusters.size() + snapshot.edges.size() +
+                          snapshot.nodes.size());
 
     for (const auto& cluster : snapshot.clusters) {
         const Point top_left = transform.map({cluster.x, cluster.y});
         const float width = static_cast<float>(cluster.width) * transform.scale;
         const float height = static_cast<float>(cluster.height) * transform.scale;
-        auto* element = box.create(
-            "dot-cluster", element_id("cluster-", cluster.id));
-        element->add_class("dot-cluster");
-        element->set_attribute("data-slot", "dotgraph-cluster");
-        element->add_utility("absolute");
-        element->set_attribute("data-cluster-id", cluster.id);
-        element->set_attribute("data-dot-color", cluster.color);
-        element->set_attribute("data-dot-style", cluster.style);
-        element->set_custom_property("--dot-stroke", cluster.color);
-        set_absolute_box(*element, static_cast<float>(top_left.x),
-                         static_cast<float>(top_left.y), width, height);
-        element->style_.background_color = flex::Color::Transparent;
-        set_uniform_border(element->style_,
-                           parse_dot_color(cluster.color,
-                                           flex::Color(0.61f, 0.64f, 0.69f)),
-                           kDefaultStrokeWidth,
-                           resolve_border_style(cluster.style));
-        element->set_z_index(0);
+        flexUI::UiNodeDefinition element;
+        element.tag = "dot-cluster";
+        element.id = element_id("cluster-", cluster.id);
+        element.properties["class"] = std::string("dot-cluster");
+        element.properties["utility"] = std::string("absolute");
+        element.properties["attr.data-slot"] = std::string("dotgraph-cluster");
+        element.properties["attr.data-cluster-id"] = cluster.id;
+        element.properties["attr.data-dot-color"] = cluster.color;
+        element.properties["attr.data-dot-style"] = cluster.style;
+        element.properties["var.dot-stroke"] = cluster.color;
+        auto p = dot_bounds(
+            static_cast<float>(top_left.x), static_cast<float>(top_left.y),
+            width, height);
+        p.background_color = flex::Color::Transparent;
+        set_border(p,
+                   parse_dot_color(cluster.color,
+                                   flex::Color(0.61f, 0.64f, 0.69f)),
+                   kDefaultStrokeWidth, resolve_border_style(cluster.style));
+        p.z_index = 0;
+        element.presentation = std::move(p);
         if (!cluster.label.empty()) {
             const float label_height = options.font_size * transform.scale + 4.0f;
-            auto* label = create_label(
-                box, "dot-cluster-label", cluster.label, 0.0f, 0.0f, width,
+            auto label = make_label_definition(
+                "dot-cluster-label", cluster.label, 0.0f, 0.0f, width,
                 label_height, options.font_family,
                 options.font_size * transform.scale,
                 parse_dot_color(
@@ -478,26 +513,32 @@ flexUI::Element* create_flexui_dotgraph(
                         ? cluster.extra.at("label_fontcolor")
                         : std::string("#374151"),
                     flex::Color(0.22f, 0.25f, 0.32f)));
-            label->add_class("dot-cluster-label");
-            element->add_child(label);
+            element.children.push_back(std::move(label));
         }
-        root->add_child(element);
+        root.children.push_back(std::move(element));
     }
 
+    std::size_t edge_index = 0;
     for (const auto& edge : snapshot.edges) {
         if (edge.points.size() < 2) continue;
+        // Bound the geometry before copying it into the native widget.
+        if (edge.points.size() > 16384) {
+            throw std::invalid_argument("DOT native edge has too many points");
+        }
         std::vector<Point> mapped;
         mapped.reserve(edge.points.size());
         ContentBounds bounds;
         for (const auto& point : edge.points) {
             Point output = transform.map(point);
+            if (!std::isfinite(output.x) || !std::isfinite(output.y)) {
+                throw std::invalid_argument("DOT edge point is nonfinite");
+            }
             mapped.push_back(output);
             bounds.include(output.x, output.y);
         }
         const float pen_width = std::max(
             parse_finite_float(edge.extra, "penwidth", kDefaultStrokeWidth) *
-                transform.scale,
-            0.5f);
+                transform.scale, 0.5f);
         const float padding = std::max(kArrowLength, pen_width * 2.0f);
         const float left = static_cast<float>(bounds.min_x) - padding;
         const float top = static_cast<float>(bounds.min_y) - padding;
@@ -509,111 +550,133 @@ flexUI::Element* create_flexui_dotgraph(
             point.x -= left;
             point.y -= top;
         }
-
-        auto widget = std::make_unique<DotEdgeWidget>(mapped, edge.directed);
-        auto* element = box.create_with_widget("dot-edge", std::move(widget));
-        element->add_class("dot-edge");
-        element->set_attribute("data-slot", "dotgraph-edge");
-        element->add_utility("absolute");
-        element->set_attribute("data-from", edge.from);
-        element->set_attribute("data-to", edge.to);
-        element->set_attribute("data-directed", edge.directed ? "true" : "false");
-        element->set_attribute("data-dot-color", edge.color);
-        element->set_attribute("data-dot-style", edge.style);
-        element->set_custom_property("--dot-stroke", edge.color);
-        set_absolute_box(*element, left, top, width, height);
-        element->style_.background_color = flex::Color::Transparent;
-        set_uniform_border(element->style_,
-                           parse_dot_color(edge.color,
-                                           flex::Color(0.29f, 0.33f, 0.39f)),
-                           pen_width, flexUI::BorderStyle::Solid);
-        element->set_z_index(1);
-        const float opacity = parse_finite_float(edge.extra, "opacity", 1.0f);
-        element->style_.opacity = std::clamp(opacity, 0.0f, 1.0f);
-
+        const std::string key = "edge-" + std::to_string(edge_index++);
+        catalog->edges.emplace(
+            key, DotEdgePrepared{mapped, edge.directed});
+        flexUI::UiNodeDefinition element;
+        element.tag = "dot-edge";
+        element.native_widget_key = key;
+        element.properties["class"] = std::string("dot-edge");
+        element.properties["utility"] = std::string("absolute");
+        element.properties["attr.data-slot"] = std::string("dotgraph-edge");
+        element.properties["attr.data-from"] = edge.from;
+        element.properties["attr.data-to"] = edge.to;
+        element.properties["attr.data-directed"] =
+            std::string(edge.directed ? "true" : "false");
+        element.properties["attr.data-dot-color"] = edge.color;
+        element.properties["attr.data-dot-style"] = edge.style;
+        element.properties["var.dot-stroke"] = edge.color;
+        auto p = dot_bounds(left, top, width, height);
+        p.background_color = flex::Color::Transparent;
+        set_border(p, parse_dot_color(
+                       edge.color, flex::Color(0.29f, 0.33f, 0.39f)),
+                   pen_width, flexUI::BorderStyle::Solid);
+        p.z_index = 1;
+        p.opacity = std::clamp(
+            parse_finite_float(edge.extra, "opacity", 1.0f), 0.0f, 1.0f);
+        element.presentation = std::move(p);
         if (!edge.label.empty()) {
             const Point first = mapped.front();
             const Point last = mapped.back();
             const float label_font_size = options.font_size * transform.scale;
-            const float label_width =
-                std::max(static_cast<float>(edge.label.size()) *
-                             label_font_size * 0.6f + kEdgeLabelPadding,
-                         label_font_size);
+            const float label_width = std::max(
+                static_cast<float>(edge.label.size()) *
+                    label_font_size * 0.6f + kEdgeLabelPadding,
+                label_font_size);
             const float label_height = label_font_size + kEdgeLabelHeightPadding;
-            auto* label = create_label(
-                box, "dot-edge-label", edge.label,
-                static_cast<float>((first.x + last.x) * 0.5) - label_width * 0.5f,
-                static_cast<float>((first.y + last.y) * 0.5) - label_height * 0.5f,
-                label_width, label_height, options.font_family, label_font_size,
+            auto label = make_label_definition(
+                "dot-edge-label", edge.label,
+                static_cast<float>((first.x + last.x) * 0.5) -
+                    label_width * 0.5f,
+                static_cast<float>((first.y + last.y) * 0.5) -
+                    label_height * 0.5f,
+                label_width, label_height, options.font_family,
+                label_font_size,
                 parse_dot_color(
                     edge.extra.count("label_fontcolor")
-                        ? edge.extra.at("label_fontcolor")
-                        : edge.color,
+                        ? edge.extra.at("label_fontcolor") : edge.color,
                     flex::Color(0.29f, 0.33f, 0.39f)));
-            label->add_class("dot-edge-label");
-            label->style_.background_color = flex::Color::White;
-            for (float& radius : label->style_.border_radius) radius = 3.0f;
-            element->add_child(label);
+            label.presentation->background_color = flex::Color::White;
+            label.presentation->border_radius = 3.0f;
+            element.children.push_back(std::move(label));
         }
-        root->add_child(element);
+        root.children.push_back(std::move(element));
     }
 
+    std::size_t node_index = 0;
     for (const auto& node : snapshot.nodes) {
         const Point top_left = transform.map({node.x, node.y});
         const float width = static_cast<float>(node.width) * transform.scale;
         const float height = static_cast<float>(node.height) * transform.scale;
-        auto widget = std::make_unique<DotNodeWidget>(node.shape);
-        auto* element = box.create_with_widget(
-            "dot-node", std::move(widget), element_id("node-", node.id));
-        element->add_class("dot-node");
-        element->add_class(std::string("shape-") + shape_name(node.shape));
-        element->set_attribute("data-slot", "dotgraph-node");
-        element->add_utility("absolute");
-        element->set_attribute("data-node-id", node.id);
-        element->set_attribute("data-shape", shape_name(node.shape));
-        element->set_attribute("data-dot-color", node.color);
-        element->set_attribute("data-dot-fill", node.fillcolor);
-        element->set_attribute("data-dot-font-color", node.fontcolor);
-        element->set_attribute("data-dot-style", node.style);
-        element->set_custom_property("--dot-fill", node.fillcolor);
-        element->set_custom_property("--dot-stroke", node.color);
-        element->set_custom_property("--dot-text", node.fontcolor);
-        set_absolute_box(*element, static_cast<float>(top_left.x),
-                         static_cast<float>(top_left.y), width, height);
-        element->style_.background_color = parse_dot_color(
+        const std::string key = "node-" + std::to_string(node_index++);
+        catalog->nodes.emplace(key, node.shape);
+        flexUI::UiNodeDefinition element;
+        element.tag = "dot-node";
+        element.id = element_id("node-", node.id);
+        element.native_widget_key = key;
+        element.properties["class"] =
+            std::string("dot-node shape-") + shape_name(node.shape);
+        element.properties["utility"] = std::string("absolute");
+        element.properties["attr.data-slot"] = std::string("dotgraph-node");
+        element.properties["attr.data-node-id"] = node.id;
+        element.properties["attr.data-shape"] = std::string(shape_name(node.shape));
+        element.properties["attr.data-dot-color"] = node.color;
+        element.properties["attr.data-dot-fill"] = node.fillcolor;
+        element.properties["attr.data-dot-font-color"] = node.fontcolor;
+        element.properties["attr.data-dot-style"] = node.style;
+        element.properties["var.dot-fill"] = node.fillcolor;
+        element.properties["var.dot-stroke"] = node.color;
+        element.properties["var.dot-text"] = node.fontcolor;
+        auto p = dot_bounds(
+            static_cast<float>(top_left.x), static_cast<float>(top_left.y),
+            width, height);
+        p.background_color = parse_dot_color(
             node.fillcolor, flex::Color(0.91f, 0.91f, 1.0f));
         const float pen_width = std::max(
             parse_finite_float(node.extra, "penwidth", kDefaultStrokeWidth) *
-                transform.scale,
-            0.5f);
-        set_uniform_border(element->style_,
-                           parse_dot_color(node.color,
-                                           flex::Color(0.29f, 0.33f, 0.39f)),
-                           pen_width, resolve_border_style(node.style));
-        const float radius = (node.shape == DG_SHAPE_ELLIPSE ||
-                              node.shape == DG_SHAPE_CIRCLE ||
-                              node.shape == DG_SHAPE_DOUBLECIRCLE)
-                                 ? std::min(width, height) * 0.5f
-                                 : 0.0f;
-        for (float& corner : element->style_.border_radius) corner = radius;
-        element->style_.opacity = std::clamp(
+                transform.scale, 0.5f);
+        set_border(p, parse_dot_color(
+                       node.color, flex::Color(0.29f, 0.33f, 0.39f)),
+                   pen_width, resolve_border_style(node.style));
+        p.border_radius =
+            (node.shape == DG_SHAPE_ELLIPSE || node.shape == DG_SHAPE_CIRCLE ||
+             node.shape == DG_SHAPE_DOUBLECIRCLE)
+                ? std::min(width, height) * 0.5f : 0.0f;
+        p.opacity = std::clamp(
             parse_finite_float(node.extra, "opacity", 1.0f), 0.0f, 1.0f);
-        element->set_z_index(2);
-
+        p.z_index = 2;
+        element.presentation = std::move(p);
         if (!node.label.empty()) {
-            auto* label = create_label(
-                box, "dot-node-label", node.label, 0.0f, 0.0f, width, height,
+            auto label = make_label_definition(
+                "dot-node-label", node.label, 0.0f, 0.0f, width, height,
                 options.font_family, options.font_size * transform.scale,
                 parse_dot_color(node.fontcolor,
                                 flex::Color(0.12f, 0.16f, 0.22f)));
-            label->add_class("dot-node-label");
-            label->set_attribute("aria-hidden", "true");
-            element->add_child(label);
+            label.properties["attr.aria-hidden"] = std::string("true");
+            element.children.push_back(std::move(label));
         }
-        root->add_child(element);
+        root.children.push_back(std::move(element));
     }
 
-    return root;
+    // Whole-tree validation (limits, ids, typed style) and all registered
+    // Widget factories happen before a single Box ownership commit.
+    auto compiled = flexUI::compile_ui_definition(std::move(definition));
+    if (!compiled) {
+        throw std::invalid_argument(
+            "DOT native UI definition rejected: " + compiled.error.message);
+    }
+    const auto registry = dotgraph_registry(catalog);
+    flexUI::UiMountOptions mount;
+    mount.mode = flexUI::UiMountMode::DetachedFragment;
+    mount.id_policy = flexUI::UiIdPolicy::Global; // preserve #node-B selectors
+    mount.required_slots = {"dotgraph"};
+    auto installed = flexUI::UiDocumentInstantiator::instantiate(
+        box, *compiled.program, registry, mount);
+    if (!installed) {
+        throw std::invalid_argument(
+            "DOT native UI assembly rejected: " + installed.error.message);
+    }
+    return installed.tree.root;
 }
 
 FlexUiDotGraphResult create_flexui_dotgraph(
