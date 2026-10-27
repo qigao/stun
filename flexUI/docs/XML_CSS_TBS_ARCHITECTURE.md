@@ -3,6 +3,32 @@
 状态：架构决策已采用，实施与验收按下列工作项推进
 日期：2026-08-31
 
+## 2026-10-27 P4.1 组件作用域候选（Draft PR #282）
+
+此阶段基于已合并的 Chart/Infographic/DOT XML 事务装配与完整 DOT
+源码→GraphLayout→Widget 测试。**PR #282 尚在 CI 验收，下面是候选 API，不代表已发布。**
+
+- `DesktopApplicationBuilder::scoped_xml_component(scope, host_id, xml)` 仅在应用
+  **首次挂载/完整 reload 前**组合组件；宿主必须是根 XML 中已存在的结构节点。
+  各个组件的 `id="action"` 编译为 `sales::action` / `costs::action`；
+  事件、binding 目标、`for`、局部 `href="#id"` 和 ARIA IDREF 同步限定作用域。
+- 所有 `on:*` 事件归于**同一个** `CompiledUiProgram` 和 `ScriptController`；
+  UI Mutation / Application Command 仍按原本预留→提交→发布的顺序进行。
+- 对跨实例输入共享采用**显式应用级**声明，例如
+  `builder.binding_input_string("caption", "Ready")`，在 UI 事务挂载前创建
+  `UiDataContext` 的类型化输入。组件的 `bind:text="$caption"` 指向该应用级输入；
+  两个组件若要独立值应声明不同输入名称，而非假定存在隐式组件私有数据源。
+  还提供 `binding_input_number` 和 `binding_input_bool`。配置中的同名输入、
+  超限字符串、非有限数字在候选发布前拒绝。
+- `slot` 保持实例局部语义，静态组合仅把重复的 slot 降为 `data-slot`，
+  不在全局建立重复 Slot 键。每个节点的真实身份仍归 Box 唯一索引管理。
+- **禁止**动态逐组件脚本注册/卸载、组件独立权限、安全隔离、未声明资源跨实例
+  共享与动态 input 自动命名。这些需要额外的生命周期与所有权契约，
+  不能仅凭作用域 ID 或一个通过的渲染测试放行。
+
+这个方案继续使用原生 XML + StyleEngine/TailwindCSS JIT + TurboScript Host ABI；
+没有 BytesVM、浏览器 DOM、WebView 或第二份 UI 树。
+
 ## 2026-10-22 实施范围与目标契约
 
 以下区分已合并源码与长期设计；后文的架构决策不代表全部能力已经验收。
