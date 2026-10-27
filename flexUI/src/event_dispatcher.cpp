@@ -364,6 +364,15 @@ void EventDispatcher::dispatch(Event &event, Element *root) {
   if (!root)
     return;
 
+  // Any native callback may synchronously reenter application code. Keep
+  // destructive Box retirement disabled until ALL ancestors and widget
+  // pointers used by this event have returned, including on exceptions.
+  struct DispatchGuard {
+    std::size_t &depth;
+    explicit DispatchGuard(std::size_t &value) noexcept : depth(value) { ++depth; }
+    ~DispatchGuard() { --depth; }
+  } guard(dispatch_depth_);
+
   if (event.type == EventType::KeyDown || event.type == EventType::KeyUp ||
       event.type == EventType::TextInput || event.type == EventType::CompositionStart ||
       event.type == EventType::CompositionUpdate || event.type == EventType::CompositionEnd) {

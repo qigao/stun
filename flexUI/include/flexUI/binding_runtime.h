@@ -127,6 +127,9 @@ class UiBindingRuntime {
   const UiBindingTargets& targets() const;
 
   bool update();
+  /// Allocation-free target-ownership query used by Box retirement preflight.
+  /// The pointer is compared by identity and is never dereferenced.
+  bool has_binding_target(const Element *element) const noexcept;
   UiBindingStats stats() const;
   std::uint64_t expression_compile_count() const;
 

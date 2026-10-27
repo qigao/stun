@@ -130,6 +130,23 @@ public:
   // detached roots using Element::replace_children(). On admission failure,
   // the caller retains and destroys the staged nodes.
   void adopt_detached_elements(std::vector<std::unique_ptr<Element>> &&elements);
+
+  /// Retire exactly one currently mounted, application-owned structural
+  /// subtree in place. This M0 lifetime primitive is ONLY for unbound,
+  /// widget-free, compiled-event-free nodes. All other cases fail closed:
+  /// a mounted ScriptController / binding / Widget cannot be retired through
+  /// this API. It also refuses during event dispatch or if any node holds
+  /// focus, hover, active input or mouse capture.
+  ///
+  /// After success, borrowed Element pointers are invalid and any previous
+  /// UiHandles (including descendant IDs) fail resolution. Sibling pointers
+  /// and their handle generations remain unchanged. This operation does
+  /// not update a CompiledUiProgram or component configuration and MUST NOT
+  /// be used as dynamic script-component unregister.
+  /// Preflight allocates before the non-allocating detach/index/cache commit;
+  /// failure does not remove elements from the tree.
+  bool retire_unbound_structural_subtree(const std::string &root_id) noexcept;
+
   // Diagnostics only; includes the Box-owned widget projections.
   std::size_t owned_element_count() const noexcept { return elements_.size(); }
   // Diagnostic count of pointer-keyed CSS baseline objects retained in Box.
