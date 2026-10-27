@@ -2,6 +2,7 @@
 #include <flexUI/box_mutation_host.h>
 #include <flexUI/controller.h>
 #include <flexUI/ui_xml.h>
+#include <flexUI/widget_registry.h>
 
 #include <tinytest.hpp>
 
