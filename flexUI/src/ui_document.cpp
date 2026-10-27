@@ -1190,6 +1190,19 @@ UiDocumentCompileResult compile_scoped_ui_components(
     }
 
     UiNodeDefinition subtree = instance.program->definition().root;
+    // Validate local semantic references against this one immutable component
+    // before qualifying IDs. Never silently link a label/ARIA target from one
+    // instance to another instance or to an application-global element.
+    std::unordered_set<std::string> local_ids;
+    {
+      std::vector<const UiNodeDefinition *> pending{&subtree};
+      while (!pending.empty()) {
+        const auto *node = pending.back();
+        pending.pop_back();
+        if (!node->id.empty()) local_ids.insert(node->id);
+        for (const auto &child : node->children) pending.push_back(&child);
+      }
+    }
     std::vector<UiNodeDefinition *> nodes{&subtree};
     while (!nodes.empty()) {
       UiNodeDefinition *node = nodes.back();
@@ -1211,6 +1224,51 @@ UiDocumentCompileResult compile_scoped_ui_components(
           return result;
         }
         node->id = instance.scope + "::" + node->id;
+      }
+      // Semantic IDREF attributes, including multi-token ARIA references,
+      // must point to this component's OWN known IDs. External URLs remain
+      // ordinary URLs; fragment links (#id) refer to qualified local IDs.
+      for (auto &[name, value] : node->properties) {
+        const bool multiple = name == "attr.aria-labelledby" ||
+                              name == "attr.aria-describedby" ||
+                              name == "attr.aria-controls" ||
+                              name == "attr.aria-owns";
+        const bool single = name == "attr.for" ||
+                            name == "attr.list" ||
+                            name == "attr.aria-activedescendant";
+        const bool href = name == "attr.href";
+        if (!multiple && !single && !href) continue;
+        const auto *ref = std::get_if<std::string>(&value);
+        if (!ref) {
+          result.error = make_error(UiDocumentErrorCode::InvalidProperty,
+                                    "component IDREF attribute must be a string");
+          return result;
+        }
+        if (href && (ref->empty() || ref->front() != '#')) continue;
+        const std::string raw = href ? ref->substr(1) : *ref;
+        std::istringstream tokens(raw);
+        std::string id;
+        std::string qualified;
+        std::size_t count = 0;
+        while (tokens >> id) {
+          if (local_ids.count(id) == 0 ||
+              id.size() + instance.scope.size() + 2 >
+                  limits.max_string_bytes) {
+            result.error = make_error(
+                UiDocumentErrorCode::InvalidComponentScope,
+                "component IDREF must resolve inside the same scope: " + id);
+            return result;
+          }
+          if (++count > 1) qualified += " ";
+          qualified += instance.scope + "::" + id;
+        }
+        if (count == 0 || (!multiple && count != 1)) {
+          result.error = make_error(
+              UiDocumentErrorCode::InvalidProperty,
+              "component IDREF requires valid local target IDs");
+          return result;
+        }
+        value = href ? "#" + qualified : qualified;
       }
       // The same template can appear more than once in a single program.
       // Its slot names stay available to CSS/semantic matching via
