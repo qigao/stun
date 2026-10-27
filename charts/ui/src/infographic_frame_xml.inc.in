@@ -1,0 +1,5 @@
+// CMake-generated from assets/infographic_frame.ui.xml.
+#pragma once
+static constexpr char kInfographicFrameXml[] = R"stunxml(
+@INFOGRAPHIC_FRAME_XML_SOURCE@
+)stunxml";
