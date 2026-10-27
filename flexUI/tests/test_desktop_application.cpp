@@ -1920,6 +1920,9 @@ spec("Desktop XML components share one native ScriptController and Effects engin
         "sale::action", flexUI::UiEventKind::KeyDown));
 
     check(app.reload({root, "", "valid-controller", "event-routes-new-generation"}));
+    // A detached reload publishes fresh typed input seeds; their native
+    // Binding projections run in the ordinary Box update stage.
+    app.box().update();
     check_equal(app.generation(), generation + 1);
     check(app.controller()->has_active_event_binding(
         "sales::action", flexUI::UiEventKind::KeyDown));
