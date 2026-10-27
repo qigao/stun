@@ -45,6 +45,10 @@ add_subdirectory("${STUN_ROOT}/tango" tango)
 add_subdirectory("${STUN_ROOT}/flex" flex)
 add_subdirectory("${STUN_ROOT}/flexUI" flexUI)
 target_link_libraries(flexUI PRIVATE Stun::UICore)
+# Link the SAME native graph placement and route algorithms used by the
+# production DotGraphRenderer; configure these targets while BUILD_TESTING
+# is OFF to avoid unrelated GraphLayout test duplication in this focused gate.
+add_subdirectory("${STUN_ROOT}/shared/layout" graphlayout)
 
 set(BUILD_TESTING ON)
 add_custom_target(stun_xml_runtime_qualification)
@@ -62,6 +66,14 @@ endforeach()
 # Avoid a chart-specific implementation or mock Box in qualification.
 add_subdirectory("${STUN_ROOT}/charts/ui" chart_ui)
 add_dependencies(stun_xml_runtime_qualification chart_ui_test)
+
+# Production DOT parser (re2c + lemon), GraphLayout-backed renderer, source
+# facade and native XML snapshot builder are linked in this exact same target.
+# This is an end-to-end source→AST→layout→UiDocument→Widget acceptance, not
+# a new parser, mock box, duplicate algorithm or standalone fake renderer.
+add_subdirectory("${STUN_ROOT}/charts/dotgraph" dotgraph)
+add_dependencies(stun_xml_runtime_qualification dotgraph_parser_test)
+
 
 # Compile the real production FlexChart→XML adapter against published SDKs,
 # even though parser/mark DSL test assets are deliberately not linked into
@@ -89,40 +101,17 @@ add_dependencies(stun_xml_runtime_qualification
     stun_infographic_ui_adapter_compile)
 add_dependencies(chart_ui_test stun_infographic_ui_adapter_compile)
 
-# Compile and RUN the actual native DOT LayoutSnapshot→Xml→Element/Widget
-# projection without linking a separate parser or GraphLayout implementation.
-# The DOT parser source adapter is still owned by charts/dotgraph; this test
-# verifies every node, edge, cluster, label, CSS selector and rollback through
-# the production snapshot builder on Linux ASan/LSan and Windows/macOS.
-add_library(stun_dotgraph_xml_snapshot OBJECT
-    "${STUN_ROOT}/charts/dotgraph/src/flexui_dotgraph_snapshot.cpp")
-target_include_directories(stun_dotgraph_xml_snapshot PRIVATE
-    "${STUN_ROOT}/charts/dotgraph/include")
-target_link_libraries(stun_dotgraph_xml_snapshot PRIVATE chart_ui flex)
+# The snapshot→XML widget test now links the production flex_dotgraph_adapter.
+# It directly exercises typed geometry, real widget rendering and rollback;
+# DotGraphParserTest separately exercises the entire DOT text/parser/layout
+# path through that SAME adapter and its registered CSS/semantic Elements.
 add_executable(test_dotgraph_ui_xml
-    "${STUN_ROOT}/charts/dotgraph/tests/test_dotgraph_ui_xml.cpp"
-    $<TARGET_OBJECTS:stun_dotgraph_xml_snapshot>)
-target_include_directories(test_dotgraph_ui_xml PRIVATE
-    "${STUN_ROOT}/charts/dotgraph/include")
+    "${STUN_ROOT}/charts/dotgraph/tests/test_dotgraph_ui_xml.cpp")
 target_link_libraries(test_dotgraph_ui_xml PRIVATE
-    chart_ui flex Salts::TinyTest)
+    flex_dotgraph_adapter chart_ui flex Salts::TinyTest)
 add_test(NAME DotGraphXmlTest COMMAND test_dotgraph_ui_xml)
 set_tests_properties(DotGraphXmlTest PROPERTIES TIMEOUT 120)
 add_dependencies(stun_xml_runtime_qualification test_dotgraph_ui_xml)
-add_dependencies(chart_ui_test test_dotgraph_ui_xml)
-
-# The public DOT-source parsing facade remains a separate production source
-# file after extracting snapshot composition. Compile it across every
-# installed-SDK host, even where the full C DOT parser/GraphLayout libraries
-# are not linked into the minimal headless test executable.
-add_library(stun_dotgraph_source_facade_compile OBJECT
-    "${STUN_ROOT}/charts/dotgraph/src/flexui_dotgraph.cpp")
-target_include_directories(stun_dotgraph_source_facade_compile PRIVATE
-    "${STUN_ROOT}/charts/dotgraph/include")
-target_link_libraries(stun_dotgraph_source_facade_compile PRIVATE chart_ui flex)
-add_dependencies(stun_xml_runtime_qualification
-    stun_dotgraph_source_facade_compile)
-add_dependencies(chart_ui_test stun_dotgraph_source_facade_compile)
 
 # The MarkdownWidget streaming consumer contract must run in the focused
 # headless production-runtime gate; parser conformance alone does not exercise

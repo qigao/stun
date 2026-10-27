@@ -336,6 +336,85 @@ spec("dotgraph") {
             check_not_null(box.query_selector(".dot-edge-label"));
         }
 
+        it("runs real DOT source through GraphLayout and XML widgets with rollback") {
+            flexUI::Box box(nullptr);
+            auto* page = box.create("main", "existing-page");
+            auto* sibling = box.create("span", "existing-control");
+            page->append(sibling);
+            box.set_root(page);
+
+            dotgraph::FlexUiDotGraphOptions options;
+            options.width = 430.0f;
+            options.height = 290.0f;
+            options.routing_mode = DG_ROUTE_ORTHOGONAL;
+
+            const std::string source =
+                "digraph { subgraph cluster_group { label=\"Group\"; "
+                "A [shape=diamond fillcolor=\"#ccddff\"]; } "
+                "A -> B [label=\"go\"]; }";
+            const auto good = dotgraph::create_flexui_dotgraph(
+                box, source, options);
+            check_true(good.error.empty());
+            check(static_cast<bool>(good));
+            check_not_null(good.root);
+            // The root is a detached but Box-owned transaction until the
+            // caller attaches it; pre-existing visible siblings are intact.
+            check_true(box.root() == page);
+            check_true(page->child_count() == 1U);
+            check_true(page->child_at(0) == sibling);
+
+            page->append(good.root);
+            box.set_viewport(options.width, options.height);
+            box.load_css(
+                ".dot-node[data-node-id=\"A\"] { background-color: #224466; } "
+                ".dot-edge[data-from=\"A\"][data-to=\"B\"] "
+                "{ border-color: #778899; }");
+            box.update();
+            auto* a = box.query_selector("#node-A");
+            auto* b = box.query_selector("#node-B");
+            auto* edge = box.query_selector(
+                ".dot-edge[data-from=\"A\"][data-to=\"B\"]");
+            check_not_null(a);
+            check_not_null(b);
+            check_not_null(edge);
+            check_not_null(a->widget);
+            check_not_null(edge->widget);
+            check_true(a == box.query_selector(
+                ".dot-node[data-node-id=\"A\"]"));
+            check_true(a->style_.background_color.r > 0.12f);
+            check_true(a->style_.background_color.r < 0.15f);
+            check_true(box.missing_utility_tokens().empty());
+
+            const auto before = box.owned_element_count();
+            const auto children = page->child_count();
+            const auto invalid_source = dotgraph::create_flexui_dotgraph(
+                box, "digraph { A -> ; }", options);
+            check_false(static_cast<bool>(invalid_source));
+            check_false(invalid_source.error.empty());
+            check_true(box.owned_element_count() == before);
+            check_true(page->child_count() == children);
+
+            // A second full parse/layout of the same IDs must be rejected
+            // in the global ID preflight, with no partial Widget admission.
+            const auto conflicting = dotgraph::create_flexui_dotgraph(
+                box, source, options);
+            check_false(static_cast<bool>(conflicting));
+            check_false(conflicting.error.empty());
+            check_true(box.owned_element_count() == before);
+            check_true(box.root() == page);
+            check_true(page->child_count() == children);
+            check_true(box.get_by_id("node-A") == a);
+
+            const auto recovered = dotgraph::create_flexui_dotgraph(
+                box, "digraph { C -> D; }", options);
+            check_true(recovered.error.empty());
+            check(static_cast<bool>(recovered));
+            page->append(recovered.root);
+            box.update();
+            check_not_null(box.query_selector("#node-D"));
+            check_true(page->child_count() == children + 1U);
+        }
+
         it("does not expose a partial semantic tree on parse failure") {
             flexUI::Box box(nullptr);
             const auto result = dotgraph::create_flexui_dotgraph(
