@@ -406,8 +406,11 @@ ControllerResult ScriptController::dispatch(const ScriptEventSnapshot &event) {
 
 bool ScriptController::has_active_event_binding(
     std::string_view element_id, UiEventKind event) const noexcept {
-  if (!impl_->is_owner_thread() || impl_->state != ControllerState::Mounted ||
-      impl_->program == nullptr) return false;
+  // Route existence and execution permission are different facts.
+  // A Faulted controller still holds the old compiled table and must have
+  // its ControllerFaulted diagnostic propagated by native EventBridge,
+  // rather than silently swallowing a real native event.
+  if (!impl_->is_owner_thread() || impl_->program == nullptr) return false;
   const auto *binding = impl_->program->find_event_binding(element_id, event);
   return binding != nullptr &&
          impl_->event_exports.find(binding) != impl_->event_exports.end();

@@ -1773,6 +1773,52 @@ spec("Desktop XML component full-generation recomposition") {
 }
 
 spec("Desktop XML components share one native ScriptController and Effects engine") {
+  it("preserves ControllerFaulted reporting in native bridge after script failure") {
+    auto probe = std::make_shared<ModuleProbe>();
+    flexUI::DesktopApplicationBuilder builder(nullptr);
+    builder.xml_entry(
+        "<ui name=\"Dashboard\"><main id=\"root\"><section id=\"host\"/></main></ui>")
+        .scoped_xml_component(
+            "sales", "host",
+            "<ui name=\"Panel\" xmlns:on=\"urn:flexui:event\">"
+            "<button id=\"action\" on:key_down=\"save_document\">Initial</button>"
+            "</ui>")
+        .script("event-failure", fake_factory(probe));
+    auto built = builder.build();
+    check(static_cast<bool>(built));
+    if (!built) return;
+    auto &app = *built.application;
+    auto *action = app.box().get_by_id("sales::action");
+    check_not_null(action);
+    if (!action) return;
+    app.box().set_focus(action);
+    auto key = flexUI::Event::key_down(flexUI::KeyCode::A);
+    const auto failed = app.dispatch_event(key);
+    check_false(static_cast<bool>(failed));
+    check(failed.error.code ==
+          flexUI::DesktopApplicationErrorCode::ControllerDispatchFailed);
+    check(failed.error.controller_error.code ==
+          flexUI::ControllerErrorCode::ModuleCallFailed);
+    check(app.controller()->state() == flexUI::ControllerState::Faulted);
+    check_equal(probe->events.size(), std::size_t{1});
+
+    // Preserve the original fault result for the NEXT native event: the
+    // route remains defined even though the module cannot be called again.
+    key = flexUI::Event::key_down(flexUI::KeyCode::A);
+    const auto rejected = app.dispatch_event(key);
+    check_false(static_cast<bool>(rejected));
+    check(rejected.error.code ==
+          flexUI::DesktopApplicationErrorCode::ControllerDispatchFailed);
+    check(rejected.error.controller_error.code ==
+          flexUI::ControllerErrorCode::ControllerFaulted);
+    check_equal(probe->events.size(), std::size_t{1});
+    const auto retired = app.retire_scoped_event_handlers("sales");
+    check_false(static_cast<bool>(retired));
+    check(retired.error.controller_error.code ==
+          flexUI::ControllerErrorCode::InvalidState);
+  }
+
+
   it("retires one scoped event route while preserving native bridge, Binding and other scopes") {
     auto probe = std::make_shared<ModuleProbe>();
     probe->emit_valid_mutation = true;
