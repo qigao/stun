@@ -341,6 +341,13 @@ tui_async_status_t tui_async_queue_destroy(tui_async_queue_t *queue) {
     return TUI_ASYNC_OK;
 }
 
+#ifndef _WIN32
+int tui_async_queue_signal_wake_fd(tui_async_queue_t *queue) {
+    if (!queue || !queue_owner(queue)) return -1;
+    return queue->wake_write;
+}
+#endif
+
 /* An actual kernel wait: input and the queue's wake endpoint are observed
  * together. A producer commits and signals under the same Platform mutex.
  * Rechecking the predicate before entering the wait prevents lost wake. */
