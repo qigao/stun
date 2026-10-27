@@ -278,7 +278,8 @@ public:
       : lifecycle(lifecycle) {}
 
   flexUI::ApplicationCommandReserveResult
-  reserve(const flexUI::ApplicationCommandBatch &) override {
+  reserve(const flexUI::ApplicationCommandBatch &batch) override {
+    observed_scopes.emplace_back(batch.origin_scope());
     ++reserve_calls;
     if (lifecycle != nullptr) {
       lifecycle->push_back("reserve");
@@ -293,6 +294,7 @@ public:
     return {std::move(prepared), {}};
   }
 
+  std::vector<std::string> observed_scopes;
   int reserve_calls = 0;
   int reserved = 0;
   int published = 0;
@@ -402,6 +404,49 @@ spec("FlexUI scoped script event retirement") {
     const auto after_unmount = controller.retire_scoped_event_handlers("sale");
     check_false(static_cast<bool>(after_unmount));
     check(after_unmount.error.code == flexUI::ControllerErrorCode::InvalidState);
+  }
+}
+
+spec("FlexUI trusted scoped command origin") {
+  it("attributes commands to the compiled handler scope, never the event target") {
+    const auto program = scoped_controller_program();
+    if (!program) return;
+    auto module = std::make_unique<FakeScriptModule>(
+        std::vector<std::string>{"save_document", "parent_handler"});
+    module->command_export = "save_document";
+    module->command_payload = "data";
+    ControllerCommandQueue queue;
+    flexUI::ApplicationCommandEngine engine(queue);
+    flexUI::ScriptController controller(flexUI::ControllerEffects{nullptr, &engine});
+    check(controller.load(std::move(module), program));
+    check(controller.mount());
+    check(controller.dispatch(scoped_event("sales::action")));
+    check(controller.dispatch(scoped_event("sale::action")));
+    // A bubbled event's compiled current_target, not the original target,
+    // determines ownership of the emitted service request.
+    auto bubble = scoped_event("sale::action");
+    bubble.current_target = {"sales::action", 1};
+    check(controller.dispatch(bubble));
+    check_equal(queue.published, 3);
+    check_equal(queue.observed_scopes.size(), std::size_t{3});
+    check_equal(queue.observed_scopes[0], std::string("sales"));
+    check_equal(queue.observed_scopes[1], std::string("sale"));
+    check_equal(queue.observed_scopes[2], std::string("sales"));
+  }
+
+  it("does not attribute a global service completion callback to a scope") {
+    auto module = std::make_unique<FakeScriptModule>(
+        std::vector<std::string>{"save_document", "on_service_completion"});
+    module->command_export = "on_service_completion";
+    ControllerCommandQueue queue;
+    flexUI::ApplicationCommandEngine engine(queue);
+    flexUI::ScriptController controller(flexUI::ControllerEffects{nullptr, &engine});
+    check(controller.load(std::move(module), controller_program()));
+    check(controller.mount());
+    check(controller.dispatch_service_completion(
+        {77, flexUI::ApplicationCompletionStatus::Succeeded, "ok", {}, {}}));
+    check_equal(queue.observed_scopes.size(), std::size_t{1});
+    check(queue.observed_scopes.front().empty());
   }
 }
 

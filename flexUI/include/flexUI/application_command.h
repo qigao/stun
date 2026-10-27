@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <memory>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace flexUI {
@@ -76,11 +77,17 @@ public:
   const ApplicationCommandLimits& limits() const noexcept;
   /// Borrowed until the next append or this batch's destruction.
   const std::vector<ApplicationCommand>& commands() const noexcept;
+  /// Borrowed from the immutable compiled handler during synchronous queue
+  /// reservation. Empty for global lifecycle/completion callbacks. Script
+  /// modules cannot set this trusted provenance field.
+  std::string_view origin_scope() const noexcept { return origin_scope_; }
 
 private:
   ApplicationCommandLimits limits_;
   std::vector<ApplicationCommand> commands_;
   std::size_t string_bytes_ = 0;
+  std::string_view origin_scope_;
+  friend class ScriptController;
 };
 
 /// Queue-owned reservation. Destruction cancels unpublished slots.
