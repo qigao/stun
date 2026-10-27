@@ -1,5 +1,6 @@
 #include <flexUI/application.h>
 #include <flexUI/application_host_bridge.h>
+#include <flexUI/render_command.h>
 #include <flexUI/widgets/button_widget.h>
 #include <flexUI/widgets/input_widget.h>
 
@@ -1807,6 +1808,43 @@ spec("Desktop XML components share one native ScriptController and Effects engin
     app.box().update();
     check_equal(app.box().get_by_id("sales::caption")->text(), "Running");
     check_equal(app.box().get_by_id("costs::caption")->text(), "Running");
+
+    // Check the actual native DrawText commands, not only Element::text().
+    // A mounted LabelWidget must not use its original constructor text as a
+    // fallback after a shared bound string becomes empty.
+    const auto painted_caption = [&](const char *id) {
+      auto *label = app.box().get_by_id(id);
+      check_not_null(label);
+      if (!label || !label->widget) return std::string{};
+      label->set_layout_bounds(0.0f, 0.0f, 240.0f, 48.0f);
+      flexUI::RenderCommandList commands(flex::RendererCapabilities{});
+      label->widget->emit_render_commands(*label, commands);
+      std::string drawn;
+      for (const auto &command : commands.commands()) {
+        if (const auto *text =
+                std::get_if<flexUI::DrawTextCommand>(&command)) {
+          drawn += text->text;
+        }
+      }
+      return drawn;
+    };
+    for (const char *id : {"sales::caption", "costs::caption"}) {
+      check(painted_caption(id).find("Running") != std::string::npos);
+    }
+
+    app.box().bindings().inputs().set_string("caption", "");
+    app.box().update();
+    for (const char *id : {"sales::caption", "costs::caption"}) {
+      check_equal(app.box().get_by_id(id)->text(), "");
+      check(painted_caption(id).empty());
+    }
+
+    app.box().bindings().inputs().set_string("caption", "Again");
+    app.box().update();
+    for (const char *id : {"sales::caption", "costs::caption"}) {
+      check_equal(app.box().get_by_id(id)->text(), "Again");
+      check(painted_caption(id).find("Again") != std::string::npos);
+    }
 
     // Reload publishes a new candidate with its original explicitly seeded
     // application-global inputs, rather than retaining stale pointers into

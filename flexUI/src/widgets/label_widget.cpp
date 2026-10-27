@@ -30,7 +30,12 @@ void LabelWidget::sync_host_semantics() {
 void LabelWidget::emit_render_commands(const Element& elem, RenderCommandList& commands) {
     auto* style = elem.computed_style;
     if (!style) return;
-    const std::string display_text = !elem.text().empty() ? elem.text() : text_;
+    // A mounted widget's Element is authoritative, including an explicitly
+    // empty bind:text value. Only unbound previews retain the constructor
+    // fallback; otherwise clearing a binding resurrects stale initial text.
+    const std::string display_text =
+        host_element() == &elem ? elem.text()
+                                : (!elem.text().empty() ? elem.text() : text_);
     if (display_text.empty()) return;
 
     if (render_cache_matches(elem, display_text)) {
