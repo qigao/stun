@@ -1151,8 +1151,12 @@ bool Box::retire_unbound_structural_subtree(
       if (!ancestor || ++steps > elements_.size()) return false;
       ancestor = ancestor->parent_elem();
     }
-    for (Element *current = root; current; current = current->parent_elem())
+    // The preceding bounded chain validation proves root reaches root_.
+    // Never inspect ancestors above the UI root, even in malformed graphs.
+    for (Element *current = root;; current = current->parent_elem()) {
       if (keyed_repeater_hosts_.count(current) != 0) return false;
+      if (current == root_) break;
+    }
 
     // Prepare a complete ownership ledger before changing the live tree.
     // Detect foreign/shared nodes and cycles instead of deleting a prefix.
