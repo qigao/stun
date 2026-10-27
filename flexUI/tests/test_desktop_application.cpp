@@ -1817,6 +1817,34 @@ spec("Desktop XML components share one native ScriptController and Effects engin
     check_equal(app.box().get_by_id("costs::caption")->text(), "Ready");
   }
 
+  it("rejects aggregate scoped XML source amplification before parsing") {
+    const std::string root_ui =
+        "<ui name=\"App\"><main id=\"root\"><div id=\"left\"/>"
+        "<div id=\"right\"/></main></ui>";
+    const std::string component =
+        "<ui name=\"Panel\"><label id=\"caption\">Caption</label></ui>";
+    flexUI::DesktopApplicationLimits limits;
+    limits.document.max_source_bytes =
+        root_ui.size() + 2 * component.size() - 1;
+    flexUI::DesktopApplicationBuilder builder(nullptr);
+    builder.xml_entry(root_ui)
+        .scoped_xml_component("first", "left", component)
+        .scoped_xml_component("second", "right", component)
+        .limits(limits);
+    const auto rejected = builder.build();
+    check_false(static_cast<bool>(rejected));
+    check(rejected.error.code ==
+          flexUI::DesktopApplicationErrorCode::UiCompileFailed);
+    check(rejected.error.ui_error.code ==
+          flexUI::UiDocumentErrorCode::SourceTooLarge);
+    // The same sources fit the exact aggregate limit without per-instance
+    // multiplication of the budget.
+    ++limits.document.max_source_bytes;
+    builder.limits(limits);
+    const auto admitted = builder.build();
+    check(static_cast<bool>(admitted));
+  }
+
   it("rejects duplicate/nonfinite typed input declarations before UI publication") {
     const std::string root_ui =
         "<ui name=\"Inputs\"><main id=\"root\"/></ui>";
