@@ -10,6 +10,7 @@
 #include <new>
 #include <optional>
 #include <thread>
+#include <unordered_set>
 #include <utility>
 
 namespace flexUI {
@@ -30,6 +31,7 @@ struct ApplicationConfig {
   UiEntryFormat entry_format = UiEntryFormat::Xml;
   bool script_enabled = false;
   std::vector<DesktopScopedXmlComponent> scoped_components;
+  std::vector<DesktopBindingInput> binding_inputs;
 };
 
 std::optional<UiEventKind> to_ui_event_kind(EventType type) noexcept {
@@ -294,6 +296,46 @@ CandidateResult build_candidate(const ApplicationConfig &config, DesktopApplicat
     state->sources = std::move(sources);
     state->program = std::move(compiled.program);
     state->box = std::make_unique<Box>(config.renderer, config.box_options);
+
+    // UI string/boolean/numeric bindings require declared typed inputs at
+    // UiDocumentInstantiator admission. Seed them on the DETACHED candidate
+    // before any Element/Widget ownership is published. Every reload starts
+    // from the same explicit application-global inputs, not prior live state.
+    if (config.binding_inputs.size() > config.limits.document.max_bindings) {
+      return {{}, fail(DesktopApplicationErrorCode::InvalidConfiguration,
+                       DesktopApplicationStage::Configuration,
+                       "application binding input count exceeds binding budget")};
+    }
+    std::unordered_set<std::string> seen_inputs;
+    seen_inputs.reserve(config.binding_inputs.size());
+    auto &inputs = state->box->bindings().inputs();
+    for (const auto &decl : config.binding_inputs) {
+      if (decl.name.empty() ||
+          decl.name.size() > config.limits.document.max_string_bytes ||
+          !seen_inputs.emplace(decl.name).second) {
+        return {{}, fail(DesktopApplicationErrorCode::InvalidConfiguration,
+                         DesktopApplicationStage::Configuration,
+                         "application binding input requires a bounded unique name")};
+      }
+      if (const auto *text = std::get_if<std::string>(&decl.value)) {
+        if (text->size() > config.limits.document.max_string_bytes) {
+          return {{}, fail(DesktopApplicationErrorCode::InvalidConfiguration,
+                           DesktopApplicationStage::Configuration,
+                           "application string input exceeds the string budget")};
+        }
+        inputs.set_string(decl.name, *text);
+      } else if (const auto *boolean = std::get_if<bool>(&decl.value)) {
+        inputs.set_bool(decl.name, *boolean);
+      } else {
+        const double number = std::get<double>(decl.value);
+        if (!std::isfinite(number)) {
+          return {{}, fail(DesktopApplicationErrorCode::InvalidConfiguration,
+                           DesktopApplicationStage::Configuration,
+                           "application numeric input must be finite")};
+        }
+        inputs.set_number(decl.name, number);
+      }
+    }
 
     const CssLoadResult css = state->box->load_stylesheet(
         state->sources.stylesheet, CssLoadOptions{"<desktop-stylesheet>", true});
@@ -759,6 +801,26 @@ DesktopApplicationBuilder::scoped_xml_component(
     std::string scope, std::string host_id, std::string source) {
   impl_->config.scoped_components.push_back(
       {std::move(scope), std::move(host_id), std::move(source)});
+  return *this;
+}
+
+DesktopApplicationBuilder &
+DesktopApplicationBuilder::binding_input_string(std::string name,
+                                                  std::string value) {
+  impl_->config.binding_inputs.push_back(
+      {std::move(name), std::move(value)});
+  return *this;
+}
+
+DesktopApplicationBuilder &
+DesktopApplicationBuilder::binding_input_bool(std::string name, bool value) {
+  impl_->config.binding_inputs.push_back({std::move(name), value});
+  return *this;
+}
+
+DesktopApplicationBuilder &
+DesktopApplicationBuilder::binding_input_number(std::string name, double value) {
+  impl_->config.binding_inputs.push_back({std::move(name), value});
   return *this;
 }
 
