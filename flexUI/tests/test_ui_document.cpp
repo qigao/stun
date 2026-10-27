@@ -1068,3 +1068,99 @@ spec("UiDocument stages native DOT presentation without Box side effects") {
     check(element->style_.text_align == flexUI::TextAlign::Center);
   }
 }
+
+
+spec("Scoped XML components are compiled into one owner/controller program") {
+  it("rewrites two identical local event and binding IDs without a second tree") {
+    const auto app = flexUI::compile_ui_xml(R"xml(
+      <ui name="Dashboard">
+        <main id="root">
+          <section id="left"/>
+          <section id="right"/>
+        </main>
+      </ui>
+    )xml");
+    const auto component = flexUI::compile_ui_xml(R"xml(
+      <ui name="Panel" xmlns:on="urn:flexui:event"
+          xmlns:bind="urn:flexui:binding">
+        <div id="panel" slot="frame">
+          <button id="action" slot="action" on:click="save_document">Save</button>
+          <label id="caption" bind:text="$caption">Initial</label>
+        </div>
+      </ui>
+    )xml");
+    check(static_cast<bool>(app));
+    check(static_cast<bool>(component));
+    const auto registry = flexUI::WidgetRegistry::builtins();
+    const std::vector<flexUI::UiScopedComponent> instances = {
+        {"sales", "left", component.program},
+        {"costs", "right", component.program}};
+    const auto combined = flexUI::compile_scoped_ui_components(
+        *app.program, instances, registry);
+    check(static_cast<bool>(combined));
+    if (!combined) return;
+    check_equal(combined.program->event_bindings().size(), std::size_t{2});
+    check_equal(combined.program->bindings().size(), std::size_t{2});
+    check_not_null(combined.program->find_event_binding(
+        "sales::action", flexUI::UiEventKind::Click));
+    check_not_null(combined.program->find_event_binding(
+        "costs::action", flexUI::UiEventKind::Click));
+    check_null(combined.program->find_event_binding(
+        "action", flexUI::UiEventKind::Click));
+    flexUI::Box box(nullptr);
+    box.bindings().inputs().set_string("caption", "Revenue");
+    const auto installed = flexUI::UiDocumentInstantiator::instantiate(
+        box, *combined.program, registry);
+    check(static_cast<bool>(installed));
+    if (!installed) return;
+    check_equal(box.root(), installed.tree.root);
+    auto* sales = box.get_by_id("sales::action");
+    auto* costs = box.get_by_id("costs::action");
+    check_not_null(sales);
+    check_not_null(costs);
+    check(sales != costs);
+    check_null(box.get_by_id("action"));
+    check_equal(*sales->attribute("data-slot"), "action");
+    check_equal(*costs->attribute("data-slot"), "action");
+    check_equal(installed.tree.slots_by_name.size(), std::size_t{0});
+    check_equal(sales->parent_elem()->id(), "sales::panel");
+    check_equal(costs->parent_elem()->id(), "costs::panel");
+    box.update();
+    check_equal(box.get_by_id("sales::caption")->text(), "Revenue");
+    check_equal(box.get_by_id("costs::caption")->text(), "Revenue");
+  }
+
+  it("fails closed on duplicate scopes, unknown hosts, and widget hosts") {
+    const auto base = flexUI::compile_ui_xml(
+        "<ui name=\"Root\"><main id=\"root\"><div id=\"host\"/>"
+        "<button id=\"not-a-host\">X</button></main></ui>");
+    const auto component = flexUI::compile_ui_xml(
+        "<ui name=\"Panel\"><button id=\"send\">Send</button></ui>");
+    check(static_cast<bool>(base));
+    check(static_cast<bool>(component));
+    const auto registry = flexUI::WidgetRegistry::builtins();
+    const auto duplicate = flexUI::compile_scoped_ui_components(
+        *base.program,
+        {{"first", "host", component.program},
+         {"first", "host", component.program}}, registry);
+    check_false(static_cast<bool>(duplicate));
+    check(duplicate.error.code == UiDocumentErrorCode::InvalidComponentScope);
+    const auto missing = flexUI::compile_scoped_ui_components(
+        *base.program, {{"first", "unknown", component.program}}, registry);
+    check_false(static_cast<bool>(missing));
+    check(missing.error.code == UiDocumentErrorCode::MissingComponentHost);
+    const auto widget = flexUI::compile_scoped_ui_components(
+        *base.program, {{"first", "not-a-host", component.program}}, registry);
+    check_false(static_cast<bool>(widget));
+    check(widget.error.code == UiDocumentErrorCode::InvalidMountTarget);
+    const auto invalid = flexUI::compile_scoped_ui_components(
+        *base.program, {{"bad::scope", "host", component.program}}, registry);
+    check_false(static_cast<bool>(invalid));
+    check(invalid.error.code == UiDocumentErrorCode::InvalidComponentScope);
+    // Component IDs are scoped, never leaked to a separate live Box by
+    // failed compilation; the pristine base program remains unchanged.
+    check_equal(base.program->definition().root.children.size(), std::size_t{2});
+    check_null(base.program->find_event_binding(
+        "first::send", flexUI::UiEventKind::Click));
+  }
+}
