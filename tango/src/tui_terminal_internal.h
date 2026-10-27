@@ -114,6 +114,11 @@ bool tui_terminal_consume_resize_pending(void);
 /* Borrow the existing UI mailbox wake pipe, never a second event loop.
  * fd=-1 disarms the signal handler before the queue can be destroyed. */
 void tui_terminal_sigwinch_set_wake_fd(int fd);
+/* Private signal lifetime boundary. The native C11 test installs the REAL
+ * process handler without requiring a controlling TTY, then delivers
+ * SIGWINCH on a worker thread while the Owner blocks in kernel select(). */
+bool tui_terminal_sigwinch_install(tui_terminal_t *term);
+bool tui_terminal_sigwinch_uninstall(tui_terminal_t *term);
 
 /* Private incremental-decoder seams used by the real-library tests. */
 bool tui_terminal_input_push(tui_terminal_t *term, const void *data,
