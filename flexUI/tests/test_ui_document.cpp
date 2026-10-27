@@ -2,6 +2,8 @@
 
 #include <tinytest.hpp>
 
+#include <cmath>
+#include <limits>
 #include <string>
 
 using flexUI::UiDocumentErrorCode;
@@ -962,5 +964,107 @@ spec("FlexUI XML fragments stage local slots without a parallel UI tree") {
     check_equal(page->child_count(), 0U);
     check_equal(box.owned_element_count(), before);
     check_null(box.get_by_id("frame"));
+  }
+}
+
+
+spec("UiDocument stages native DOT presentation without Box side effects") {
+  it("validates whole-tree bounds and colors before any Element adoption") {
+    flexUI::Box box(nullptr);
+    auto* page = box.create("main", "existing-page");
+    box.set_root(page);
+    const auto before = box.owned_element_count();
+
+    flexUI::UiDocumentDefinition def;
+    def.name = "InvalidDot";
+    def.root.tag = "div";
+    flexUI::UiNodeDefinition node;
+    node.tag = "span";
+    node.id = "bad-node";
+    flexUI::UiNodePresentation p;
+    p.has_bounds = true;
+    p.absolute = true;
+    p.x = std::numeric_limits<float>::quiet_NaN();
+    p.y = 1.0f;
+    p.width = 20.0f;
+    p.height = 20.0f;
+    node.presentation = p;
+    def.root.children.push_back(std::move(node));
+    const auto invalid = flexUI::compile_ui_definition(def);
+    check_false(static_cast<bool>(invalid));
+    check(invalid.error.code == UiDocumentErrorCode::InvalidProperty);
+    check_equal(box.owned_element_count(), before);
+    check_equal(box.root(), page);
+    check_equal(page->child_count(), 0U);
+
+    p.x = 5.0f;
+    p.background_color = flexUI::Color(1.25f, 0.0f, 0.0f, 1.0f);
+    def.root.children.front().presentation = p;
+    const auto invalid_color = flexUI::compile_ui_definition(def);
+    check_false(static_cast<bool>(invalid_color));
+    check(invalid_color.error.code == UiDocumentErrorCode::InvalidProperty);
+    check_equal(box.owned_element_count(), before);
+  }
+
+  it("stages typed absolute geometry, border and text paint before publication") {
+    flexUI::Box box(nullptr);
+    auto* page = box.create("main", "existing-page");
+    box.set_root(page);
+    const auto before = box.owned_element_count();
+
+    flexUI::UiDocumentDefinition def;
+    def.name = "Dot";
+    def.root.tag = "div";
+    flexUI::UiNodeDefinition node;
+    node.tag = "span";
+    node.id = "node-A";
+    node.properties["class"] = std::string("dot-node shape-box");
+    node.properties["attr.data-slot"] = std::string("dotgraph-node");
+    node.properties["text"] = std::string("A");
+    flexUI::UiNodePresentation p;
+    p.has_bounds = true;
+    p.absolute = true;
+    p.x = 17.0f;
+    p.y = 26.0f;
+    p.width = 42.0f;
+    p.height = 19.0f;
+    p.background_color = flexUI::Color(0.2f, 0.3f, 0.4f, 1.0f);
+    p.border_color = flexUI::Color(0.1f, 0.2f, 0.3f, 1.0f);
+    p.border_width = 1.5f;
+    p.border_style = flexUI::BorderStyle::Dashed;
+    p.border_radius = 3.0f;
+    p.opacity = 0.8f;
+    p.font_family = std::string("Segoe UI");
+    p.font_size = 14.0f;
+    p.text_align = flexUI::TextAlign::Center;
+    p.z_index = 2;
+    node.presentation = std::move(p);
+    def.root.children.push_back(std::move(node));
+    const auto compiled = flexUI::compile_ui_definition(std::move(def));
+    check(static_cast<bool>(compiled));
+
+    flexUI::UiMountOptions mount;
+    mount.mode = flexUI::UiMountMode::DetachedFragment;
+    mount.id_policy = flexUI::UiIdPolicy::Global;
+    const auto result = flexUI::UiDocumentInstantiator::instantiate(
+        box, *compiled.program, flexUI::WidgetRegistry::builtins(), mount);
+    check(static_cast<bool>(result));
+    check_equal(box.root(), page);
+    check_equal(page->child_count(), 0U);
+    check_equal(box.owned_element_count(), before + 2);
+    auto* element = box.get_by_id("node-A");
+    check_not_null(element);
+    check(element->parent_elem() == result.tree.root);
+    check_equal(*element->attribute("data-slot"), "dotgraph-node");
+    check_true(std::fabs(element->x() - 17.0f) < 0.001f);
+    check_true(std::fabs(element->y() - 26.0f) < 0.001f);
+    check_true(std::fabs(element->layout_width() - 42.0f) < 0.001f);
+    check(element->style_.position == flexUI::Position::Absolute);
+    check(element->style_.border_style[0] == flexUI::BorderStyle::Dashed);
+    check_true(std::fabs(element->style_.border_width[0] - 1.5f) < 0.001f);
+    check_true(std::fabs(element->style_.background_color.r - 0.2f) < 0.001f);
+    check_true(std::fabs(element->style_.opacity - 0.8f) < 0.001f);
+    check_equal(element->style_.font_family, "Segoe UI");
+    check(element->style_.text_align == flexUI::TextAlign::Center);
   }
 }
