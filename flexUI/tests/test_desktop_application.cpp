@@ -1817,6 +1817,73 @@ spec("Desktop XML components share one native ScriptController and Effects engin
     check_equal(app.box().get_by_id("costs::caption")->text(), "Ready");
   }
 
+
+  it("seeds shared boolean and numeric MIR class bindings across instances") {
+    const std::string root_ui =
+        "<ui name=\"Dashboard\"><main id=\"root\">"
+        "<section id=\"left\"/><section id=\"right\"/>"
+        "</main></ui>";
+    const std::string component = R"xml(
+      <ui name="Panel" xmlns:bind="urn:flexui:binding">
+        <div id="state" bind:class_active="${enabled}"
+             bind:class_busy="${quantity &gt; 1}">Status</div>
+      </ui>
+    )xml";
+    flexUI::DesktopApplicationBuilder builder(nullptr);
+    builder.xml_entry(root_ui)
+        .scoped_xml_component("sales", "left", component)
+        .scoped_xml_component("costs", "right", component)
+        .binding_input_bool("enabled", true)
+        .binding_input_number("quantity", 0.25);
+    auto built = builder.build();
+    check(static_cast<bool>(built));
+    if (!built) return;
+    auto &app = *built.application;
+    check_equal(app.program().bindings().size(), std::size_t{4});
+    app.box().update();
+    for (const char *id : {"sales::state", "costs::state"}) {
+      auto *node = app.box().get_by_id(id);
+      check_not_null(node);
+      if (!node) return;
+      check(node->has_class(flexUI::Symbol("active")));
+      check_false(node->has_class(flexUI::Symbol("busy")));
+    }
+    app.box().bindings().inputs().set_bool("enabled", false);
+    app.box().bindings().inputs().set_number("quantity", 2.0);
+    app.box().update();
+    for (const char *id : {"sales::state", "costs::state"}) {
+      auto *node = app.box().get_by_id(id);
+      check_false(node->has_class(flexUI::Symbol("active")));
+      check(node->has_class(flexUI::Symbol("busy")));
+    }
+    check(app.reload({root_ui, "", "", "typed-inputs-reload"}));
+    app.box().update();
+    for (const char *id : {"sales::state", "costs::state"}) {
+      auto *node = app.box().get_by_id(id);
+      check(node->has_class(flexUI::Symbol("active")));
+      check_false(node->has_class(flexUI::Symbol("busy")));
+    }
+  }
+
+  it("rejects incompatible typed input before candidate Box publication") {
+    const std::string root_ui =
+        "<ui name=\"Dashboard\"><main id=\"root\"><div id=\"host\"/>"
+        "</main></ui>";
+    const std::string component =
+        "<ui name=\"Panel\" xmlns:bind=\"urn:flexui:binding\">"
+        "<label id=\"caption\" bind:text=\"$caption\">Initial</label></ui>";
+    flexUI::DesktopApplicationBuilder builder(nullptr);
+    builder.xml_entry(root_ui)
+        .scoped_xml_component("panel", "host", component)
+        .binding_input_bool("caption", true);
+    const auto rejected = builder.build();
+    check_false(static_cast<bool>(rejected));
+    check(rejected.error.code ==
+          flexUI::DesktopApplicationErrorCode::UiInstantiationFailed);
+    check(rejected.error.ui_error.code ==
+          flexUI::UiDocumentErrorCode::BindingInstallFailed);
+  }
+
   it("rejects aggregate scoped XML source amplification before parsing") {
     const std::string root_ui =
         "<ui name=\"App\"><main id=\"root\"><div id=\"left\"/>"
