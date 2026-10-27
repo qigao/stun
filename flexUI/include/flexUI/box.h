@@ -319,6 +319,10 @@ private:
 
   // 活跃 Widget
   std::vector<Element *> active_widgets_;
+  // Keyed repeaters borrow their container for their entire lifetime,
+  // including when empty. A structural retire must refuse a leased host
+  // or its descendants, not just nodes with a Widget or Binding target.
+  std::unordered_set<Element *> keyed_repeater_hosts_;
 
   // 子系统
   EventDispatcher events_{this};

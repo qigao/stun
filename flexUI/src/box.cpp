@@ -1151,6 +1151,8 @@ bool Box::retire_unbound_structural_subtree(
       if (!ancestor || ++steps > elements_.size()) return false;
       ancestor = ancestor->parent_elem();
     }
+    for (Element *current = root; current; current = current->parent_elem())
+      if (keyed_repeater_hosts_.count(current) != 0) return false;
 
     // Prepare a complete ownership ledger before changing the live tree.
     // Detect foreign/shared nodes and cycles instead of deleting a prefix.
@@ -1163,6 +1165,7 @@ bool Box::retire_unbound_structural_subtree(
           batch.size() > elements_.size()) return false;
       if (element->owner_box_ != this || element->is_widget_owned() ||
           element->widget || bindings_.has_binding_target(element) ||
+          keyed_repeater_hosts_.count(element) != 0 ||
           std::find(active_widgets_.begin(), active_widgets_.end(), element) !=
               active_widgets_.end())
         return false;

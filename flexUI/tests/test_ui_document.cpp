@@ -1,10 +1,12 @@
 #include <flexUI.h>
 #include <flexUI/widgets/label_widget.h>
+#include <flexUI/keyed_repeater.h>
 
 #include <tinytest.hpp>
 
 #include <cmath>
 #include <limits>
+#include <stdexcept>
 #include <string>
 #include <thread>
 
@@ -1252,6 +1254,33 @@ spec("Box structural subtree retirement rejects unsafe lifetime owners") {
     check_false(box.retire_unbound_structural_subtree("child"));
     check_equal(box.resolve_handle(child), box.get_by_id("child"));
     check_equal(box.owned_element_count(), std::size_t{2});
+  }
+
+  it("protects live keyed-repeater container leases even when empty") {
+    flexUI::Box box(nullptr);
+    auto *root = box.create("div", "root");
+    auto *host = box.create("div", "repeater-host");
+    auto *outer = box.create("div", "outer");
+    root->append(outer);
+    outer->append(host);
+    box.set_root(root);
+    {
+      flexUI::UiKeyedRepeater repeater(box, *host, 8u);
+      check_false(box.retire_unbound_structural_subtree("repeater-host"));
+      check_false(box.retire_unbound_structural_subtree("outer"));
+      check_equal(box.get_by_id("repeater-host"), host);
+      bool refused = false;
+      try {
+        flexUI::UiKeyedRepeater duplicate(box, *host, 8u);
+      } catch (const std::invalid_argument &) {
+        refused = true;
+      }
+      check(refused);
+    }
+    const auto retired = box.handle_for(*host);
+    check(box.retire_unbound_structural_subtree("repeater-host"));
+    check_null(box.resolve_handle(retired));
+    check_equal(box.get_by_id("outer"), outer);
   }
 
   it("refuses focused, hovered or captured subtree retirement") {
