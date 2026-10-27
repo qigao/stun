@@ -297,6 +297,51 @@ static int test_native_input_and_wake_multiplex(void) {
     return 0;
 }
 
+
+#ifndef _WIN32
+typedef struct signal_wake_writer {
+    int fd;
+    bool wrote;
+} signal_wake_writer_t;
+
+static void signal_wake_write_worker(void *arg) {
+    signal_wake_writer_t *ctx = (signal_wake_writer_t *)arg;
+    cmeta_sleep_ms(10u);
+    const unsigned char byte = 1u;
+    ctx->wrote = write(ctx->fd, &byte, 1u) == 1;
+}
+
+/* A SIGWINCH delivered to a non-owner thread writes only one byte to the
+ * existing queue wake endpoint. The idle Owner resumes with no message
+ * admission, then checks terminal geometry on its next normal turn. */
+static int test_signal_safe_idle_owner_resize_wake(void) {
+    const tui_async_queue_config_t config = {2u, 8u};
+    tui_async_queue_t *queue = tui_async_queue_create(&config);
+    CHECK(queue != NULL);
+    const int fd = tui_async_queue_signal_wake_fd(queue);
+    CHECK(fd >= 0);
+    CHECK(tui_async_wait_io(queue, NO_INPUT_HANDLE, 0) ==
+          TUI_ASYNC_WAIT_TIMEOUT);
+
+    signal_wake_writer_t ctx = {fd, false};
+    cmeta_thread_t thread = NULL;
+    CHECK(cmeta_thread_create(&thread, signal_wake_write_worker, &ctx) == 0);
+    CHECK(tui_async_wait_io(queue, NO_INPUT_HANDLE, 1000) ==
+          TUI_ASYNC_WAIT_INTERRUPTED);
+    CHECK(cmeta_thread_join(&thread) == 0);
+    CHECK(ctx.wrote);
+
+    tui_async_queue_stats_t stats = {0};
+    CHECK(tui_async_queue_get_stats(queue, &stats) == TUI_ASYNC_OK);
+    CHECK(stats.queued == 0u && stats.accepted == 0u);
+    CHECK(tui_async_wait_io(queue, NO_INPUT_HANDLE, 0) ==
+          TUI_ASYNC_WAIT_TIMEOUT);
+    CHECK(tui_async_queue_close(queue) == TUI_ASYNC_OK);
+    CHECK(tui_async_queue_destroy(queue) == TUI_ASYNC_OK);
+    return 0;
+}
+#endif
+
 typedef struct app_model {
     size_t updates;
     uint32_t last;
@@ -484,6 +529,9 @@ int main(void) {
     if (test_concurrent_producers_and_owner_affinity() != 0) return 1;
     if (test_real_kernel_wake_and_close() != 0) return 1;
     if (test_native_input_and_wake_multiplex() != 0) return 1;
+#ifndef _WIN32
+    if (test_signal_safe_idle_owner_resize_wake() != 0) return 1;
+#endif
     if (test_owner_message_dispatch_batches() != 0) return 1;
     if (test_one_render_for_async_burst() != 0) return 1;
     if (test_concurrent_close_preserves_admission() != 0) return 1;

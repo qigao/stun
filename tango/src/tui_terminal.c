@@ -27,9 +27,26 @@
 
 #ifndef _WIN32
 static volatile sig_atomic_t g_resize_pending = 0;
+static volatile sig_atomic_t g_resize_wake_fd = -1;
+
+/* SIGWINCH is process-directed and may run on a producer thread while
+ * UI Owner sleeps indefinitely in select(). Wake the SAME queue pipe that
+ * the Owner already multiplexes. write() is async-signal-safe, and any
+ * EAGAIN implies the pipe is already readable. Preserve interrupted errno. */
 static void handle_sigwinch(int sig) {
     (void)sig;
+    const int saved_errno = errno;
     g_resize_pending = 1;
+    const sig_atomic_t fd = g_resize_wake_fd;
+    if (fd >= 0) {
+        const unsigned char byte = 1u;
+        (void)write((int)fd, &byte, 1u);
+    }
+    errno = saved_errno;
+}
+
+void tui_terminal_sigwinch_set_wake_fd(int fd) {
+    g_resize_wake_fd = (sig_atomic_t)fd;
 }
 
 /* Keep the signal flag private to this translation unit. */
@@ -341,6 +358,8 @@ failed:
 #else
 static bool platform_leave(tui_terminal_t* term) {
     bool ok = true;
+    /* Disarm before cleanup closes the mailbox wake pipe. */
+    tui_terminal_sigwinch_set_wake_fd(-1);
     if (term->sigwinch_installed) {
         if (sigaction(SIGWINCH, &term->orig_sigwinch, NULL) == 0) {
             term->sigwinch_installed = false;
@@ -381,6 +400,7 @@ static bool platform_enter(tui_terminal_t* term) {
     }
     term->sigwinch_installed = true;
     g_resize_pending = 0;
+    tui_terminal_sigwinch_set_wake_fd(-1);
     return true;
 }
 #endif

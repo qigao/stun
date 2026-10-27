@@ -111,6 +111,9 @@ bool tui_terminal_input_record(tui_terminal_t* term,
 #else
 /* Consume a pending SIGWINCH notification on the terminal owner thread. */
 bool tui_terminal_consume_resize_pending(void);
+/* Borrow the existing UI mailbox wake pipe, never a second event loop.
+ * fd=-1 disarms the signal handler before the queue can be destroyed. */
+void tui_terminal_sigwinch_set_wake_fd(int fd);
 
 /* Private incremental-decoder seams used by the real-library tests. */
 bool tui_terminal_input_push(tui_terminal_t *term, const void *data,
