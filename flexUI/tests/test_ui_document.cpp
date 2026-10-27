@@ -1161,6 +1161,35 @@ spec("Box structural subtree retirement rejects unsafe lifetime owners") {
     check_equal(host->child_count(), std::size_t{1});
   }
 
+  it("blocks reentrant subtree deletion inside native event propagation") {
+    flexUI::Box box(nullptr);
+    auto *root = box.create("div", "root");
+    auto *target = box.create("div", "target");
+    auto *victim = box.create("div", "victim");
+    root->append(target);
+    root->append(victim);
+    box.set_root(root);
+    box.set_focus(target);
+    const auto victim_handle = box.handle_for(*victim);
+    bool observed = false;
+    bool rejected = false;
+    box.set_event_callback([&](flexUI::Element &element,
+                               const flexUI::Event &) {
+      if (&element == target) {
+        observed = true;
+        rejected = !box.retire_unbound_structural_subtree("victim");
+      }
+    });
+    auto event = flexUI::Event::key_down(flexUI::KeyCode::A);
+    box.dispatch_event(event);
+    check(observed);
+    check(rejected);
+    check_equal(box.resolve_handle(victim_handle), victim);
+    check(box.retire_unbound_structural_subtree("victim"));
+    check_null(box.resolve_handle(victim_handle));
+    check_equal(box.get_by_id("target"), target);
+  }
+
   it("refuses focused, hovered or captured subtree retirement") {
     flexUI::Box box(nullptr);
     auto *root = box.create("div", "root");
