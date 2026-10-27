@@ -209,6 +209,31 @@ CandidateResult build_candidate(const ApplicationConfig &config, DesktopApplicat
   }
 
   try {
+    // Repeating independently bounded component XML sources must not multiply
+    // the application's compile-source budget by the instance count.
+    // Reject before allocating parsing trees or any live Box state.
+    if (!config.scoped_components.empty()) {
+      std::size_t remaining = config.limits.document.max_source_bytes;
+      if (sources.ui.size() > remaining) {
+        auto error = fail(DesktopApplicationErrorCode::UiCompileFailed,
+                          DesktopApplicationStage::UiCompile,
+                          "scoped UI application exceeds the total XML source budget");
+        error.ui_error = {UiDocumentErrorCode::SourceTooLarge, error.message};
+        return {{}, std::move(error)};
+      }
+      remaining -= sources.ui.size();
+      for (const auto &component : config.scoped_components) {
+        if (component.source.size() > remaining) {
+          auto error = fail(
+              DesktopApplicationErrorCode::UiCompileFailed,
+              DesktopApplicationStage::UiCompile,
+              "combined scoped XML sources exceed the application source budget");
+          error.ui_error = {UiDocumentErrorCode::SourceTooLarge, error.message};
+          return {{}, std::move(error)};
+        }
+        remaining -= component.source.size();
+      }
+    }
     UiDocumentCompileResult compiled =
         config.entry_format == UiEntryFormat::Xml
             ? compile_ui_xml(sources.ui, config.limits.document)
