@@ -1,0 +1,10 @@
+<ui name="InfographicFrame" xmlns:attr="urn:flexui:attribute">
+  <figure slot="infographic" attr:role="figure"
+          class="flex flex-col relative w-full rounded-lg border bg-card text-card-foreground p-4 gap-4">
+    <figcaption slot="infographic-title" class="text-sm font-medium" />
+    <div slot="infographic-surface" attr:role="img" class="relative w-full">
+      <infographic-plot slot="infographic-plot" attr:data-renderer="infographic"
+                        class="relative w-full overflow-hidden" />
+    </div>
+  </figure>
+</ui>

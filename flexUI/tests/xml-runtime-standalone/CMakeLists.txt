@@ -77,6 +77,18 @@ add_dependencies(stun_xml_runtime_qualification
     stun_flexchart_ui_adapter_compile)
 add_dependencies(chart_ui_test stun_flexchart_ui_adapter_compile)
 
+# Compile the actual Infographic facade through the same released-SDK
+# contract, not only a synthetic Plot Widget. Full infographic layout/IR
+# parser tests remain separately owned by charts/infographic.
+add_library(stun_infographic_ui_adapter_compile OBJECT
+    "${STUN_ROOT}/charts/infographic/src/flexui_infographic.cpp")
+target_include_directories(stun_infographic_ui_adapter_compile PRIVATE
+    "${STUN_ROOT}/charts/infographic/include/infographic")
+target_link_libraries(stun_infographic_ui_adapter_compile PRIVATE chart_ui flex)
+add_dependencies(stun_xml_runtime_qualification
+    stun_infographic_ui_adapter_compile)
+add_dependencies(chart_ui_test stun_infographic_ui_adapter_compile)
+
 # The MarkdownWidget streaming consumer contract must run in the focused
 # headless production-runtime gate; parser conformance alone does not exercise
 # the FlexUI projection/lifecycle path.

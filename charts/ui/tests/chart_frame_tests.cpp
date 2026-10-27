@@ -1,4 +1,5 @@
 #include <charts/ui/chart_frame.h>
+#include <charts/ui/infographic_frame.h>
 
 #include <flexUI/box.h>
 #include <flexUI/computed_style.h>
@@ -349,6 +350,113 @@ spec("ChartFrame and native Plot share one XML publication transaction") {
                         box, no_legend, {{"series", "Label", ""}},
                         std::make_unique<ProbePlotWidget>(),
                         300.0f, 150.0f, "native-probe"), std::invalid_argument);
+    check_equal(box.root(), page);
+    check_equal(page->child_count(), 0U);
+    check_equal(box.owned_element_count(), before);
+  }
+}
+
+
+spec("Infographic native Plot uses the same atomic XML component pipeline") {
+  it("builds a real Box-owned native infographic with accessible XML slots") {
+    flexUI::Box box(nullptr);
+    auto* page = box.create("main", "page");
+    box.set_root(page);
+    charts::ui::InfographicFrameOptions options;
+    options.title = "Data journey";
+    options.view_id = "roadmap-7";
+    options.accessible_label = "Process infographic";
+    options.width = 540.0f;
+    options.height = 380.0f;
+
+    const auto result = charts::ui::create_infographic_frame_with_plot(
+        box, options, std::make_unique<ProbePlotWidget>());
+    check(static_cast<bool>(result));
+    check_equal(box.root(), page);
+    check_equal(page->child_count(), 0U);
+    check_equal(*result.root->attribute("data-slot"), "infographic");
+    check_equal(*result.root->attribute("data-infographic"), "roadmap-7");
+    check_equal(*result.root->attribute("aria-label"), "Process infographic");
+    check_not_null(result.title);
+    check_equal(result.title->text(), "Data journey");
+    check_equal(*result.surface->attribute("data-slot"), "infographic-surface");
+    check_equal(*result.surface->attribute("aria-label"), "Process infographic");
+    check_equal(*result.plot->attribute("data-slot"), "infographic-plot");
+    check_equal(*result.plot->attribute("data-renderer"), "infographic");
+    check(result.plot->parent_elem() == result.surface);
+    check_not_null(result.plot->widget);
+    check_true(std::abs(result.plot->layout_width() - 540.0f) <= 0.001f);
+    check_true(std::abs(result.plot->layout_height() - 380.0f) <= 0.001f);
+    check_null(box.get_by_id("infographic"));
+
+    page->append(result.root);
+    box.update();
+    check(result.root->computed_style->display == flexUI::Display::Flex);
+    check_true(result.root->computed_style->border_width[0] > 0.0f);
+  }
+
+  it("supports multiple id-less infographic instances and optional captions") {
+    flexUI::Box box(nullptr);
+    charts::ui::InfographicFrameOptions options;
+    options.title.clear();
+    const auto first = charts::ui::create_infographic_frame_with_plot(
+        box, options, std::make_unique<ProbePlotWidget>());
+    const auto second = charts::ui::create_infographic_frame_with_plot(
+        box, options, std::make_unique<ProbePlotWidget>());
+    check(static_cast<bool>(first));
+    check(static_cast<bool>(second));
+    check_null(first.title);
+    check_null(second.title);
+    check(first.root != second.root);
+    check(first.plot != second.plot);
+    auto* page = box.create("main");
+    page->append(first.root);
+    page->append(second.root);
+    box.set_root(page);
+    box.update();
+    check_equal(page->child_count(), 2U);
+  }
+
+  it("rolls back the complete infographic on native Plot binding failure") {
+    flexUI::Box box(nullptr);
+    auto* page = box.create("main", "page");
+    box.set_root(page);
+    const auto before = box.owned_element_count();
+    charts::ui::InfographicFrameOptions options;
+    options.title = "Should never publish";
+
+    check_throws_as(charts::ui::create_infographic_frame_with_plot(
+                        box, options, std::make_unique<RejectingPlotWidget>()),
+                    std::invalid_argument);
+    check_equal(box.root(), page);
+    check_equal(page->child_count(), 0U);
+    check_equal(box.owned_element_count(), before);
+    check_null(box.get_by_id("infographic-plot"));
+
+    // Failed widget binding did not corrupt the Box ownership transaction.
+    const auto recovered = charts::ui::create_infographic_frame_with_plot(
+        box, options, std::make_unique<ProbePlotWidget>());
+    check(static_cast<bool>(recovered));
+    check_equal(box.root(), page);
+  }
+
+  it("rejects invalid dimensions, missing accessibility and empty widget") {
+    flexUI::Box box(nullptr);
+    auto* page = box.create("main");
+    box.set_root(page);
+    const auto before = box.owned_element_count();
+    charts::ui::InfographicFrameOptions options;
+    check_throws_as(charts::ui::create_infographic_frame_with_plot(
+                        box, options, {}), std::invalid_argument);
+    options.width = -2.0f;
+    check_throws_as(charts::ui::create_infographic_frame_with_plot(
+                        box, options, std::make_unique<ProbePlotWidget>()),
+                    std::invalid_argument);
+    options.width = 600.0f;
+    options.accessible_label.clear();
+    check_throws_as(charts::ui::create_infographic_frame_with_plot(
+                        box, options, std::make_unique<ProbePlotWidget>()),
+                    std::invalid_argument);
     check_equal(box.root(), page);
     check_equal(page->child_count(), 0U);
     check_equal(box.owned_element_count(), before);
