@@ -292,6 +292,9 @@ private:
   // authoritative. Retiring arbitrary Element IDs without rewriting that
   // table would leave stale script/binding/type definitions. M0 refuses it.
   bool compiled_program_installed_ = false;
+  // Layout/render and widget-frame traversal borrow Element* across
+  // callback boundaries; retirement must wait until those walks finish.
+  std::size_t borrowed_tree_depth_ = 0;
 
   // 元素树
   Element *root_ = nullptr;

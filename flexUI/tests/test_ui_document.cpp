@@ -1,11 +1,13 @@
 #include <flexUI.h>
 #include <flexUI/widgets/label_widget.h>
+#include <flexUI/widget.h>
 #include <flexUI/keyed_repeater.h>
 
 #include <tinytest.hpp>
 
 #include <cmath>
 #include <limits>
+#include <memory>
 #include <stdexcept>
 #include <string>
 #include <thread>
@@ -1315,6 +1317,61 @@ spec("Box structural subtree retirement rejects unsafe lifetime owners") {
     box.set_focus(nullptr);
     check(box.retire_unbound_structural_subtree("incoming"));
     check_null(box.resolve_handle(incoming_handle));
+  }
+
+  it("blocks retirement from widget layout and frame callbacks") {
+    struct ReentrantWidget final : flexUI::Widget {
+      flexUI::Box *box = nullptr;
+      bool *layout_called = nullptr;
+      bool *layout_rejected = nullptr;
+      bool *frame_called = nullptr;
+      bool *frame_rejected = nullptr;
+
+      void emit_render_commands(const flexUI::Element &,
+                                flexUI::RenderCommandList &) override {}
+      const char *type_name() const override { return "ReentrantWidget"; }
+
+      void sync_host_semantics_for_layout(flexUI::Element &) override {
+        *layout_called = true;
+        *layout_rejected =
+            !box->retire_unbound_structural_subtree("victim");
+      }
+      void update(float, flexUI::Element &) override {
+        *frame_called = true;
+        *frame_rejected =
+            !box->retire_unbound_structural_subtree("victim");
+      }
+    };
+
+    flexUI::Box box(nullptr);
+    bool layout_called = false;
+    bool layout_rejected = false;
+    bool frame_called = false;
+    bool frame_rejected = false;
+    auto widget = std::make_unique<ReentrantWidget>();
+    widget->box = &box;
+    widget->layout_called = &layout_called;
+    widget->layout_rejected = &layout_rejected;
+    widget->frame_called = &frame_called;
+    widget->frame_rejected = &frame_rejected;
+
+    auto *root = box.create("div", "root");
+    auto *host = box.create_with_widget("label", std::move(widget), "host");
+    auto *victim = box.create("div", "victim");
+    root->append(host);
+    root->append(victim);
+    box.set_root(root);
+    const auto old_handle = box.handle_for(*victim);
+    box.update();
+    check(layout_called);
+    check(layout_rejected);
+    check_equal(box.resolve_handle(old_handle), victim);
+    box.update_time(16.0f);
+    check(frame_called);
+    check(frame_rejected);
+    check_equal(box.resolve_handle(old_handle), victim);
+    check(box.retire_unbound_structural_subtree("victim"));
+    check_null(box.resolve_handle(old_handle));
   }
 
   it("refuses focused, hovered or captured subtree retirement") {

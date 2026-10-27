@@ -1133,7 +1133,8 @@ bool Box::retire_detached_elements(const std::vector<Element*>& candidates) noex
 bool Box::retire_unbound_structural_subtree(
     const std::string &root_id) noexcept {
   if (std::this_thread::get_id() != owning_thread_ || root_id.empty() ||
-      compiled_program_installed_ || events_.is_dispatching()) return false;
+      compiled_program_installed_ || events_.is_dispatching() ||
+      borrowed_tree_depth_ != 0) return false;
   try {
     const auto indexed = elements_by_id_.find(root_id);
     if (indexed == elements_by_id_.end()) return false;
@@ -1479,6 +1480,11 @@ bool Box::style_state_affects_selectors(Symbol state) const {
 }
 
 void Box::update() {
+  struct TreeBorrowScope {
+    std::size_t &depth;
+    explicit TreeBorrowScope(std::size_t &value) noexcept : depth(value) { ++depth; }
+    ~TreeBorrowScope() { --depth; }
+  } guard(borrowed_tree_depth_);
   bindings_.update();
   pipeline_->update(*this);
 }
@@ -1496,6 +1502,13 @@ void Box::dispatch_event(Event& event) {
 }
 
 void Box::update_time(float delta_ms) {
+  // Widget::update() is application-extensible and may synchronously attempt
+  // mutation while active_widgets_ and animation state borrow pointers.
+  struct TreeBorrowScope {
+    std::size_t &depth;
+    explicit TreeBorrowScope(std::size_t &value) noexcept : depth(value) { ++depth; }
+    ~TreeBorrowScope() { --depth; }
+  } guard(borrowed_tree_depth_);
   time_ms_ += delta_ms;
   transitions_.update(time_ms_);
   animations_.update(time_ms_);
