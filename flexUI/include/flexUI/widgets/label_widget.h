@@ -37,6 +37,12 @@ public:
     void emit_render_commands(const Element& elem, RenderCommandList& commands) override;
     bool handle_event(const Event& event, Element& elem) override;
     void update(float delta_ms, Element& elem) override;
+    // Label text has no layout-dependent host semantics. Re-synchronizing the
+    // constructor text during layout would overwrite a live bind:text value;
+    // bind_host_element() and set_text() already perform the required sync.
+    void sync_host_semantics_for_layout(Element& elem) override {
+        (void)elem;
+    }
     bool needs_frame_update(const Element& elem) const override {
         (void)elem;
         return false;
