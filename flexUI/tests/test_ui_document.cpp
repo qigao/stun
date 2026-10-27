@@ -1164,3 +1164,69 @@ spec("Scoped XML components are compiled into one owner/controller program") {
         "first::send", flexUI::UiEventKind::Click));
   }
 }
+
+
+spec("Scoped XML components preserve local label and accessibility references") {
+  it("qualifies HTML-style local IDREF, fragment href and multi-target ARIA") {
+    const auto app = flexUI::compile_ui_xml(
+        "<ui name=\"App\"><main id=\"root\"><section id=\"left\"/>"
+        "<section id=\"right\"/></main></ui>");
+    const auto component = flexUI::compile_ui_xml(R"xml(
+      <ui name="Fields" xmlns:attr="urn:flexui:attribute">
+        <div id="panel" slot="frame">
+          <label id="title" attr:for="field"
+                 attr:aria-controls="field hint">Name</label>
+          <input id="field" />
+          <span id="hint">Help</span>
+          <a id="link" attr:href="#field">Jump to field</a>
+        </div>
+      </ui>
+    )xml");
+    check(static_cast<bool>(app));
+    check(static_cast<bool>(component));
+    auto registry = flexUI::WidgetRegistry::builtins();
+    const auto merged = flexUI::compile_scoped_ui_components(
+        *app.program, {{"sales", "left", component.program},
+                       {"costs", "right", component.program}},
+        registry);
+    check(static_cast<bool>(merged));
+    if (!merged) return;
+    flexUI::Box box(nullptr);
+    const auto installed = flexUI::UiDocumentInstantiator::instantiate(
+        box, *merged.program, registry);
+    check(static_cast<bool>(installed));
+    if (!installed) return;
+    check_equal(*box.get_by_id("sales::title")->attribute("for"),
+                "sales::field");
+    check_equal(*box.get_by_id("sales::title")->attribute("aria-controls"),
+                "sales::field sales::hint");
+    check_equal(*box.get_by_id("costs::title")->attribute("for"),
+                "costs::field");
+    check_equal(*box.get_by_id("sales::link")->attribute("href"),
+                "#sales::field");
+    check_equal(*box.get_by_id("costs::link")->attribute("href"),
+                "#costs::field");
+  }
+
+  it("rejects unresolved cross-instance references before mounting") {
+    const auto app = flexUI::compile_ui_xml(
+        "<ui name=\"App\"><main id=\"root\"><div id=\"left\"/>"
+        "</main></ui>");
+    const auto invalid = flexUI::compile_ui_xml(R"xml(
+      <ui name="Wrong" xmlns:attr="urn:flexui:attribute">
+        <div id="panel">
+          <label id="label" attr:for="missing">Label</label>
+        </div>
+      </ui>
+    )xml");
+    check(static_cast<bool>(app));
+    check(static_cast<bool>(invalid));
+    const auto merged = flexUI::compile_scoped_ui_components(
+        *app.program, {{"sales", "left", invalid.program}},
+        flexUI::WidgetRegistry::builtins());
+    check_false(static_cast<bool>(merged));
+    check(merged.error.code == UiDocumentErrorCode::InvalidComponentScope);
+    check_equal(app.program->definition().root.children.size(),
+                std::size_t{1});
+  }
+}
