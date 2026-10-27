@@ -1120,6 +1120,26 @@ UiDocumentCompileResult compile_scoped_ui_components(
   // touched until ALL component programs are accepted and recompiled into
   // ONE authoritative immutable program.
   UiDocumentDefinition merged = application.definition();
+  // A composition of individually bounded XML templates is NOT itself
+  // bounded until we charge the total node cost. Reject oversized repeated
+  // component graphs BEFORE copying or adding any child subtrees.
+  const auto count_nodes = [&limits](const UiNodeDefinition &root) {
+    std::size_t total = 0;
+    std::vector<const UiNodeDefinition *> pending{&root};
+    while (!pending.empty()) {
+      const UiNodeDefinition *node = pending.back();
+      pending.pop_back();
+      if (++total > limits.max_nodes) return total;
+      for (const auto &child : node->children) pending.push_back(&child);
+    }
+    return total;
+  };
+  std::size_t used_nodes = count_nodes(merged.root);
+  if (used_nodes > limits.max_nodes) {
+    result.error = make_error(UiDocumentErrorCode::NodeLimitExceeded,
+                              "base application exceeds XML node budget");
+    return result;
+  }
   std::unordered_set<std::string> base_hosts;
   {
     std::vector<const UiNodeDefinition *> pending{&merged.root};
@@ -1135,14 +1155,16 @@ UiDocumentCompileResult compile_scoped_ui_components(
     const auto valid_scope = [&] {
       if (instance.scope.empty() ||
           instance.scope.size() > limits.max_string_bytes / 2 ||
-          (std::isalpha(static_cast<unsigned char>(instance.scope.front())) == 0 &&
-           instance.scope.front() != '_')) {
+          !((instance.scope.front() >= 'A' && instance.scope.front() <= 'Z') ||
+            (instance.scope.front() >= 'a' && instance.scope.front() <= 'z') ||
+            instance.scope.front() == '_')) {
         return false;
       }
       return std::all_of(instance.scope.begin() + 1, instance.scope.end(),
                          [](char ch) {
-                           const auto value = static_cast<unsigned char>(ch);
-                           return std::isalnum(value) != 0 ||
+                           return (ch >= 'A' && ch <= 'Z') ||
+                                  (ch >= 'a' && ch <= 'z') ||
+                                  (ch >= '0' && ch <= '9') ||
                                   ch == '_' || ch == '-';
                          });
     };
@@ -1167,6 +1189,14 @@ UiDocumentCompileResult compile_scoped_ui_components(
           "ownership contract");
       return result;
     }
+    const auto added = count_nodes(instance.program->definition().root);
+    if (added > limits.max_nodes - used_nodes) {
+      result.error = make_error(
+          UiDocumentErrorCode::NodeLimitExceeded,
+          "combined scoped XML components exceed application node budget");
+      return result;
+    }
+    used_nodes += added;
     // Host lookup occurs on the new private candidate for each insertion.
     // Only base_hosts are allowed so a child component cannot attach to a
     // prior component or depend on insertion order.
