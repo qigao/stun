@@ -98,7 +98,7 @@ add_library(flex_dotgraph_adapter STATIC
 target_include_directories(flex_dotgraph_adapter
     PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
 )
-target_link_libraries(flex_dotgraph_adapter PUBLIC dotgraph flexUI)
+target_link_libraries(flex_dotgraph_adapter PUBLIC dotgraph flexUI PRIVATE chart_ui)
 
 if(WIN32)
     target_compile_definitions(dotgraph_parser PUBLIC NOMINMAX WIN32_LEAN_AND_MEAN)
