@@ -1676,6 +1676,20 @@ spec("Desktop XML components share one native ScriptController and Effects engin
     check_false(static_cast<bool>(missing_input));
     check(missing_input.error.code ==
           flexUI::DesktopApplicationErrorCode::InvalidConfiguration);
+
+    // Name resolution succeeds, but a Bool input cannot drive bind:text.
+    // The detached candidate fails instead of projecting an invalid label.
+    flexUI::DesktopApplicationBuilder wrong_type(nullptr);
+    wrong_type.xml_entry(root)
+        .scoped_xml_component("actual", "host", panel)
+        .scoped_binding_alias("actual", "caption", "flag")
+        .binding_input_bool("flag", true);
+    const auto incompatible = wrong_type.build();
+    check_false(static_cast<bool>(incompatible));
+    check(incompatible.error.code ==
+          flexUI::DesktopApplicationErrorCode::UiInstantiationFailed);
+    check(incompatible.error.ui_error.code ==
+          flexUI::UiDocumentErrorCode::BindingInstallFailed);
   }
 
   it("dispatches same-local-id handlers to distinct qualified UiHandles") {

@@ -1111,7 +1111,7 @@ UiDocumentCompileResult compile_ui_definition(
 // Remap whole variable identifiers in previously compiled binding expressions
 // without touching literal strings, escaped bytes or function call names.
 // The size cap applies during construction, before any Box is touched.
-std::optional<std::string> remap_scoped_binding_expression(
+static std::optional<std::string> remap_scoped_binding_expression(
     std::string_view source,
     const std::unordered_map<std::string, std::string> &aliases,
     std::size_t limit) {

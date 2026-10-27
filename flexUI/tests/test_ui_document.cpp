@@ -1149,6 +1149,30 @@ spec("Scoped XML components are compiled into one owner/controller program") {
     check_equal(box.get_by_id("costs::caption")->text(), "Expenses");
   }
 
+  it("rewrites whole MIR input tokens but never the built-in function") {
+    const auto root = flexUI::compile_ui_xml(
+        "<ui name=\"Root\"><main id=\"root\"><div id=\"host\"/></main></ui>");
+    const auto panel = flexUI::compile_ui_xml(R"xml(
+      <ui name="Panel" xmlns:bind="urn:flexui:binding">
+        <div id="badge"
+             bind:class_active="${max(count, counted) &gt; 1 &amp;&amp; count &gt; 0}"/>
+      </ui>
+    )xml");
+    check(static_cast<bool>(root));
+    check(static_cast<bool>(panel));
+    if (!root || !panel) return;
+    const auto compiled = flexUI::compile_scoped_ui_components(
+        *root.program,
+        {{"sales", "host", panel.program,
+          {{"count", "sales_count"}, {"counted", "sales_counted"}}}},
+        flexUI::WidgetRegistry::builtins());
+    check(static_cast<bool>(compiled));
+    if (!compiled) return;
+    check_equal(compiled.program->bindings().size(), std::size_t{1});
+    check_equal(compiled.program->bindings().front().expression,
+                "max(sales_count, sales_counted) > 1 && sales_count > 0");
+  }
+
   it("refuses duplicate unused or invalid source aliases before Box ownership") {
     const auto base = flexUI::compile_ui_xml(
         "<ui name=\"App\"><main id=\"root\"><div id=\"host\"/></main></ui>");
