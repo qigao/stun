@@ -1651,6 +1651,54 @@ spec("Desktop XML components share one native ScriptController and Effects engin
     check_equal(probe->created_sources.size(), std::size_t{1});
   }
 
+  it("routes real focused native key events to the correct component instance") {
+    auto probe = std::make_shared<ModuleProbe>();
+    probe->emit_valid_mutation = true;
+    flexUI::DesktopApplicationBuilder builder(nullptr);
+    builder.xml_entry(
+        "<ui name=\"Dashboard\"><main id=\"root\">"
+        "<section id=\"left\"/><section id=\"right\"/>"
+        "</main></ui>")
+        .scoped_xml_component(
+            "sales", "left",
+            "<ui name=\"Panel\" xmlns:on=\"urn:flexui:event\">"
+            "<button id=\"action\" on:key_down=\"save_document\">Initial</button>"
+            "</ui>")
+        .scoped_xml_component(
+            "costs", "right",
+            "<ui name=\"Panel\" xmlns:on=\"urn:flexui:event\">"
+            "<button id=\"action\" on:key_down=\"save_document\">Initial</button>"
+            "</ui>")
+        .script("valid-controller", fake_factory(probe));
+    auto built = builder.build();
+    check(static_cast<bool>(built));
+    if (!built) return;
+    auto &app = *built.application;
+    auto &box = app.box();
+    auto *sales = box.get_by_id("sales::action");
+    auto *costs = box.get_by_id("costs::action");
+    check_not_null(sales);
+    check_not_null(costs);
+    if (!sales || !costs) return;
+
+    box.set_focus(sales);
+    auto key = flexUI::Event::key_down(flexUI::KeyCode::A);
+    check(app.dispatch_event(key));
+    check_equal(sales->text(), "Saved");
+    check_equal(costs->text(), "Initial");
+    check_equal(probe->events.size(), std::size_t{1});
+    check_equal(probe->events.front().target.id, "sales::action");
+    check_equal(probe->events.front().current_target.id, "sales::action");
+
+    box.set_focus(costs);
+    key = flexUI::Event::key_down(flexUI::KeyCode::A);
+    check(app.dispatch_event(key));
+    check_equal(costs->text(), "Saved");
+    check_equal(probe->events.size(), std::size_t{2});
+    check_equal(probe->events.back().target.id, "costs::action");
+    check(app.controller()->state() == flexUI::ControllerState::Mounted);
+  }
+
   it("reserves commands before applying scoped UI mutations, then publishes once") {
     auto probe = std::make_shared<ModuleProbe>();
     probe->emit_valid_mutation = true;
