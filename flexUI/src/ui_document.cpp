@@ -179,6 +179,63 @@ UiDocumentError validate_node(const AstNode &node, const UiDocumentLimits &limit
   return {};
 }
 
+// Native chart/DOT projection is immutable typed UI input, not imperative
+// mutation of a live Box. Reject nonfinite geometry or colors before any
+// Element or Widget factory is invoked.
+UiDocumentError validate_native_presentation(
+    const UiNodeDefinition &node, const UiDocumentLimits &limits) {
+  if (node.native_widget_key.size() > limits.max_string_bytes) {
+    return make_error(UiDocumentErrorCode::StringLimitExceeded,
+                      "native widget key exceeds the bounded string limit");
+  }
+  if (!node.presentation) return {};
+  const auto &p = *node.presentation;
+  if (p.absolute && p.relative) {
+    return make_error(UiDocumentErrorCode::InvalidProperty,
+                      "native UI position cannot be absolute and relative");
+  }
+  if (p.absolute && !p.has_bounds) {
+    return make_error(UiDocumentErrorCode::InvalidProperty,
+                      "native absolute positioning requires explicit bounds");
+  }
+  if (p.has_bounds &&
+      (!std::isfinite(p.x) || !std::isfinite(p.y) ||
+       !std::isfinite(p.width) || !std::isfinite(p.height) ||
+       p.width <= 0.0f || p.height <= 0.0f)) {
+    return make_error(UiDocumentErrorCode::InvalidProperty,
+                      "native layout bounds must be finite and positive");
+  }
+  const auto color_ok = [](const std::optional<Color> &value) {
+    if (!value) return true;
+    const auto &v = *value;
+    return std::isfinite(v.r) && std::isfinite(v.g) &&
+           std::isfinite(v.b) && std::isfinite(v.a) &&
+           v.r >= 0.0f && v.r <= 1.0f &&
+           v.g >= 0.0f && v.g <= 1.0f &&
+           v.b >= 0.0f && v.b <= 1.0f &&
+           v.a >= 0.0f && v.a <= 1.0f;
+  };
+  if (!color_ok(p.background_color) ||
+      !color_ok(p.border_color) || !color_ok(p.text_color)) {
+    return make_error(UiDocumentErrorCode::InvalidProperty,
+                      "native color components must be finite within [0, 1]");
+  }
+  if ((p.border_width &&
+       (!std::isfinite(*p.border_width) || *p.border_width < 0.0f)) ||
+      (p.border_radius &&
+       (!std::isfinite(*p.border_radius) || *p.border_radius < 0.0f)) ||
+      (p.opacity &&
+       (!std::isfinite(*p.opacity) || *p.opacity < 0.0f ||
+        *p.opacity > 1.0f)) ||
+      (p.font_size &&
+       (!std::isfinite(*p.font_size) || *p.font_size <= 0.0f)) ||
+      (p.font_family && p.font_family->size() > limits.max_string_bytes)) {
+    return make_error(UiDocumentErrorCode::InvalidProperty,
+                      "invalid native border, opacity or font presentation");
+  }
+  return {};
+}
+
 UiDocumentError validate_definition_node(const UiNodeDefinition &node,
                                          const UiDocumentLimits &limits, std::size_t depth,
                                          std::size_t &node_count,
@@ -196,6 +253,8 @@ UiDocumentError validate_definition_node(const UiNodeDefinition &node,
   if (error) {
     return error;
   }
+  error = validate_native_presentation(node, limits);
+  if (error) return error;
   for (const auto &child : node.children) {
     error = validate_definition_node(child, limits, depth + 1, node_count, ids);
     if (error) {
@@ -613,6 +672,58 @@ struct DetachedTree {
   std::vector<DetachedWidget> widgets;
 };
 
+void apply_native_presentation(Element &element,
+                               const UiNodePresentation &p) {
+  auto &style = element.style_;
+  if (p.has_bounds) {
+    style.width_size.kind = CssSizeKind::Length;
+    style.width_size.value = p.width;
+    style.width_size.expression.clear();
+    style.height_size.kind = CssSizeKind::Length;
+    style.height_size.value = p.height;
+    style.height_size.expression.clear();
+    style.width = p.width;
+    style.height = p.height;
+    style.width_is_percent = false;
+    style.height_is_percent = false;
+    element.set_layout_size(p.width, p.height);
+  }
+  if (p.absolute) {
+    style.position = Position::Absolute;
+    style.left = p.x;
+    style.top = p.y;
+    style.right = NAN;
+    style.bottom = NAN;
+    element.set_position_mode(flex::PositionMode::Absolute);
+    element.set_position_offsets(p.y, NAN, NAN, p.x);
+    element.set_position(p.x, p.y);
+  } else if (p.relative) {
+    style.position = Position::Relative;
+  }
+  if (p.clipped) element.set_clip(true);
+  if (p.background_color) style.background_color = *p.background_color;
+  if (p.border_color) {
+    style.border_color = *p.border_color;
+    style.has_border_side_colors = true;
+    for (auto &color : style.border_colors) color = *p.border_color;
+  }
+  if (p.border_width) {
+    for (auto &width : style.border_width) width = *p.border_width;
+  }
+  if (p.border_style) {
+    for (auto &border : style.border_style) border = *p.border_style;
+  }
+  if (p.border_radius) {
+    for (auto &radius : style.border_radius) radius = *p.border_radius;
+  }
+  if (p.opacity) style.opacity = *p.opacity;
+  if (p.font_size) style.font_size = *p.font_size;
+  if (p.font_family) style.font_family = *p.font_family;
+  if (p.text_color) style.text_color = *p.text_color;
+  if (p.text_align) style.text_align = *p.text_align;
+  if (p.z_index) element.set_z_index(*p.z_index);
+}
+
 void apply_properties(Element &element, const UiNodeDefinition &definition,
                       bool include_event_attributes) {
   const auto find_property = [&](const char *first,
@@ -679,6 +790,9 @@ void apply_properties(Element &element, const UiNodeDefinition &definition,
     } else {
       element.set_attribute(name, value_to_string(value));
     }
+  }
+  if (definition.presentation) {
+    apply_native_presentation(element, *definition.presentation);
   }
 }
 
