@@ -1780,6 +1780,65 @@ spec("Desktop XML components share one native ScriptController and Effects engin
         "costs::action", flexUI::UiEventKind::Click));
   }
 
+  it("declares shared typed binding inputs before scoped component mount and reload") {
+    const std::string root_ui =
+        "<ui name=\"Dashboard\"><main id=\"root\">"
+        "<section id=\"left\"/><section id=\"right\"/>"
+        "</main></ui>";
+    const std::string component =
+        "<ui name=\"Panel\" xmlns:bind=\"urn:flexui:binding\">"
+        "<label id=\"caption\" bind:text=\"$caption\">Initial</label>"
+        "</ui>";
+    flexUI::DesktopApplicationBuilder builder(nullptr);
+    builder.xml_entry(root_ui)
+        .scoped_xml_component("sales", "left", component)
+        .scoped_xml_component("costs", "right", component)
+        .binding_input_string("caption", "Ready");
+    auto built = builder.build();
+    check(static_cast<bool>(built));
+    if (!built) return;
+    auto &app = *built.application;
+    check_equal(app.program().bindings().size(), std::size_t{2});
+    app.box().update();
+    check_equal(app.box().get_by_id("sales::caption")->text(), "Ready");
+    check_equal(app.box().get_by_id("costs::caption")->text(), "Ready");
+
+    app.box().bindings().inputs().set_string("caption", "Running");
+    app.box().update();
+    check_equal(app.box().get_by_id("sales::caption")->text(), "Running");
+    check_equal(app.box().get_by_id("costs::caption")->text(), "Running");
+
+    // Reload publishes a new candidate with its original explicitly seeded
+    // application-global inputs, rather than retaining stale pointers into
+    // the prior component binding runtime.
+    check(app.reload({root_ui, "", "", "reloaded"}));
+    app.box().update();
+    check_equal(app.box().get_by_id("sales::caption")->text(), "Ready");
+    check_equal(app.box().get_by_id("costs::caption")->text(), "Ready");
+  }
+
+  it("rejects duplicate/nonfinite typed input declarations before UI publication") {
+    const std::string root_ui =
+        "<ui name=\"Inputs\"><main id=\"root\"/></ui>";
+    flexUI::DesktopApplicationBuilder duplicates(nullptr);
+    duplicates.xml_entry(root_ui)
+        .binding_input_string("caption", "Ready")
+        .binding_input_bool("caption", true);
+    auto duplicated = duplicates.build();
+    check_false(static_cast<bool>(duplicated));
+    check(duplicated.error.code ==
+          flexUI::DesktopApplicationErrorCode::InvalidConfiguration);
+
+    flexUI::DesktopApplicationBuilder nonfinite(nullptr);
+    nonfinite.xml_entry(root_ui)
+        .binding_input_number("quantity",
+            std::numeric_limits<double>::infinity());
+    auto invalid = nonfinite.build();
+    check_false(static_cast<bool>(invalid));
+    check(invalid.error.code ==
+          flexUI::DesktopApplicationErrorCode::InvalidConfiguration);
+  }
+
   it("rejects duplicate component scopes and missing script exports before mount") {
     const std::string root_ui =
         "<ui name=\"Root\"><main id=\"root\"><div id=\"left\"/>"
