@@ -16,7 +16,7 @@ flexUI::UiDocumentDefinition dotgraph_frame_definition() {
     }
     return result.program;
   }();
-  return compiled->definition();
+  return compiled.program->definition();
 }
 
 }  // namespace charts::ui
