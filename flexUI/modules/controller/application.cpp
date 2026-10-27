@@ -4,6 +4,7 @@
 #include "flexUI/box_mutation_host.h"
 #include "flexUI/ui_xml.h"
 
+#include <algorithm>
 #include <cmath>
 #include <exception>
 #include <limits>
@@ -31,6 +32,7 @@ struct ApplicationConfig {
   UiEntryFormat entry_format = UiEntryFormat::Xml;
   bool script_enabled = false;
   std::vector<DesktopScopedXmlComponent> scoped_components;
+  std::vector<DesktopScopedBindingAlias> scoped_binding_aliases;
   std::vector<DesktopBindingInput> binding_inputs;
 };
 
@@ -245,6 +247,12 @@ CandidateResult build_candidate(const ApplicationConfig &config, DesktopApplicat
       return {{}, std::move(error)};
     }
 
+    if (config.scoped_components.empty() &&
+        !config.scoped_binding_aliases.empty()) {
+      return {{}, fail(DesktopApplicationErrorCode::InvalidConfiguration,
+                       DesktopApplicationStage::Configuration,
+                       "binding aliases require a registered XML component")};
+    }
     if (!config.scoped_components.empty()) {
       if (config.entry_format != UiEntryFormat::Xml) {
         return {{},
@@ -267,6 +275,31 @@ CandidateResult build_candidate(const ApplicationConfig &config, DesktopApplicat
         }
         instances.push_back({component.scope, component.host_id,
                              std::move(nested.program)});
+      }
+      if (config.scoped_binding_aliases.size() > config.limits.document.max_bindings) {
+        return {{}, fail(DesktopApplicationErrorCode::InvalidConfiguration,
+                         DesktopApplicationStage::Configuration,
+                         "scoped aliases exceed configured binding budget")};
+      }
+      for (const auto &alias : config.scoped_binding_aliases) {
+        auto scope = std::find_if(
+            instances.begin(), instances.end(),
+            [&](const UiScopedComponent &item) {
+              return item.scope == alias.scope;
+            });
+        const auto source = std::find_if(
+            config.binding_inputs.begin(), config.binding_inputs.end(),
+            [&](const DesktopBindingInput &input) {
+              return input.name == alias.application_name;
+            });
+        if (scope == instances.end() || source == config.binding_inputs.end()) {
+          return {{}, fail(DesktopApplicationErrorCode::InvalidConfiguration,
+                           DesktopApplicationStage::Configuration,
+                           "scoped binding alias requires a declared scope and "
+                           "explicit application-global typed input")};
+        }
+        scope->input_aliases.push_back(
+            {alias.local_name, alias.application_name});
       }
       auto composed = compile_scoped_ui_components(
           *compiled.program, instances, config.registry, config.limits.document);
@@ -826,6 +859,14 @@ DesktopApplicationBuilder::scoped_xml_component(
     std::string scope, std::string host_id, std::string source) {
   impl_->config.scoped_components.push_back(
       {std::move(scope), std::move(host_id), std::move(source)});
+  return *this;
+}
+
+DesktopApplicationBuilder &
+DesktopApplicationBuilder::scoped_binding_alias(
+    std::string scope, std::string local_name, std::string application_name) {
+  impl_->config.scoped_binding_aliases.push_back(
+      {std::move(scope), std::move(local_name), std::move(application_name)});
   return *this;
 }
 

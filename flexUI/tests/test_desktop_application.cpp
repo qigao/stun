@@ -1596,6 +1596,102 @@ spec("FlexUI natural text obeys content models during reload") {
 
 
 spec("Desktop XML components share one native ScriptController and Effects engine") {
+  it("redirects per-instance String Bool Number and resets on full reload") {
+    const std::string root =
+        "<ui name=\"Dashboard\"><main id=\"root\">"
+        "<section id=\"left\"/><section id=\"right\"/></main></ui>";
+    const std::string panel = R"xml(
+      <ui name="Panel" xmlns:bind="urn:flexui:binding">
+        <div id="panel">
+          <label id="caption" bind:text="$caption">Initial</label>
+          <div id="state" bind:class_active="${enabled &amp;&amp; quantity &gt; 1}"/>
+          <label id="footer" bind:text="$shared">Shared</label>
+        </div>
+      </ui>
+    )xml";
+    flexUI::DesktopApplicationBuilder builder(nullptr);
+    builder.xml_entry(root)
+        .scoped_xml_component("sales", "left", panel)
+        .scoped_xml_component("costs", "right", panel)
+        .scoped_binding_alias("sales", "caption", "sales_caption")
+        .scoped_binding_alias("sales", "enabled", "sales_enabled")
+        .scoped_binding_alias("sales", "quantity", "sales_quantity")
+        .scoped_binding_alias("costs", "caption", "costs_caption")
+        .scoped_binding_alias("costs", "enabled", "costs_enabled")
+        .scoped_binding_alias("costs", "quantity", "costs_quantity")
+        .binding_input_string("sales_caption", "Revenue")
+        .binding_input_string("costs_caption", "Expenses")
+        .binding_input_string("shared", "One application")
+        .binding_input_bool("sales_enabled", true)
+        .binding_input_bool("costs_enabled", true)
+        .binding_input_number("sales_quantity", 5)
+        .binding_input_number("costs_quantity", 0);
+    auto built = builder.build();
+    check(static_cast<bool>(built));
+    if (!built) return;
+    auto &app = *built.application;
+    check_equal(app.program().bindings().size(), std::size_t{6});
+    app.box().update();
+    check_equal(app.box().get_by_id("sales::caption")->text(), "Revenue");
+    check_equal(app.box().get_by_id("costs::caption")->text(), "Expenses");
+    check_equal(app.box().get_by_id("sales::footer")->text(), "One application");
+    check_equal(app.box().get_by_id("costs::footer")->text(), "One application");
+    check(app.box().get_by_id("sales::state")->has_class(flexUI::Symbol("active")));
+    check_false(app.box().get_by_id("costs::state")->has_class(flexUI::Symbol("active")));
+    app.box().bindings().inputs().set_string("sales_caption", "Running");
+    app.box().bindings().inputs().set_number("costs_quantity", 3.0);
+    app.box().update();
+    check_equal(app.box().get_by_id("sales::caption")->text(), "Running");
+    check_equal(app.box().get_by_id("costs::caption")->text(), "Expenses");
+    check(app.box().get_by_id("costs::state")->has_class(flexUI::Symbol("active")));
+
+    check(app.reload({root, "", "", "alias-reload"}));
+    app.box().update();
+    check_equal(app.box().get_by_id("sales::caption")->text(), "Revenue");
+    check_equal(app.box().get_by_id("costs::caption")->text(), "Expenses");
+    check_false(app.box().get_by_id("costs::state")->has_class(flexUI::Symbol("active")));
+  }
+
+  it("refuses unknown scopes and unseeded alias targets before candidate mount") {
+    const std::string root =
+        "<ui name=\"App\"><main id=\"root\"><section id=\"host\"/></main></ui>";
+    const std::string panel =
+        "<ui name=\"Panel\" xmlns:bind=\"urn:flexui:binding\">"
+        "<label id=\"caption\" bind:text=\"$caption\">Initial</label></ui>";
+    flexUI::DesktopApplicationBuilder unknown_scope(nullptr);
+    unknown_scope.xml_entry(root)
+        .scoped_xml_component("actual", "host", panel)
+        .binding_input_string("caption_value", "Ready")
+        .scoped_binding_alias("other", "caption", "caption_value");
+    const auto missing_scope = unknown_scope.build();
+    check_false(static_cast<bool>(missing_scope));
+    check(missing_scope.error.code ==
+          flexUI::DesktopApplicationErrorCode::InvalidConfiguration);
+
+    flexUI::DesktopApplicationBuilder unseeded(nullptr);
+    unseeded.xml_entry(root)
+        .scoped_xml_component("actual", "host", panel)
+        .scoped_binding_alias("actual", "caption", "unknown");
+    const auto missing_input = unseeded.build();
+    check_false(static_cast<bool>(missing_input));
+    check(missing_input.error.code ==
+          flexUI::DesktopApplicationErrorCode::InvalidConfiguration);
+
+    // Name resolution succeeds, but a Bool input cannot drive bind:text.
+    // The detached candidate fails instead of projecting an invalid label.
+    flexUI::DesktopApplicationBuilder wrong_type(nullptr);
+    wrong_type.xml_entry(root)
+        .scoped_xml_component("actual", "host", panel)
+        .scoped_binding_alias("actual", "caption", "flag")
+        .binding_input_bool("flag", true);
+    const auto incompatible = wrong_type.build();
+    check_false(static_cast<bool>(incompatible));
+    check(incompatible.error.code ==
+          flexUI::DesktopApplicationErrorCode::UiInstantiationFailed);
+    check(incompatible.error.ui_error.code ==
+          flexUI::UiDocumentErrorCode::BindingInstallFailed);
+  }
+
   it("dispatches same-local-id handlers to distinct qualified UiHandles") {
     auto probe = std::make_shared<ModuleProbe>();
     probe->emit_valid_mutation = true;

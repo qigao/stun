@@ -59,6 +59,13 @@ struct DesktopBindingInput {
   std::variant<double, bool, std::string> value;
 };
 
+/// Explicit static component-local-name to declared application input mapping.
+struct DesktopScopedBindingAlias {
+  std::string scope;
+  std::string local_name;
+  std::string application_name;
+};
+
 struct DesktopApplicationLimits {
   UiDocumentLimits document;
   ControllerLimits controller;
@@ -283,6 +290,12 @@ public:
   /// unsupported until it has its own ownership and cancellation contract.
   DesktopApplicationBuilder &scoped_xml_component(
       std::string scope, std::string host_id, std::string source);
+
+  /// Redirect one static component template's binding input source to an
+  /// explicitly declared typed application-global input. No implicit
+  /// namespace, runtime per-component owner or dynamic unregister is created.
+  DesktopApplicationBuilder &scoped_binding_alias(
+      std::string scope, std::string local_name, std::string application_name);
 
   /// Declare a bounded application-global input before XML bindings mount.
   /// Input names are shared explicitly across components. Every candidate

@@ -3,10 +3,24 @@
 状态：架构决策已采用，实施与验收按下列工作项推进
 日期：2026-08-31
 
-## 2026-10-27 P4.1 组件作用域候选（Draft PR #282）
+## 2026-10-27 P4.2 静态组件显式输入别名（Draft）
+
+P4.1 已通过 PR #282 合入 master。本轮为复用的 XML 组件增加编译期、
+**显式**输入映射。例如模板中 `bind:text="$caption"`，可用
+`builder.scoped_binding_alias("sales", "caption", "sales_caption")`
+将此处源绑定到 `builder.binding_input_string("sales_caption", "Revenue")`，
+而第二实例 `costs` 可以选择另一个声明的输入。布尔/数值 MIR 表达式亦可
+对完整变量名做定向重写，字符串字面量与函数名不受改写。
+
+组件不会获得独立的 `UiDataContext`；全部输入由单一应用 Box 持有。
+未知作用域、缺失已声明的应用输入、重复或未使用的映射均拒绝。完整 reload
+仍从显式种子值创建全新候选；动态 mount/unmount、私有输入生命周期、
+资源所有权和安全能力隔离仍属后续工作。
+
+## 2026-10-27 P4.1 组件作用域（已合并 PR #282）
 
 此阶段基于已合并的 Chart/Infographic/DOT XML 事务装配与完整 DOT
-源码→GraphLayout→Widget 测试。**PR #282 尚在 CI 验收，下面是候选 API，不代表已发布。**
+源码→GraphLayout→Widget 测试。PR #282 已合并；以下为已验收契约。
 
 - `DesktopApplicationBuilder::scoped_xml_component(scope, host_id, xml)` 仅在应用
   **首次挂载/完整 reload 前**组合组件；宿主必须是根 XML 中已存在的结构节点。
