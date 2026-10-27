@@ -82,7 +82,7 @@ jobs:
           echo "VCPKG_BINARY_CACHE=$cache" >> "$GITHUB_ENV"
 
       - name: Configure exact-ABI curl GitHub Packages cache
-        uses: qigao/vcpkg-cache/.github/actions/setup-vcpkg-curl-cache@b744e960ff69ac9b2372261c472f3f548258c8e5
+        uses: qigao/vcpkg-cache/.github/actions/setup-vcpkg-curl-cache@4d0c635920aa061a41be6c5bc184d7023f5cb834
         with:
           mode: read
           triplet: x64-linux
