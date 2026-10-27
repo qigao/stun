@@ -1068,3 +1068,279 @@ spec("UiDocument stages native DOT presentation without Box side effects") {
     check(element->style_.text_align == flexUI::TextAlign::Center);
   }
 }
+
+
+spec("Scoped XML components are compiled into one owner/controller program") {
+  it("rewrites two identical local event and binding IDs without a second tree") {
+    const auto app = flexUI::compile_ui_xml(R"xml(
+      <ui name="Dashboard">
+        <main id="root">
+          <section id="left"/>
+          <section id="right"/>
+        </main>
+      </ui>
+    )xml");
+    const auto component = flexUI::compile_ui_xml(R"xml(
+      <ui name="Panel" xmlns:on="urn:flexui:event"
+          xmlns:bind="urn:flexui:binding">
+        <div id="panel" slot="frame">
+          <button id="action" slot="action" on:click="save_document">Save</button>
+          <label id="caption" bind:text="$caption">Initial</label>
+        </div>
+      </ui>
+    )xml");
+    check(static_cast<bool>(app));
+    check(static_cast<bool>(component));
+    const auto registry = flexUI::WidgetRegistry::builtins();
+    const std::vector<flexUI::UiScopedComponent> instances = {
+        {"sales", "left", component.program},
+        {"costs", "right", component.program}};
+    const auto combined = flexUI::compile_scoped_ui_components(
+        *app.program, instances, registry);
+    check(static_cast<bool>(combined));
+    if (!combined) return;
+    check_equal(combined.program->event_bindings().size(), std::size_t{2});
+    check_equal(combined.program->bindings().size(), std::size_t{2});
+    check_not_null(combined.program->find_event_binding(
+        "sales::action", flexUI::UiEventKind::Click));
+    check_not_null(combined.program->find_event_binding(
+        "costs::action", flexUI::UiEventKind::Click));
+    check_null(combined.program->find_event_binding(
+        "action", flexUI::UiEventKind::Click));
+    flexUI::Box box(nullptr);
+    box.bindings().inputs().set_string("caption", "Revenue");
+    const auto installed = flexUI::UiDocumentInstantiator::instantiate(
+        box, *combined.program, registry);
+    check(static_cast<bool>(installed));
+    if (!installed) return;
+    check_equal(box.root(), installed.tree.root);
+    auto* sales = box.get_by_id("sales::action");
+    auto* costs = box.get_by_id("costs::action");
+    check_not_null(sales);
+    check_not_null(costs);
+    check(sales != costs);
+    check_null(box.get_by_id("action"));
+    check_equal(*sales->attribute("data-slot"), "action");
+    check_equal(*costs->attribute("data-slot"), "action");
+    check_equal(installed.tree.slots_by_name.size(), std::size_t{0});
+    check_equal(sales->parent_elem()->id(), "sales::panel");
+    check_equal(costs->parent_elem()->id(), "costs::panel");
+    box.update();
+    check_equal(box.get_by_id("sales::caption")->text(), "Revenue");
+    check_equal(box.get_by_id("costs::caption")->text(), "Revenue");
+  }
+
+  it("charges repeated components against one total node budget before copying") {
+    const auto app = flexUI::compile_ui_xml(
+        "<ui name=\"App\"><main id=\"root\"><div id=\"left\"/>"
+        "<div id=\"right\"/></main></ui>");
+    const auto component = flexUI::compile_ui_xml(
+        "<ui name=\"Panel\"><div id=\"panel\"><span id=\"inner\"/>"
+        "</div></ui>");
+    check(static_cast<bool>(app));
+    check(static_cast<bool>(component));
+    flexUI::UiDocumentLimits limits;
+    limits.max_nodes = 6;  // base=3, each component=2, total=7.
+    const auto oversized = flexUI::compile_scoped_ui_components(
+        *app.program, {{"sales", "left", component.program},
+                       {"costs", "right", component.program}},
+        flexUI::WidgetRegistry::builtins(), limits);
+    check_false(static_cast<bool>(oversized));
+    check(oversized.error.code == UiDocumentErrorCode::NodeLimitExceeded);
+    check_equal(app.program->definition().root.children.size(),
+                std::size_t{2});
+    // The same input is accepted when the *aggregate* budget is sufficient.
+    limits.max_nodes = 7;
+    const auto admitted = flexUI::compile_scoped_ui_components(
+        *app.program, {{"sales", "left", component.program},
+                       {"costs", "right", component.program}},
+        flexUI::WidgetRegistry::builtins(), limits);
+    check(static_cast<bool>(admitted));
+  }
+
+  it("fails closed on duplicate scopes, unknown hosts, and widget hosts") {
+    const auto base = flexUI::compile_ui_xml(
+        "<ui name=\"Root\"><main id=\"root\"><div id=\"host\"/>"
+        "<button id=\"not-a-host\">X</button></main></ui>");
+    const auto component = flexUI::compile_ui_xml(
+        "<ui name=\"Panel\"><button id=\"send\">Send</button></ui>");
+    check(static_cast<bool>(base));
+    check(static_cast<bool>(component));
+    const auto registry = flexUI::WidgetRegistry::builtins();
+    const auto duplicate = flexUI::compile_scoped_ui_components(
+        *base.program,
+        {{"first", "host", component.program},
+         {"first", "host", component.program}}, registry);
+    check_false(static_cast<bool>(duplicate));
+    check(duplicate.error.code == UiDocumentErrorCode::InvalidComponentScope);
+    const auto missing = flexUI::compile_scoped_ui_components(
+        *base.program, {{"first", "unknown", component.program}}, registry);
+    check_false(static_cast<bool>(missing));
+    check(missing.error.code == UiDocumentErrorCode::MissingComponentHost);
+    const auto widget = flexUI::compile_scoped_ui_components(
+        *base.program, {{"first", "not-a-host", component.program}}, registry);
+    check_false(static_cast<bool>(widget));
+    check(widget.error.code == UiDocumentErrorCode::InvalidMountTarget);
+    const auto invalid = flexUI::compile_scoped_ui_components(
+        *base.program, {{"bad::scope", "host", component.program}}, registry);
+    check_false(static_cast<bool>(invalid));
+    check(invalid.error.code == UiDocumentErrorCode::InvalidComponentScope);
+    // Component IDs are scoped, never leaked to a separate live Box by
+    // failed compilation; the pristine base program remains unchanged.
+    check_equal(base.program->definition().root.children.size(), std::size_t{2});
+    check_null(base.program->find_event_binding(
+        "first::send", flexUI::UiEventKind::Click));
+  }
+}
+
+
+spec("Scoped XML components preserve local label and accessibility references") {
+  it("qualifies HTML-style local IDREF, fragment href and multi-target ARIA") {
+    const auto app = flexUI::compile_ui_xml(
+        "<ui name=\"App\"><main id=\"root\"><section id=\"left\"/>"
+        "<section id=\"right\"/></main></ui>");
+    const auto component = flexUI::compile_ui_xml(R"xml(
+      <ui name="Fields" xmlns:attr="urn:flexui:attribute">
+        <div id="panel" slot="frame">
+          <label id="title" attr:for="field"
+                 attr:aria-controls="field hint">Name</label>
+          <input id="field" />
+          <span id="hint">Help</span>
+          <a id="link" attr:href="#field">Jump to field</a>
+        </div>
+      </ui>
+    )xml");
+    check(static_cast<bool>(app));
+    check(static_cast<bool>(component));
+    auto registry = flexUI::WidgetRegistry::builtins();
+    const auto merged = flexUI::compile_scoped_ui_components(
+        *app.program, {{"sales", "left", component.program},
+                       {"costs", "right", component.program}},
+        registry);
+    check(static_cast<bool>(merged));
+    if (!merged) return;
+    flexUI::Box box(nullptr);
+    const auto installed = flexUI::UiDocumentInstantiator::instantiate(
+        box, *merged.program, registry);
+    check(static_cast<bool>(installed));
+    if (!installed) return;
+    check_equal(*box.get_by_id("sales::title")->attribute("for"),
+                "sales::field");
+    check_equal(*box.get_by_id("sales::title")->attribute("aria-controls"),
+                "sales::field sales::hint");
+    check_equal(*box.get_by_id("costs::title")->attribute("for"),
+                "costs::field");
+    check_equal(*box.get_by_id("sales::link")->attribute("href"),
+                "#sales::field");
+    check_equal(*box.get_by_id("costs::link")->attribute("href"),
+                "#costs::field");
+  }
+
+
+  it("qualifies plain XML IDREF and local links for each component instance") {
+    const auto app = flexUI::compile_ui_xml(
+        "<ui name=\"App\"><main id=\"root\"><div id=\"left\"/>"
+        "<div id=\"right\"/></main></ui>");
+    const auto component = flexUI::compile_ui_xml(R"xml(
+      <ui name="Plain" xmlns:attr="urn:flexui:attribute">
+        <div id="panel">
+          <label id="plain-label" for="field" aria-labelledby="title hint"
+                 aria-flowto="field hint">Name</label>
+          <span id="title">Title</span>
+          <span id="hint">Help</span>
+          <input id="field" />
+          <span id="detail" aria-details="hint"
+                aria-errormessage="hint" headers="title hint"/>
+          <a id="plain-link" href="#field">Local</a>
+          <a id="external-link" href="https://example.com/#field">External</a>
+        </div>
+      </ui>
+    )xml");
+    check(static_cast<bool>(app));
+    check(static_cast<bool>(component));
+    if (!app || !component) return;
+    const auto registry = flexUI::WidgetRegistry::builtins();
+    const auto combined = flexUI::compile_scoped_ui_components(
+        *app.program, {{"sales", "left", component.program},
+                       {"costs", "right", component.program}}, registry);
+    check(static_cast<bool>(combined));
+    if (!combined) return;
+    flexUI::Box box(nullptr);
+    const auto mounted = flexUI::UiDocumentInstantiator::instantiate(
+        box, *combined.program, registry);
+    check(static_cast<bool>(mounted));
+    if (!mounted) return;
+    check_equal(*box.get_by_id("sales::plain-label")->attribute("for"),
+                "sales::field");
+    check_equal(*box.get_by_id("costs::plain-label")->attribute("for"),
+                "costs::field");
+    check_equal(*box.get_by_id("sales::plain-label")->attribute("aria-labelledby"),
+                "sales::title sales::hint");
+    check_equal(*box.get_by_id("costs::plain-label")->attribute("aria-flowto"),
+                "costs::field costs::hint");
+    check_equal(*box.get_by_id("sales::detail")->attribute("aria-details"),
+                "sales::hint");
+    check_equal(*box.get_by_id("costs::detail")->attribute("aria-errormessage"),
+                "costs::hint");
+    check_equal(*box.get_by_id("sales::detail")->attribute("headers"),
+                "sales::title sales::hint");
+    check_equal(*box.get_by_id("sales::plain-link")->attribute("href"),
+                "#sales::field");
+    check_equal(*box.get_by_id("costs::plain-link")->attribute("href"),
+                "#costs::field");
+    check_equal(*box.get_by_id("sales::external-link")->attribute("href"),
+                "https://example.com/#field");
+  }
+
+  it("rejects conflicting plain/attr aliases and unresolved plain IDREFs") {
+    const auto app = flexUI::compile_ui_xml(
+        "<ui name=\"App\"><main id=\"root\"><div id=\"left\"/></main></ui>");
+    const auto ambiguous = flexUI::compile_ui_xml(R"xml(
+      <ui name="Ambiguous" xmlns:attr="urn:flexui:attribute">
+        <div id="panel">
+          <span id="field"/>
+          <a id="link" href="#field" attr:href="#field">Link</a>
+        </div>
+      </ui>
+    )xml");
+    const auto missing = flexUI::compile_ui_xml(R"xml(
+      <ui name="Missing"><label id="label" for="foreign">Label</label></ui>
+    )xml");
+    check(static_cast<bool>(app));
+    check(static_cast<bool>(ambiguous));
+    check(static_cast<bool>(missing));
+    if (!app || !ambiguous || !missing) return;
+    const auto registry = flexUI::WidgetRegistry::builtins();
+    const auto alias_error = flexUI::compile_scoped_ui_components(
+        *app.program, {{"sales", "left", ambiguous.program}}, registry);
+    check_false(static_cast<bool>(alias_error));
+    check(alias_error.error.code == UiDocumentErrorCode::InvalidProperty);
+    const auto missing_error = flexUI::compile_scoped_ui_components(
+        *app.program, {{"sales", "left", missing.program}}, registry);
+    check_false(static_cast<bool>(missing_error));
+    check(missing_error.error.code == UiDocumentErrorCode::InvalidComponentScope);
+    check_equal(app.program->definition().root.children.size(), std::size_t{1});
+  }
+
+  it("rejects unresolved cross-instance references before mounting") {
+    const auto app = flexUI::compile_ui_xml(
+        "<ui name=\"App\"><main id=\"root\"><div id=\"left\"/>"
+        "</main></ui>");
+    const auto invalid = flexUI::compile_ui_xml(R"xml(
+      <ui name="Wrong" xmlns:attr="urn:flexui:attribute">
+        <div id="panel">
+          <label id="label" attr:for="missing">Label</label>
+        </div>
+      </ui>
+    )xml");
+    check(static_cast<bool>(app));
+    check(static_cast<bool>(invalid));
+    const auto merged = flexUI::compile_scoped_ui_components(
+        *app.program, {{"sales", "left", invalid.program}},
+        flexUI::WidgetRegistry::builtins());
+    check_false(static_cast<bool>(merged));
+    check(merged.error.code == UiDocumentErrorCode::InvalidComponentScope);
+    check_equal(app.program->definition().root.children.size(),
+                std::size_t{1});
+  }
+}

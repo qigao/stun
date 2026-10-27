@@ -17,6 +17,7 @@
 #include <optional>
 #include <sstream>
 #include <stdexcept>
+#include <string_view>
 #include <unordered_set>
 #include <utility>
 
@@ -1103,6 +1104,252 @@ UiDocumentCompileResult compile_ui_definition(
 
   result.program = std::shared_ptr<const CompiledUiProgram>(
       new CompiledUiProgram(std::move(impl)));
+  return result;
+}
+
+UiDocumentCompileResult compile_scoped_ui_components(
+    const CompiledUiProgram &application,
+    const std::vector<UiScopedComponent> &components,
+    const WidgetRegistry &registry, const UiDocumentLimits &limits) {
+  UiDocumentCompileResult result;
+  if (components.size() > limits.max_nodes) {
+    result.error = make_error(UiDocumentErrorCode::NodeLimitExceeded,
+                              "too many scoped XML component instances");
+    return result;
+  }
+  // Build a detached compiler input. No Box or live Widget/Controller is
+  // touched until ALL component programs are accepted and recompiled into
+  // ONE authoritative immutable program.
+  UiDocumentDefinition merged = application.definition();
+  // A composition of individually bounded XML templates is NOT itself
+  // bounded until we charge the total node cost. Reject oversized repeated
+  // component graphs BEFORE copying or adding any child subtrees.
+  const auto count_nodes = [&limits](const UiNodeDefinition &root) {
+    std::size_t total = 0;
+    std::vector<const UiNodeDefinition *> pending{&root};
+    while (!pending.empty()) {
+      const UiNodeDefinition *node = pending.back();
+      pending.pop_back();
+      if (++total > limits.max_nodes) return total;
+      for (const auto &child : node->children) pending.push_back(&child);
+    }
+    return total;
+  };
+  std::size_t used_nodes = count_nodes(merged.root);
+  if (used_nodes > limits.max_nodes) {
+    result.error = make_error(UiDocumentErrorCode::NodeLimitExceeded,
+                              "base application exceeds XML node budget");
+    return result;
+  }
+  std::unordered_set<std::string> base_hosts;
+  {
+    std::vector<const UiNodeDefinition *> pending{&merged.root};
+    while (!pending.empty()) {
+      const UiNodeDefinition *node = pending.back();
+      pending.pop_back();
+      if (!node->id.empty()) base_hosts.insert(node->id);
+      for (const auto &child : node->children) pending.push_back(&child);
+    }
+  }
+  std::unordered_set<std::string> scopes;
+  for (const auto &instance : components) {
+    const auto valid_scope = [&] {
+      if (instance.scope.empty() ||
+          instance.scope.size() > limits.max_string_bytes / 2 ||
+          !((instance.scope.front() >= 'A' && instance.scope.front() <= 'Z') ||
+            (instance.scope.front() >= 'a' && instance.scope.front() <= 'z') ||
+            instance.scope.front() == '_')) {
+        return false;
+      }
+      return std::all_of(instance.scope.begin() + 1, instance.scope.end(),
+                         [](char ch) {
+                           return (ch >= 'A' && ch <= 'Z') ||
+                                  (ch >= 'a' && ch <= 'z') ||
+                                  (ch >= '0' && ch <= '9') ||
+                                  ch == '_' || ch == '-';
+                         });
+    };
+    if (!valid_scope() || !scopes.emplace(instance.scope).second ||
+        !instance.program) {
+      result.error = make_error(
+          UiDocumentErrorCode::InvalidComponentScope,
+          "component requires a unique ASCII scope and a compiled program");
+      return result;
+    }
+    if (base_hosts.count(instance.host_id) == 0) {
+      result.error = make_error(
+          UiDocumentErrorCode::MissingComponentHost,
+          "scoped XML component host must exist in the base application: " +
+              instance.host_id);
+      return result;
+    }
+    if (!instance.program->resources().empty()) {
+      result.error = make_error(
+          UiDocumentErrorCode::UnsupportedComponentResources,
+          "component-specific resources require an explicit scoped resource "
+          "ownership contract");
+      return result;
+    }
+    const auto added = count_nodes(instance.program->definition().root);
+    if (added > limits.max_nodes - used_nodes) {
+      result.error = make_error(
+          UiDocumentErrorCode::NodeLimitExceeded,
+          "combined scoped XML components exceed application node budget");
+      return result;
+    }
+    used_nodes += added;
+    // Host lookup occurs on the new private candidate for each insertion.
+    // Only base_hosts are allowed so a child component cannot attach to a
+    // prior component or depend on insertion order.
+    UiNodeDefinition *host = nullptr;
+    std::vector<UiNodeDefinition *> pending{&merged.root};
+    while (!pending.empty()) {
+      UiNodeDefinition *node = pending.back();
+      pending.pop_back();
+      if (node->id == instance.host_id) {
+        host = node;
+        break;
+      }
+      for (auto &child : node->children) pending.push_back(&child);
+    }
+    if (!host || !registry.descriptor(host->tag) ||
+        registry.descriptor(host->tag)->kind != UiNodeKind::Container) {
+      result.error = make_error(
+          UiDocumentErrorCode::InvalidMountTarget,
+          "scoped XML component requires a structural, non-Widget host");
+      return result;
+    }
+
+    UiNodeDefinition subtree = instance.program->definition().root;
+    // Validate local semantic references against this one immutable component
+    // before qualifying IDs. Never silently link a label/ARIA target from one
+    // instance to another instance or to an application-global element.
+    std::unordered_set<std::string> local_ids;
+    {
+      std::vector<const UiNodeDefinition *> pending{&subtree};
+      while (!pending.empty()) {
+        const auto *node = pending.back();
+        pending.pop_back();
+        if (!node->id.empty()) local_ids.insert(node->id);
+        for (const auto &child : node->children) pending.push_back(&child);
+      }
+    }
+    std::vector<UiNodeDefinition *> nodes{&subtree};
+    while (!nodes.empty()) {
+      UiNodeDefinition *node = nodes.back();
+      nodes.pop_back();
+      if (!node->native_widget_key.empty()) {
+        result.error = make_error(
+            UiDocumentErrorCode::InvalidComponentScope,
+            "native component Widget factory keys need an explicit "
+            "per-instance registry contract");
+        return result;
+      }
+      if (!node->id.empty()) {
+        if (node->id.find("::") != std::string::npos ||
+            node->id.size() + instance.scope.size() + 2 >
+                limits.max_string_bytes) {
+          result.error = make_error(
+              UiDocumentErrorCode::InvalidComponentScope,
+              "component element ID cannot be safely qualified");
+          return result;
+        }
+        node->id = instance.scope + "::" + node->id;
+      }
+      // Semantic IDREF attributes, including multi-token ARIA references,
+      // must point to this component's OWN known IDs. External URLs remain
+      // ordinary URLs; fragment links (#id) refer to qualified local IDs.
+      for (auto &[name, value] : node->properties) {
+        const bool namespaced = name.rfind("attr.", 0) == 0;
+        const std::string_view key = namespaced
+                                         ? std::string_view(name).substr(5)
+                                         : std::string_view(name);
+        const bool multiple = key == "aria-labelledby" ||
+                              key == "aria-describedby" ||
+                              key == "aria-controls" ||
+                              key == "aria-owns" ||
+                              key == "aria-flowto" ||
+                              key == "headers";
+        const bool single = key == "for" || key == "list" ||
+                            key == "form" ||
+                            key == "aria-activedescendant" ||
+                            key == "aria-details" ||
+                            key == "aria-errormessage";
+        const bool href = key == "href";
+        if (!multiple && !single && !href) continue;
+        // The plain and attr:-prefixed spellings map to the same Element
+        // attribute. Never allow one to override the scoped IDREF of another.
+        const std::string alias = namespaced
+                                      ? std::string(key)
+                                      : "attr." + name;
+        if (node->properties.count(alias) != 0) {
+          result.error = make_error(
+              UiDocumentErrorCode::InvalidProperty,
+              "component IDREF attribute has conflicting XML aliases: " +
+                  std::string(key));
+          return result;
+        }
+        const auto *ref = std::get_if<std::string>(&value);
+        if (!ref) {
+          result.error = make_error(UiDocumentErrorCode::InvalidProperty,
+                                    "component IDREF attribute must be a string");
+          return result;
+        }
+        if (href && (ref->empty() || ref->front() != '#')) continue;
+        const std::string raw = href ? ref->substr(1) : *ref;
+        std::istringstream tokens(raw);
+        std::string id;
+        std::string qualified;
+        std::size_t count = 0;
+        while (tokens >> id) {
+          if (local_ids.count(id) == 0 ||
+              id.size() + instance.scope.size() + 2 >
+                  limits.max_string_bytes) {
+            result.error = make_error(
+                UiDocumentErrorCode::InvalidComponentScope,
+                "component IDREF must resolve inside the same scope: " + id);
+            return result;
+          }
+          if (++count > 1) qualified += " ";
+          qualified += instance.scope + "::" + id;
+        }
+        if (count == 0 || (!multiple && count != 1)) {
+          result.error = make_error(
+              UiDocumentErrorCode::InvalidProperty,
+              "component IDREF requires valid local target IDs");
+          return result;
+        }
+        value = href ? "#" + qualified : qualified;
+      }
+      // The same template can appear more than once in a single program.
+      // Its slot names stay available to CSS/semantic matching via
+      // data-slot, but must not enter the app-wide UNIQUE slot index.
+      if (auto it = node->properties.find("slot");
+          it != node->properties.end()) {
+        const auto *slot = std::get_if<std::string>(&it->second);
+        if (!slot || node->properties.count("attr.data-slot") != 0) {
+          result.error = make_error(
+              UiDocumentErrorCode::InvalidProperty,
+              "component slot cannot shadow data-slot");
+          return result;
+        }
+        std::string value = *slot;
+        node->properties.erase(it);
+        node->properties.emplace("attr.data-slot", std::move(value));
+        node->property_spans.erase("slot");
+      }
+      for (auto &child : node->children) nodes.push_back(&child);
+    }
+    host->children.push_back(std::move(subtree));
+  }
+  result = compile_ui_definition(std::move(merged), application.resources(),
+                                 limits);
+  if (result) {
+    if (auto error = registry.validate(*result.program, limits)) {
+      result.program.reset();
+      result.error = std::move(error);
+    }
+  }
   return result;
 }
 

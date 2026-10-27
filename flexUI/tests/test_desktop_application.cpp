@@ -1,5 +1,6 @@
 #include <flexUI/application.h>
 #include <flexUI/application_host_bridge.h>
+#include <flexUI/render_command.h>
 #include <flexUI/widgets/button_widget.h>
 #include <flexUI/widgets/input_widget.h>
 
@@ -1590,5 +1591,411 @@ spec("FlexUI natural text obeys content models during reload") {
     check_equal(box->get_by_id("save"), save);
     check_equal(dynamic_cast<flexUI::ButtonWidget *>(save->widget)->text(), "Save & close");
     check_equal(built.application->sources().ui, source);
+  }
+}
+
+
+spec("Desktop XML components share one native ScriptController and Effects engine") {
+  it("dispatches same-local-id handlers to distinct qualified UiHandles") {
+    auto probe = std::make_shared<ModuleProbe>();
+    probe->emit_valid_mutation = true;
+    const std::string root_ui =
+        "<ui name=\"Dashboard\"><main id=\"root\">"
+        "<section id=\"left\"/><section id=\"right\"/>"
+        "</main></ui>";
+    const std::string panel_xml =
+        "<ui name=\"Panel\" xmlns:on=\"urn:flexui:event\">"
+        "<div id=\"action\" slot=\"control\" on:click=\"save_document\">"
+        "Original</div></ui>";
+
+    flexUI::DesktopApplicationBuilder builder(nullptr);
+    builder.xml_entry(root_ui)
+        .scoped_xml_component("sales", "left", panel_xml)
+        .scoped_xml_component("costs", "right", panel_xml)
+        .script("valid-controller", fake_factory(probe));
+    auto built = builder.build();
+    check(static_cast<bool>(built));
+    if (!built) return;
+    auto &app = *built.application;
+    auto &box = app.box();
+    auto* sales = box.get_by_id("sales::action");
+    auto* costs = box.get_by_id("costs::action");
+    check_not_null(sales);
+    check_not_null(costs);
+    check(sales != costs);
+    check_null(box.get_by_id("action"));
+    check_not_null(app.program().find_event_binding(
+        "sales::action", flexUI::UiEventKind::Click));
+    check_not_null(app.program().find_event_binding(
+        "costs::action", flexUI::UiEventKind::Click));
+    check_equal(*sales->attribute("data-slot"), "control");
+    check_equal(*costs->attribute("data-slot"), "control");
+
+    flexUI::ScriptEventSnapshot event;
+    event.event = flexUI::UiEventKind::Click;
+    event.target = box.handle_for(*sales);
+    event.current_target = event.target;
+    check(event.target);
+    check(app.controller()->dispatch(event));
+    check_equal(sales->text(), "Saved");
+    check_equal(costs->text(), "Original");
+    check_equal(probe->events.size(), std::size_t{1});
+    check_equal(probe->events.front().current_target.id, "sales::action");
+
+    event.target = box.handle_for(*costs);
+    event.current_target = event.target;
+    check(app.controller()->dispatch(event));
+    check_equal(costs->text(), "Saved");
+    check_equal(probe->events.size(), std::size_t{2});
+    check_equal(probe->events.back().current_target.id, "costs::action");
+    check(app.controller()->state() == flexUI::ControllerState::Mounted);
+    check_equal(probe->created_sources.size(), std::size_t{1});
+  }
+
+  it("routes real focused native key events to the correct component instance") {
+    auto probe = std::make_shared<ModuleProbe>();
+    probe->emit_valid_mutation = true;
+    flexUI::DesktopApplicationBuilder builder(nullptr);
+    builder.xml_entry(
+        "<ui name=\"Dashboard\"><main id=\"root\">"
+        "<section id=\"left\"/><section id=\"right\"/>"
+        "</main></ui>")
+        .scoped_xml_component(
+            "sales", "left",
+            "<ui name=\"Panel\" xmlns:on=\"urn:flexui:event\">"
+            "<button id=\"action\" on:key_down=\"save_document\">Initial</button>"
+            "</ui>")
+        .scoped_xml_component(
+            "costs", "right",
+            "<ui name=\"Panel\" xmlns:on=\"urn:flexui:event\">"
+            "<button id=\"action\" on:key_down=\"save_document\">Initial</button>"
+            "</ui>")
+        .script("valid-controller", fake_factory(probe));
+    auto built = builder.build();
+    check(static_cast<bool>(built));
+    if (!built) return;
+    auto &app = *built.application;
+    auto &box = app.box();
+    auto *sales = box.get_by_id("sales::action");
+    auto *costs = box.get_by_id("costs::action");
+    check_not_null(sales);
+    check_not_null(costs);
+    if (!sales || !costs) return;
+
+    box.set_focus(sales);
+    auto key = flexUI::Event::key_down(flexUI::KeyCode::A);
+    check(app.dispatch_event(key));
+    check_equal(sales->text(), "Saved");
+    check_equal(costs->text(), "Initial");
+    check_equal(probe->events.size(), std::size_t{1});
+    check_equal(probe->events.front().target.id, "sales::action");
+    check_equal(probe->events.front().current_target.id, "sales::action");
+
+    box.set_focus(costs);
+    key = flexUI::Event::key_down(flexUI::KeyCode::A);
+    check(app.dispatch_event(key));
+    check_equal(costs->text(), "Saved");
+    check_equal(probe->events.size(), std::size_t{2});
+    check_equal(probe->events.back().target.id, "costs::action");
+    check(app.controller()->state() == flexUI::ControllerState::Mounted);
+  }
+
+  it("reserves commands before applying scoped UI mutations, then publishes once") {
+    auto probe = std::make_shared<ModuleProbe>();
+    probe->emit_valid_mutation = true;
+    probe->emit_service_command = true;
+    flexUI::DesktopApplicationBuilder builder(nullptr);
+    builder.xml_entry(
+        "<ui name=\"Dashboard\"><main id=\"root\">"
+        "<section id=\"left\"/></main></ui>")
+        .scoped_xml_component(
+            "sales", "left",
+            "<ui name=\"Panel\" xmlns:on=\"urn:flexui:event\">"
+            "<div id=\"action\" on:click=\"save_document\">Initial</div></ui>")
+        .script("valid-controller", fake_factory(probe));
+    static_cast<void>(configure_storage_service(builder));
+    auto built = builder.build();
+    check(static_cast<bool>(built));
+    if (!built) return;
+
+    auto &app = *built.application;
+    auto* target = app.box().get_by_id("sales::action");
+    check_not_null(target);
+    flexUI::ScriptEventSnapshot event;
+    event.event = flexUI::UiEventKind::Click;
+    event.target = app.box().handle_for(*target);
+    event.current_target = event.target;
+    check(app.controller()->dispatch(event));
+    check_equal(target->text(), "Saved");
+    const auto command = app.try_receive_service_request();
+    check(static_cast<bool>(command));
+    const auto stats = app.service_statistics();
+    check_equal(stats.published, std::uint64_t{1});
+    check_equal(stats.current_pending, std::size_t{1});
+    check(app.controller()->state() == flexUI::ControllerState::Mounted);
+  }
+
+  it("preserves active Box/controller when scoped reload compilation fails") {
+    auto probe = std::make_shared<ModuleProbe>();
+    const std::string root_ui =
+        "<ui name=\"Dashboard\"><main id=\"root\">"
+        "<section id=\"left\"/><section id=\"right\"/>"
+        "</main></ui>";
+    const std::string panel_xml =
+        "<ui name=\"Panel\" xmlns:on=\"urn:flexui:event\">"
+        "<div id=\"action\" on:click=\"save_document\">Original</div></ui>";
+    flexUI::DesktopApplicationBuilder builder(nullptr);
+    builder.xml_entry(root_ui)
+        .scoped_xml_component("sales", "left", panel_xml)
+        .scoped_xml_component("costs", "right", panel_xml)
+        .script("valid-controller", fake_factory(probe));
+    auto built = builder.build();
+    check(static_cast<bool>(built));
+    if (!built) return;
+    auto &app = *built.application;
+    auto *before = app.box().get_by_id("sales::action");
+    check_not_null(before);
+    const auto generation = app.generation();
+
+    const auto rejected = app.reload(
+        {"<ui name=\"Wrong\"><main id=\"root\"><div id=\"left\"/></main></ui>",
+         "", "valid-controller", "scoped-reload"});
+    check_false(static_cast<bool>(rejected));
+    check(rejected.error.code ==
+          flexUI::DesktopApplicationErrorCode::UiCompileFailed);
+    check(rejected.error.ui_error.code ==
+          flexUI::UiDocumentErrorCode::MissingComponentHost);
+    check(app.generation() == generation);
+    check(app.box().get_by_id("sales::action") == before);
+    check_not_null(app.box().get_by_id("costs::action"));
+    check(app.controller()->state() == flexUI::ControllerState::Mounted);
+
+    // The registered component definitions are recompiled on successful
+    // reload and remain in the single post-reload controller handler table.
+    const auto accepted = app.reload(
+        {root_ui, "", "valid-controller", "scoped-reload"});
+    check(static_cast<bool>(accepted));
+    check_not_null(app.box().get_by_id("sales::action"));
+    check_not_null(app.box().get_by_id("costs::action"));
+    check_not_null(app.program().find_event_binding(
+        "costs::action", flexUI::UiEventKind::Click));
+  }
+
+  it("declares shared typed binding inputs before scoped component mount and reload") {
+    const std::string root_ui =
+        "<ui name=\"Dashboard\"><main id=\"root\">"
+        "<section id=\"left\"/><section id=\"right\"/>"
+        "</main></ui>";
+    const std::string component =
+        "<ui name=\"Panel\" xmlns:bind=\"urn:flexui:binding\">"
+        "<label id=\"caption\" bind:text=\"$caption\">Initial</label>"
+        "</ui>";
+    flexUI::DesktopApplicationBuilder builder(nullptr);
+    builder.xml_entry(root_ui)
+        .scoped_xml_component("sales", "left", component)
+        .scoped_xml_component("costs", "right", component)
+        .binding_input_string("caption", "Ready");
+    auto built = builder.build();
+    check(static_cast<bool>(built));
+    if (!built) return;
+    auto &app = *built.application;
+    check_equal(app.program().bindings().size(), std::size_t{2});
+    app.box().update();
+    check_equal(app.box().get_by_id("sales::caption")->text(), "Ready");
+    check_equal(app.box().get_by_id("costs::caption")->text(), "Ready");
+
+    app.box().bindings().inputs().set_string("caption", "Running");
+    app.box().update();
+    check_equal(app.box().get_by_id("sales::caption")->text(), "Running");
+    check_equal(app.box().get_by_id("costs::caption")->text(), "Running");
+
+    // Check the actual native DrawText commands, not only Element::text().
+    // A mounted LabelWidget must not use its original constructor text as a
+    // fallback after a shared bound string becomes empty.
+    const auto painted_caption = [&](const char *id) {
+      auto *label = app.box().get_by_id(id);
+      check_not_null(label);
+      if (!label || !label->widget) return std::string{};
+      label->set_layout_bounds(0.0f, 0.0f, 240.0f, 48.0f);
+      flexUI::RenderCommandList commands(flex::RendererCapabilities{});
+      label->widget->emit_render_commands(*label, commands);
+      std::string drawn;
+      for (const auto &command : commands.commands()) {
+        if (const auto *text =
+                std::get_if<flexUI::DrawTextCommand>(&command)) {
+          drawn += text->text;
+        }
+      }
+      return drawn;
+    };
+    for (const char *id : {"sales::caption", "costs::caption"}) {
+      check(painted_caption(id).find("Running") != std::string::npos);
+    }
+
+    app.box().bindings().inputs().set_string("caption", "");
+    app.box().update();
+    for (const char *id : {"sales::caption", "costs::caption"}) {
+      check_equal(app.box().get_by_id(id)->text(), "");
+      check(painted_caption(id).empty());
+    }
+
+    app.box().bindings().inputs().set_string("caption", "Again");
+    app.box().update();
+    for (const char *id : {"sales::caption", "costs::caption"}) {
+      check_equal(app.box().get_by_id(id)->text(), "Again");
+      check(painted_caption(id).find("Again") != std::string::npos);
+    }
+
+    // Reload publishes a new candidate with its original explicitly seeded
+    // application-global inputs, rather than retaining stale pointers into
+    // the prior component binding runtime.
+    check(app.reload({root_ui, "", "", "reloaded"}));
+    app.box().update();
+    check_equal(app.box().get_by_id("sales::caption")->text(), "Ready");
+    check_equal(app.box().get_by_id("costs::caption")->text(), "Ready");
+  }
+
+
+  it("seeds shared boolean and numeric MIR class bindings across instances") {
+    const std::string root_ui =
+        "<ui name=\"Dashboard\"><main id=\"root\">"
+        "<section id=\"left\"/><section id=\"right\"/>"
+        "</main></ui>";
+    const std::string component = R"xml(
+      <ui name="Panel" xmlns:bind="urn:flexui:binding">
+        <div id="state" bind:class_active="${enabled}"
+             bind:class_busy="${quantity &gt; 1}">Status</div>
+      </ui>
+    )xml";
+    flexUI::DesktopApplicationBuilder builder(nullptr);
+    builder.xml_entry(root_ui)
+        .scoped_xml_component("sales", "left", component)
+        .scoped_xml_component("costs", "right", component)
+        .binding_input_bool("enabled", true)
+        .binding_input_number("quantity", 0.25);
+    auto built = builder.build();
+    check(static_cast<bool>(built));
+    if (!built) return;
+    auto &app = *built.application;
+    check_equal(app.program().bindings().size(), std::size_t{4});
+    app.box().update();
+    for (const char *id : {"sales::state", "costs::state"}) {
+      auto *node = app.box().get_by_id(id);
+      check_not_null(node);
+      if (!node) return;
+      check(node->has_class(flexUI::Symbol("active")));
+      check_false(node->has_class(flexUI::Symbol("busy")));
+    }
+    app.box().bindings().inputs().set_bool("enabled", false);
+    app.box().bindings().inputs().set_number("quantity", 2.0);
+    app.box().update();
+    for (const char *id : {"sales::state", "costs::state"}) {
+      auto *node = app.box().get_by_id(id);
+      check_false(node->has_class(flexUI::Symbol("active")));
+      check(node->has_class(flexUI::Symbol("busy")));
+    }
+    check(app.reload({root_ui, "", "", "typed-inputs-reload"}));
+    app.box().update();
+    for (const char *id : {"sales::state", "costs::state"}) {
+      auto *node = app.box().get_by_id(id);
+      check(node->has_class(flexUI::Symbol("active")));
+      check_false(node->has_class(flexUI::Symbol("busy")));
+    }
+  }
+
+  it("rejects incompatible typed input before candidate Box publication") {
+    const std::string root_ui =
+        "<ui name=\"Dashboard\"><main id=\"root\"><div id=\"host\"/>"
+        "</main></ui>";
+    const std::string component =
+        "<ui name=\"Panel\" xmlns:bind=\"urn:flexui:binding\">"
+        "<label id=\"caption\" bind:text=\"$caption\">Initial</label></ui>";
+    flexUI::DesktopApplicationBuilder builder(nullptr);
+    builder.xml_entry(root_ui)
+        .scoped_xml_component("panel", "host", component)
+        .binding_input_bool("caption", true);
+    const auto rejected = builder.build();
+    check_false(static_cast<bool>(rejected));
+    check(rejected.error.code ==
+          flexUI::DesktopApplicationErrorCode::UiInstantiationFailed);
+    check(rejected.error.ui_error.code ==
+          flexUI::UiDocumentErrorCode::BindingInstallFailed);
+  }
+
+  it("rejects aggregate scoped XML source amplification before parsing") {
+    const std::string root_ui =
+        "<ui name=\"App\"><main id=\"root\"><div id=\"left\"/>"
+        "<div id=\"right\"/></main></ui>";
+    const std::string component =
+        "<ui name=\"Panel\"><label id=\"caption\">Caption</label></ui>";
+    flexUI::DesktopApplicationLimits limits;
+    limits.document.max_source_bytes =
+        root_ui.size() + 2 * component.size() - 1;
+    flexUI::DesktopApplicationBuilder builder(nullptr);
+    builder.xml_entry(root_ui)
+        .scoped_xml_component("first", "left", component)
+        .scoped_xml_component("second", "right", component)
+        .limits(limits);
+    const auto rejected = builder.build();
+    check_false(static_cast<bool>(rejected));
+    check(rejected.error.code ==
+          flexUI::DesktopApplicationErrorCode::UiCompileFailed);
+    check(rejected.error.ui_error.code ==
+          flexUI::UiDocumentErrorCode::SourceTooLarge);
+    // The same sources fit the exact aggregate limit without per-instance
+    // multiplication of the budget.
+    ++limits.document.max_source_bytes;
+    builder.limits(limits);
+    const auto admitted = builder.build();
+    check(static_cast<bool>(admitted));
+  }
+
+  it("rejects duplicate/nonfinite typed input declarations before UI publication") {
+    const std::string root_ui =
+        "<ui name=\"Inputs\"><main id=\"root\"/></ui>";
+    flexUI::DesktopApplicationBuilder duplicates(nullptr);
+    duplicates.xml_entry(root_ui)
+        .binding_input_string("caption", "Ready")
+        .binding_input_bool("caption", true);
+    auto duplicated = duplicates.build();
+    check_false(static_cast<bool>(duplicated));
+    check(duplicated.error.code ==
+          flexUI::DesktopApplicationErrorCode::InvalidConfiguration);
+
+    flexUI::DesktopApplicationBuilder nonfinite(nullptr);
+    nonfinite.xml_entry(root_ui)
+        .binding_input_number("quantity",
+            std::numeric_limits<double>::infinity());
+    auto invalid = nonfinite.build();
+    check_false(static_cast<bool>(invalid));
+    check(invalid.error.code ==
+          flexUI::DesktopApplicationErrorCode::InvalidConfiguration);
+  }
+
+  it("rejects duplicate component scopes and missing script exports before mount") {
+    const std::string root_ui =
+        "<ui name=\"Root\"><main id=\"root\"><div id=\"left\"/>"
+        "<div id=\"right\"/></main></ui>";
+    const std::string panel_xml =
+        "<ui name=\"Panel\" xmlns:on=\"urn:flexui:event\">"
+        "<div id=\"go\" on:click=\"save_document\">Go</div></ui>";
+    flexUI::DesktopApplicationBuilder duplicates(nullptr);
+    duplicates.xml_entry(root_ui)
+        .scoped_xml_component("same", "left", panel_xml)
+        .scoped_xml_component("same", "right", panel_xml);
+    const auto duplicate = duplicates.build();
+    check_false(static_cast<bool>(duplicate));
+    check(duplicate.error.code ==
+          flexUI::DesktopApplicationErrorCode::UiCompileFailed);
+    check(duplicate.error.ui_error.code ==
+          flexUI::UiDocumentErrorCode::InvalidComponentScope);
+
+    flexUI::DesktopApplicationBuilder scriptless(nullptr);
+    scriptless.xml_entry(root_ui)
+        .scoped_xml_component("sales", "left", panel_xml);
+    const auto no_module = scriptless.build();
+    check_false(static_cast<bool>(no_module));
+    check(no_module.error.code ==
+          flexUI::DesktopApplicationErrorCode::ScriptRequired);
   }
 }

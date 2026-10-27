@@ -10,6 +10,7 @@
 #include <new>
 #include <optional>
 #include <thread>
+#include <unordered_set>
 #include <utility>
 
 namespace flexUI {
@@ -29,6 +30,8 @@ struct ApplicationConfig {
   ApplicationCompletionWakeup completion_wakeup;
   UiEntryFormat entry_format = UiEntryFormat::Xml;
   bool script_enabled = false;
+  std::vector<DesktopScopedXmlComponent> scoped_components;
+  std::vector<DesktopBindingInput> binding_inputs;
 };
 
 std::optional<UiEventKind> to_ui_event_kind(EventType type) noexcept {
@@ -206,6 +209,31 @@ CandidateResult build_candidate(const ApplicationConfig &config, DesktopApplicat
   }
 
   try {
+    // Repeating independently bounded component XML sources must not multiply
+    // the application's compile-source budget by the instance count.
+    // Reject before allocating parsing trees or any live Box state.
+    if (!config.scoped_components.empty()) {
+      std::size_t remaining = config.limits.document.max_source_bytes;
+      if (sources.ui.size() > remaining) {
+        auto error = fail(DesktopApplicationErrorCode::UiCompileFailed,
+                          DesktopApplicationStage::UiCompile,
+                          "scoped UI application exceeds the total XML source budget");
+        error.ui_error = {UiDocumentErrorCode::SourceTooLarge, error.message};
+        return {{}, std::move(error)};
+      }
+      remaining -= sources.ui.size();
+      for (const auto &component : config.scoped_components) {
+        if (component.source.size() > remaining) {
+          auto error = fail(
+              DesktopApplicationErrorCode::UiCompileFailed,
+              DesktopApplicationStage::UiCompile,
+              "combined scoped XML sources exceed the application source budget");
+          error.ui_error = {UiDocumentErrorCode::SourceTooLarge, error.message};
+          return {{}, std::move(error)};
+        }
+        remaining -= component.source.size();
+      }
+    }
     UiDocumentCompileResult compiled =
         config.entry_format == UiEntryFormat::Xml
             ? compile_ui_xml(sources.ui, config.limits.document)
@@ -215,6 +243,56 @@ CandidateResult build_candidate(const ApplicationConfig &config, DesktopApplicat
                         DesktopApplicationStage::UiCompile, compiled.error.message);
       error.ui_error = std::move(compiled.error);
       return {{}, std::move(error)};
+    }
+
+    if (!config.scoped_components.empty()) {
+      if (config.entry_format != UiEntryFormat::Xml) {
+        return {{},
+                fail(DesktopApplicationErrorCode::InvalidConfiguration,
+                     DesktopApplicationStage::Configuration,
+                     "scoped XML components require an XML application entry")};
+      }
+      std::vector<UiScopedComponent> instances;
+      instances.reserve(config.scoped_components.size());
+      for (const auto &component : config.scoped_components) {
+        auto nested = compile_ui_xml(component.source, config.limits.document);
+        if (!nested) {
+          auto error = fail(
+              DesktopApplicationErrorCode::UiCompileFailed,
+              DesktopApplicationStage::UiCompile,
+              "component '" + component.scope + "' XML rejected: " +
+                  nested.error.message);
+          error.ui_error = std::move(nested.error);
+          return {{}, std::move(error)};
+        }
+        instances.push_back({component.scope, component.host_id,
+                             std::move(nested.program)});
+      }
+      auto composed = compile_scoped_ui_components(
+          *compiled.program, instances, config.registry, config.limits.document);
+      if (!composed) {
+        auto error = fail(
+            DesktopApplicationErrorCode::UiCompileFailed,
+            DesktopApplicationStage::UiCompile, composed.error.message);
+        error.ui_error = std::move(composed.error);
+        return {{}, std::move(error)};
+      }
+      compiled = std::move(composed);
+    }
+    // UiHandle id bytes are bounded by the controller contract, not merely
+    // the XML parser's larger maximum string size. Fail before any Box mount
+    // instead of admitting an uncallable scoped handler.
+    for (const auto &binding : compiled.program->event_bindings()) {
+      if (binding.element_id.size() > config.limits.controller.max_element_id_bytes) {
+        auto error = fail(
+            DesktopApplicationErrorCode::UiCompileFailed,
+            DesktopApplicationStage::UiCompile,
+            "compiled event element ID exceeds controller handle limit");
+        error.ui_error = {UiDocumentErrorCode::InvalidComponentScope,
+                          error.message, binding.source.line,
+                          binding.source.column};
+        return {{}, std::move(error)};
+      }
     }
 
     if (auto schema_error = config.registry.validate(*compiled.program, config.limits.document)) {
@@ -243,6 +321,46 @@ CandidateResult build_candidate(const ApplicationConfig &config, DesktopApplicat
     state->sources = std::move(sources);
     state->program = std::move(compiled.program);
     state->box = std::make_unique<Box>(config.renderer, config.box_options);
+
+    // UI string/boolean/numeric bindings require declared typed inputs at
+    // UiDocumentInstantiator admission. Seed them on the DETACHED candidate
+    // before any Element/Widget ownership is published. Every reload starts
+    // from the same explicit application-global inputs, not prior live state.
+    if (config.binding_inputs.size() > config.limits.document.max_bindings) {
+      return {{}, fail(DesktopApplicationErrorCode::InvalidConfiguration,
+                       DesktopApplicationStage::Configuration,
+                       "application binding input count exceeds binding budget")};
+    }
+    std::unordered_set<std::string> seen_inputs;
+    seen_inputs.reserve(config.binding_inputs.size());
+    auto &inputs = state->box->bindings().inputs();
+    for (const auto &decl : config.binding_inputs) {
+      if (decl.name.empty() ||
+          decl.name.size() > config.limits.document.max_string_bytes ||
+          !seen_inputs.emplace(decl.name).second) {
+        return {{}, fail(DesktopApplicationErrorCode::InvalidConfiguration,
+                         DesktopApplicationStage::Configuration,
+                         "application binding input requires a bounded unique name")};
+      }
+      if (const auto *text = std::get_if<std::string>(&decl.value)) {
+        if (text->size() > config.limits.document.max_string_bytes) {
+          return {{}, fail(DesktopApplicationErrorCode::InvalidConfiguration,
+                           DesktopApplicationStage::Configuration,
+                           "application string input exceeds the string budget")};
+        }
+        inputs.set_string(decl.name, *text);
+      } else if (const auto *boolean = std::get_if<bool>(&decl.value)) {
+        inputs.set_bool(decl.name, *boolean);
+      } else {
+        const double number = std::get<double>(decl.value);
+        if (!std::isfinite(number)) {
+          return {{}, fail(DesktopApplicationErrorCode::InvalidConfiguration,
+                           DesktopApplicationStage::Configuration,
+                           "application numeric input must be finite")};
+        }
+        inputs.set_number(decl.name, number);
+      }
+    }
 
     const CssLoadResult css = state->box->load_stylesheet(
         state->sources.stylesheet, CssLoadOptions{"<desktop-stylesheet>", true});
@@ -700,6 +818,34 @@ DesktopApplicationBuilder &
 DesktopApplicationBuilder::legacy_flex_entry_compatibility(std::string source) {
   impl_->config.entry_format = UiEntryFormat::LegacyFlexCompatibility;
   impl_->sources.ui = std::move(source);
+  return *this;
+}
+
+DesktopApplicationBuilder &
+DesktopApplicationBuilder::scoped_xml_component(
+    std::string scope, std::string host_id, std::string source) {
+  impl_->config.scoped_components.push_back(
+      {std::move(scope), std::move(host_id), std::move(source)});
+  return *this;
+}
+
+DesktopApplicationBuilder &
+DesktopApplicationBuilder::binding_input_string(std::string name,
+                                                  std::string value) {
+  impl_->config.binding_inputs.push_back(
+      {std::move(name), std::move(value)});
+  return *this;
+}
+
+DesktopApplicationBuilder &
+DesktopApplicationBuilder::binding_input_bool(std::string name, bool value) {
+  impl_->config.binding_inputs.push_back({std::move(name), value});
+  return *this;
+}
+
+DesktopApplicationBuilder &
+DesktopApplicationBuilder::binding_input_number(std::string name, double value) {
+  impl_->config.binding_inputs.push_back({std::move(name), value});
   return *this;
 }
 
