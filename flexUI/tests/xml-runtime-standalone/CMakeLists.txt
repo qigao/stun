@@ -111,6 +111,19 @@ set_tests_properties(DotGraphXmlTest PROPERTIES TIMEOUT 120)
 add_dependencies(stun_xml_runtime_qualification test_dotgraph_ui_xml)
 add_dependencies(chart_ui_test test_dotgraph_ui_xml)
 
+# The public DOT-source parsing facade remains a separate production source
+# file after extracting snapshot composition. Compile it across every
+# installed-SDK host, even where the full C DOT parser/GraphLayout libraries
+# are not linked into the minimal headless test executable.
+add_library(stun_dotgraph_source_facade_compile OBJECT
+    "${STUN_ROOT}/charts/dotgraph/src/flexui_dotgraph.cpp")
+target_include_directories(stun_dotgraph_source_facade_compile PRIVATE
+    "${STUN_ROOT}/charts/dotgraph/include")
+target_link_libraries(stun_dotgraph_source_facade_compile PRIVATE chart_ui flex)
+add_dependencies(stun_xml_runtime_qualification
+    stun_dotgraph_source_facade_compile)
+add_dependencies(chart_ui_test stun_dotgraph_source_facade_compile)
+
 # The MarkdownWidget streaming consumer contract must run in the focused
 # headless production-runtime gate; parser conformance alone does not exercise
 # the FlexUI projection/lifecycle path.
