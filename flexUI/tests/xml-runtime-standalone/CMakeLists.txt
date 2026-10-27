@@ -53,7 +53,8 @@ add_subdirectory("${STUN_ROOT}/shared/layout" graphlayout)
 set(BUILD_TESTING ON)
 add_custom_target(stun_xml_runtime_qualification)
 foreach(test IN ITEMS test_ui_content_models test_ui_xml_admission test_ui_xml
-    test_ui_document test_widget_registry test_desktop_application)
+    test_ui_document test_widget_registry test_desktop_application
+    test_script_controller)
   add_executable(${test} "${STUN_ROOT}/flexUI/tests/${test}.cpp")
   target_link_libraries(${test} PRIVATE FlexUI::Controller Salts::TinyTest)
   add_test(NAME ${test} COMMAND ${test})

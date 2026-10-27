@@ -92,6 +92,7 @@ enum class DesktopApplicationStage {
   ServiceRegistry,
   ServiceRequests,
   ControllerServiceCompletion,
+  ControllerEventRetirement,
 };
 
 enum class DesktopApplicationErrorCode {
@@ -117,6 +118,7 @@ enum class DesktopApplicationErrorCode {
   ServiceRequestFailed,
   GenerationExhausted,
   ControllerServiceCompletionFailed,
+  ControllerEventRetirementFailed,
 };
 
 struct DesktopApplicationError {
@@ -277,6 +279,14 @@ public:
   DesktopApplicationResult recompose_scoped_xml_components(
       std::vector<DesktopScopedXmlComponent> components,
       std::vector<DesktopScopedBindingAlias> input_aliases);
+
+  /// Retire only pre-resolved script event callbacks for a registered XML
+  /// component scope in the current generation. No Element, Binding, Widget,
+  /// resource or service request is removed/cancelled. Reentrant native
+  /// bubbling is rejected, and complete reload/recompose resets the table.
+  /// This is not a component unmount operation.
+  DesktopApplicationResult retire_scoped_event_handlers(
+      std::string_view scope);
 
 private:
   struct Impl;

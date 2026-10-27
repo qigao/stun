@@ -1,15 +1,19 @@
 #include <flexUI/box.h>
 #include <flexUI/box_mutation_host.h>
 #include <flexUI/controller.h>
+#include <flexUI/ui_xml.h>
+#include <flexUI/widget_registry.h>
 
 #include <tinytest.hpp>
 
 #include <cstddef>
+#include <functional>
 #include <initializer_list>
 #include <memory>
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -58,6 +62,8 @@ public:
                "unknown fake export"}};
     }
     calls.push_back(found->second);
+    if (on_event_call && context.callback == flexUI::ScriptCallbackKind::Event)
+      on_event_call();
     if (lifecycle_ != nullptr) {
       lifecycle_->push_back(found->second);
     }
@@ -109,6 +115,7 @@ public:
   std::string mutation_text;
   std::string command_export;
   std::string command_payload;
+  std::function<void()> on_event_call;
 
 private:
   std::unordered_map<std::string, flexUI::ScriptExportHandle> handles_;
@@ -129,6 +136,37 @@ flexUI::ScriptEventSnapshot click_event() {
   event.target = {"save", 1};
   event.timestamp_ms = 42.0;
   return event;
+}
+
+std::shared_ptr<const flexUI::CompiledUiProgram> scoped_controller_program() {
+  const auto base = flexUI::compile_ui_xml(
+      "<ui name=\"App\"><main id=\"root\">"
+      "<section id=\"sale_host\"/><section id=\"sales_host\"/></main></ui>");
+  const auto panel = flexUI::compile_ui_xml(
+      "<ui name=\"Panel\" xmlns:on=\"urn:flexui:event\">"
+      "<div id=\"panel\">"
+      "<div id=\"action\" on:click=\"save_document\">Action</div>"
+      "<div id=\"nested\" on:key_down=\"parent_handler\">Nested</div>"
+      "</div></ui>");
+  check(static_cast<bool>(base));
+  check(static_cast<bool>(panel));
+  if (!base || !panel) return {};
+  const auto combined = flexUI::compile_scoped_ui_components(
+      *base.program,
+      {{"sale", "sale_host", panel.program},
+       {"sales", "sales_host", panel.program}},
+      flexUI::WidgetRegistry::builtins());
+  check(static_cast<bool>(combined));
+  return combined.program;
+}
+
+flexUI::ScriptEventSnapshot scoped_event(
+    std::string id, flexUI::UiEventKind event = flexUI::UiEventKind::Click) {
+  flexUI::ScriptEventSnapshot snapshot;
+  snapshot.event = event;
+  snapshot.target = {std::move(id), 1};
+  snapshot.current_target = snapshot.target;
+  return snapshot;
 }
 
 void check_calls(const std::vector<std::string> &actual,
@@ -263,6 +301,109 @@ public:
 };
 
 } // namespace
+
+spec("FlexUI scoped script event retirement") {
+  it("atomically drops exact scoped event routes and preserves other callbacks") {
+    const auto program = scoped_controller_program();
+    if (!program) return;
+    auto module = std::make_unique<FakeScriptModule>(
+        std::vector<std::string>{"save_document", "parent_handler", "on_frame",
+                                 "on_service_completion"});
+    auto *fake = module.get();
+    flexUI::ScriptController controller;
+    check(controller.load(std::move(module), program));
+    check(controller.mount());
+    check(controller.has_active_event_binding("sale::action", flexUI::UiEventKind::Click));
+    check(controller.has_active_event_binding("sales::action", flexUI::UiEventKind::Click));
+    check(controller.has_active_event_binding("sales::nested", flexUI::UiEventKind::KeyDown));
+    check(controller.dispatch(scoped_event("sales::action")));
+    check(controller.dispatch(scoped_event("sales::nested", flexUI::UiEventKind::KeyDown)));
+    check_equal(fake->calls.size(), std::size_t{2});
+
+    const auto unknown = controller.retire_scoped_event_handlers("other");
+    check_false(static_cast<bool>(unknown));
+    check(unknown.error.code == flexUI::ControllerErrorCode::InvalidArgument);
+    check(unknown.error.stage == flexUI::ControllerStage::EventRetirement);
+    for (const char *invalid : {"", "sales::action", "sales.", "2sales"}) {
+      const auto rejected = controller.retire_scoped_event_handlers(invalid);
+      check_false(static_cast<bool>(rejected));
+      check(rejected.error.code == flexUI::ControllerErrorCode::InvalidArgument);
+    }
+    check(controller.has_active_event_binding("sales::action", flexUI::UiEventKind::Click));
+
+    const auto retired = controller.retire_scoped_event_handlers("sales");
+    check(static_cast<bool>(retired));
+    check_equal(controller.program().get(), program.get());
+    check_not_null(program->find_event_binding("sales::action", flexUI::UiEventKind::Click));
+    check_false(controller.has_active_event_binding("sales::action", flexUI::UiEventKind::Click));
+    check_false(controller.has_active_event_binding("sales::nested", flexUI::UiEventKind::KeyDown));
+    check(controller.has_active_event_binding("sale::action", flexUI::UiEventKind::Click));
+    check(controller.retire_scoped_event_handlers("sales"));
+    check(controller.dispatch(scoped_event("sales::action")));
+    check(controller.dispatch(scoped_event("sales::nested", flexUI::UiEventKind::KeyDown)));
+    check_equal(fake->calls.size(), std::size_t{2});
+    check(controller.dispatch(scoped_event("sale::action")));
+    check_equal(fake->calls.size(), std::size_t{3});
+    check_equal(fake->calls.back(), "save_document");
+    check(controller.frame(0.016));
+    check_equal(fake->calls.back(), "on_frame");
+    check(controller.dispatch_service_completion(
+        {11, flexUI::ApplicationCompletionStatus::Succeeded, "ok", {}, {}}));
+    check_equal(fake->calls.back(), "on_service_completion");
+    check(controller.state() == flexUI::ControllerState::Mounted);
+
+    check(controller.unmount());
+    auto replacement = std::make_unique<FakeScriptModule>(
+        std::vector<std::string>{"save_document", "parent_handler"});
+    auto *fresh = replacement.get();
+    check(controller.load(std::move(replacement), program));
+    check(controller.mount());
+    check(controller.has_active_event_binding("sales::action", flexUI::UiEventKind::Click));
+    check(controller.dispatch(scoped_event("sales::action")));
+    check_equal(fresh->calls.size(), std::size_t{1});
+  }
+
+  it("rejects wrong-thread and in-flight module event retirement without partial changes") {
+    auto program = scoped_controller_program();
+    if (!program) return;
+    auto module = std::make_unique<FakeScriptModule>(
+        std::vector<std::string>{"save_document", "parent_handler"});
+    auto *fake = module.get();
+    flexUI::ScriptController controller;
+    check(controller.load(std::move(module), program));
+    const auto compiled = controller.retire_scoped_event_handlers("sales");
+    check_false(static_cast<bool>(compiled));
+    check(compiled.error.code == flexUI::ControllerErrorCode::InvalidState);
+    check(controller.mount());
+
+    flexUI::ControllerErrorCode other_thread = flexUI::ControllerErrorCode::None;
+    std::thread worker([&] {
+      other_thread = controller.retire_scoped_event_handlers("sales").error.code;
+    });
+    worker.join();
+    check(other_thread == flexUI::ControllerErrorCode::WrongThread);
+    check(controller.has_active_event_binding("sales::action", flexUI::UiEventKind::Click));
+
+    bool called = false;
+    flexUI::ControllerResult refused;
+    fake->on_event_call = [&] {
+      called = true;
+      refused = controller.retire_scoped_event_handlers("sales");
+    };
+    check(controller.dispatch(scoped_event("sales::action")));
+    check(called);
+    check_false(static_cast<bool>(refused));
+    check(refused.error.code == flexUI::ControllerErrorCode::InvalidState);
+    check(controller.has_active_event_binding("sales::nested", flexUI::UiEventKind::KeyDown));
+    check(controller.state() == flexUI::ControllerState::Mounted);
+    fake->on_event_call = {};
+    check(controller.retire_scoped_event_handlers("sales"));
+    check(controller.unmount());
+    const auto after_unmount = controller.retire_scoped_event_handlers("sale");
+    check_false(static_cast<bool>(after_unmount));
+    check(after_unmount.error.code == flexUI::ControllerErrorCode::InvalidState);
+  }
+}
 
 spec("FlexUI script controller lifecycle") {
   it("resolves exports before dispatch and preserves lifecycle order") {

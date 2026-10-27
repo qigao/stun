@@ -1773,6 +1773,171 @@ spec("Desktop XML component full-generation recomposition") {
 }
 
 spec("Desktop XML components share one native ScriptController and Effects engine") {
+  it("preserves ControllerFaulted reporting in native bridge after script failure") {
+    auto probe = std::make_shared<ModuleProbe>();
+    flexUI::DesktopApplicationBuilder builder(nullptr);
+    builder.xml_entry(
+        "<ui name=\"Dashboard\"><main id=\"root\"><section id=\"host\"/></main></ui>")
+        .scoped_xml_component(
+            "sales", "host",
+            "<ui name=\"Panel\" xmlns:on=\"urn:flexui:event\">"
+            "<button id=\"action\" on:key_down=\"save_document\">Initial</button>"
+            "</ui>")
+        .script("event-failure", fake_factory(probe));
+    auto built = builder.build();
+    check(static_cast<bool>(built));
+    if (!built) return;
+    auto &app = *built.application;
+    auto *action = app.box().get_by_id("sales::action");
+    check_not_null(action);
+    if (!action) return;
+    app.box().set_focus(action);
+    auto key = flexUI::Event::key_down(flexUI::KeyCode::A);
+    const auto failed = app.dispatch_event(key);
+    check_false(static_cast<bool>(failed));
+    check(failed.error.code ==
+          flexUI::DesktopApplicationErrorCode::ControllerDispatchFailed);
+    check(failed.error.controller_error.code ==
+          flexUI::ControllerErrorCode::ModuleCallFailed);
+    check(app.controller()->state() == flexUI::ControllerState::Faulted);
+    check_equal(probe->events.size(), std::size_t{1});
+
+    // Preserve the original fault result for the NEXT native event: the
+    // route remains defined even though the module cannot be called again.
+    key = flexUI::Event::key_down(flexUI::KeyCode::A);
+    const auto rejected = app.dispatch_event(key);
+    check_false(static_cast<bool>(rejected));
+    check(rejected.error.code ==
+          flexUI::DesktopApplicationErrorCode::ControllerDispatchFailed);
+    check(rejected.error.controller_error.code ==
+          flexUI::ControllerErrorCode::ControllerFaulted);
+    check_equal(probe->events.size(), std::size_t{1});
+    const auto retired = app.retire_scoped_event_handlers("sales");
+    check_false(static_cast<bool>(retired));
+    check(retired.error.controller_error.code ==
+          flexUI::ControllerErrorCode::InvalidState);
+  }
+
+
+  it("retires one scoped event route while preserving native bridge, Binding and other scopes") {
+    auto probe = std::make_shared<ModuleProbe>();
+    probe->emit_valid_mutation = true;
+    const std::string root =
+        "<ui name=\"Dashboard\"><main id=\"root\">"
+        "<section id=\"left\"/><section id=\"right\"/></main></ui>";
+    const std::string panel = R"xml(
+      <ui name="Panel" xmlns:on="urn:flexui:event"
+          xmlns:bind="urn:flexui:binding">
+        <div id="panel">
+          <button id="action" on:key_down="save_document">Initial</button>
+          <label id="caption" bind:text="$caption">Before</label>
+        </div>
+      </ui>
+    )xml";
+    flexUI::DesktopApplicationBuilder builder(nullptr);
+    builder.xml_entry(root)
+        .scoped_xml_component("sale", "left", panel)
+        .scoped_xml_component("sales", "right", panel)
+        .scoped_binding_alias("sale", "caption", "sale_caption")
+        .scoped_binding_alias("sales", "caption", "sales_caption")
+        .binding_input_string("sale_caption", "One")
+        .binding_input_string("sales_caption", "Two")
+        .script("valid-controller", fake_factory(probe));
+    auto built = builder.build();
+    check(static_cast<bool>(built));
+    if (!built) return;
+    auto &app = *built.application;
+    auto *sale = app.box().get_by_id("sale::action");
+    auto *sales = app.box().get_by_id("sales::action");
+    check_not_null(sale);
+    check_not_null(sales);
+    if (!sale || !sales) return;
+    app.box().set_focus(sales);
+    auto event = flexUI::Event::key_down(flexUI::KeyCode::A);
+    check(app.dispatch_event(event));
+    check_equal(probe->events.size(), std::size_t{1});
+    check_equal(probe->events.back().current_target.id, "sales::action");
+
+    const auto generation = app.generation();
+    const auto missing = app.retire_scoped_event_handlers("other");
+    check_false(static_cast<bool>(missing));
+    check(missing.error.code ==
+          flexUI::DesktopApplicationErrorCode::InvalidConfiguration);
+    check_equal(app.generation(), generation);
+    check(app.controller()->has_active_event_binding(
+        "sales::action", flexUI::UiEventKind::KeyDown));
+    bool reentrant_blocked = false;
+    app.box().set_event_callback([&](flexUI::Element &node, const flexUI::Event &native) {
+      if (&node == sales && native.type == flexUI::EventType::KeyDown) {
+        auto attempted = app.retire_scoped_event_handlers("sales");
+        reentrant_blocked = !static_cast<bool>(attempted) &&
+            attempted.error.code == flexUI::DesktopApplicationErrorCode::InvalidState;
+      }
+    });
+    event = flexUI::Event::key_down(flexUI::KeyCode::A);
+    check(app.dispatch_event(event));
+    check(reentrant_blocked);
+    check_equal(probe->events.size(), std::size_t{2});
+    app.box().set_event_callback({});
+
+    check(app.retire_scoped_event_handlers("sales"));
+    check(app.retire_scoped_event_handlers("sales")); // Idempotent, same generation.
+    check_equal(app.generation(), generation);
+    check_false(app.controller()->has_active_event_binding(
+        "sales::action", flexUI::UiEventKind::KeyDown));
+    check(app.controller()->has_active_event_binding(
+        "sale::action", flexUI::UiEventKind::KeyDown));
+    check_not_null(app.program().find_event_binding(
+        "sales::action", flexUI::UiEventKind::KeyDown));
+    check_not_null(app.box().get_by_id("sales::action"));
+    app.box().bindings().inputs().set_string("sales_caption", "Still Bound");
+    app.box().update();
+    check_equal(app.box().get_by_id("sales::caption")->text(), "Still Bound");
+    event = flexUI::Event::key_down(flexUI::KeyCode::A);
+    check(app.dispatch_event(event));
+    check_equal(probe->events.size(), std::size_t{2});
+    auto old_snapshot = flexUI::ScriptEventSnapshot{};
+    old_snapshot.event = flexUI::UiEventKind::KeyDown;
+    old_snapshot.target = app.box().handle_for(*sales);
+    old_snapshot.current_target = old_snapshot.target;
+    check(app.controller()->dispatch(old_snapshot));
+    check_equal(probe->events.size(), std::size_t{2});
+
+    app.box().set_focus(sale);
+    event = flexUI::Event::key_down(flexUI::KeyCode::A);
+    check(app.dispatch_event(event));
+    check_equal(probe->events.size(), std::size_t{3});
+    check_equal(probe->events.back().current_target.id, "sale::action");
+
+    flexUI::DesktopApplicationErrorCode other_thread =
+        flexUI::DesktopApplicationErrorCode::None;
+    std::thread worker([&] {
+      other_thread = app.retire_scoped_event_handlers("sale").error.code;
+    });
+    worker.join();
+    check(other_thread == flexUI::DesktopApplicationErrorCode::WrongThread);
+    check(app.controller()->has_active_event_binding(
+        "sale::action", flexUI::UiEventKind::KeyDown));
+
+    check(app.reload({root, "", "valid-controller", "event-routes-new-generation"}));
+    // A detached reload publishes fresh typed input seeds; their native
+    // Binding projections run in the ordinary Box update stage.
+    app.box().update();
+    check_equal(app.generation(), generation + 1);
+    check(app.controller()->has_active_event_binding(
+        "sales::action", flexUI::UiEventKind::KeyDown));
+    auto *fresh_sales = app.box().get_by_id("sales::action");
+    check_not_null(fresh_sales);
+    if (!fresh_sales) return;
+    app.box().set_focus(fresh_sales);
+    event = flexUI::Event::key_down(flexUI::KeyCode::A);
+    check(app.dispatch_event(event));
+    check_equal(probe->events.size(), std::size_t{4});
+    check_equal(probe->events.back().current_target.id, "sales::action");
+    check(app.box().get_by_id("sales::caption")->text() == "Two");
+  }
+
+
   it("redirects per-instance String Bool Number and resets on full reload") {
     const std::string root =
         "<ui name=\"Dashboard\"><main id=\"root\">"

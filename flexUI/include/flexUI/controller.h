@@ -142,6 +142,7 @@ enum class ControllerErrorCode {
   CommandFailed,
   InternalInvariant,
   CompletionLimitExceeded,
+  EventRetirementFailed,
 };
 
 enum class ControllerStage {
@@ -152,6 +153,7 @@ enum class ControllerStage {
   Frame,
   Unmount,
   ServiceCompletion,
+  EventRetirement,
 };
 
 struct ControllerError {
@@ -220,6 +222,20 @@ public:
   /// @return Success for an unbound event; otherwise a structured state,
   ///         limit, or module error. A module error transitions to Faulted.
   ControllerResult dispatch(const ScriptEventSnapshot &event);
+
+  /// Atomically retire the pre-resolved event routes with compiled IDs of
+  /// the exact form "scope::local_id". The immutable CompiledUiProgram,
+  /// Element tree, Bindings and script module remain unchanged. Requires a
+  /// mounted idle owner-thread controller and a compiler-valid ASCII scope.
+  /// A repeated retirement is idempotent until the next controller lifetime.
+  /// This does NOT cancel service requests or unmount script components.
+  ControllerResult retire_scoped_event_handlers(std::string_view scope);
+
+  /// Query the controller's ACTIVE event routing table, which can differ from
+  /// the immutable compiler definition after a scoped event retirement.
+  bool has_active_event_binding(std::string_view element_id,
+                                UiEventKind event) const noexcept;
+
   /// Dispatches one resolved application-service completion to the optional
   /// pre-resolved `on_service_completion` export.
   /// @return Success without a module call when the export is absent.
