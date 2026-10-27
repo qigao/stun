@@ -1106,6 +1106,144 @@ UiDocumentCompileResult compile_ui_definition(
   return result;
 }
 
+UiDocumentCompileResult compile_scoped_ui_components(
+    const CompiledUiProgram &application,
+    const std::vector<UiScopedComponent> &components,
+    const WidgetRegistry &registry, const UiDocumentLimits &limits) {
+  UiDocumentCompileResult result;
+  if (components.size() > limits.max_nodes) {
+    result.error = make_error(UiDocumentErrorCode::NodeLimitExceeded,
+                              "too many scoped XML component instances");
+    return result;
+  }
+  // Build a detached compiler input. No Box or live Widget/Controller is
+  // touched until ALL component programs are accepted and recompiled into
+  // ONE authoritative immutable program.
+  UiDocumentDefinition merged = application.definition();
+  std::unordered_set<std::string> base_hosts;
+  {
+    std::vector<const UiNodeDefinition *> pending{&merged.root};
+    while (!pending.empty()) {
+      const UiNodeDefinition *node = pending.back();
+      pending.pop_back();
+      if (!node->id.empty()) base_hosts.insert(node->id);
+      for (const auto &child : node->children) pending.push_back(&child);
+    }
+  }
+  std::unordered_set<std::string> scopes;
+  for (const auto &instance : components) {
+    const auto valid_scope = [&] {
+      if (instance.scope.empty() ||
+          instance.scope.size() > limits.max_string_bytes / 2 ||
+          (std::isalpha(static_cast<unsigned char>(instance.scope.front())) == 0 &&
+           instance.scope.front() != '_')) {
+        return false;
+      }
+      return std::all_of(instance.scope.begin() + 1, instance.scope.end(),
+                         [](char ch) {
+                           const auto value = static_cast<unsigned char>(ch);
+                           return std::isalnum(value) != 0 ||
+                                  ch == '_' || ch == '-';
+                         });
+    };
+    if (!valid_scope() || !scopes.emplace(instance.scope).second ||
+        !instance.program) {
+      result.error = make_error(
+          UiDocumentErrorCode::InvalidComponentScope,
+          "component requires a unique ASCII scope and a compiled program");
+      return result;
+    }
+    if (base_hosts.count(instance.host_id) == 0) {
+      result.error = make_error(
+          UiDocumentErrorCode::MissingComponentHost,
+          "scoped XML component host must exist in the base application: " +
+              instance.host_id);
+      return result;
+    }
+    if (!instance.program->resources().empty()) {
+      result.error = make_error(
+          UiDocumentErrorCode::UnsupportedComponentResources,
+          "component-specific resources require an explicit scoped resource "
+          "ownership contract");
+      return result;
+    }
+    // Host lookup occurs on the new private candidate for each insertion.
+    // Only base_hosts are allowed so a child component cannot attach to a
+    // prior component or depend on insertion order.
+    UiNodeDefinition *host = nullptr;
+    std::vector<UiNodeDefinition *> pending{&merged.root};
+    while (!pending.empty()) {
+      UiNodeDefinition *node = pending.back();
+      pending.pop_back();
+      if (node->id == instance.host_id) {
+        host = node;
+        break;
+      }
+      for (auto &child : node->children) pending.push_back(&child);
+    }
+    if (!host || !registry.descriptor(host->tag) ||
+        registry.descriptor(host->tag)->kind != UiNodeKind::Container) {
+      result.error = make_error(
+          UiDocumentErrorCode::InvalidMountTarget,
+          "scoped XML component requires a structural, non-Widget host");
+      return result;
+    }
+
+    UiNodeDefinition subtree = instance.program->definition().root;
+    std::vector<UiNodeDefinition *> nodes{&subtree};
+    while (!nodes.empty()) {
+      UiNodeDefinition *node = nodes.back();
+      nodes.pop_back();
+      if (!node->native_widget_key.empty()) {
+        result.error = make_error(
+            UiDocumentErrorCode::InvalidComponentScope,
+            "native component Widget factory keys need an explicit "
+            "per-instance registry contract");
+        return result;
+      }
+      if (!node->id.empty()) {
+        if (node->id.find("::") != std::string::npos ||
+            node->id.size() + instance.scope.size() + 2 >
+                limits.max_string_bytes) {
+          result.error = make_error(
+              UiDocumentErrorCode::InvalidComponentScope,
+              "component element ID cannot be safely qualified");
+          return result;
+        }
+        node->id = instance.scope + "::" + node->id;
+      }
+      // The same template can appear more than once in a single program.
+      // Its slot names stay available to CSS/semantic matching via
+      // data-slot, but must not enter the app-wide UNIQUE slot index.
+      if (auto it = node->properties.find("slot");
+          it != node->properties.end()) {
+        const auto *slot = std::get_if<std::string>(&it->second);
+        if (!slot || node->properties.count("attr.data-slot") != 0) {
+          result.error = make_error(
+              UiDocumentErrorCode::InvalidProperty,
+              "component slot cannot shadow data-slot");
+          return result;
+        }
+        std::string value = *slot;
+        node->properties.erase(it);
+        node->properties.emplace("attr.data-slot", std::move(value));
+        node->property_spans.erase("slot");
+      }
+      for (auto &child : node->children) nodes.push_back(&child);
+    }
+    host->children.push_back(std::move(subtree));
+  }
+  result = compile_ui_definition(std::move(merged), application.resources(),
+                                 limits);
+  if (result) {
+    if (auto error = registry.validate(*result.program, limits)) {
+      result.program.reset();
+      result.error = std::move(error);
+    }
+  }
+  return result;
+}
+
 UiDocumentInstantiateResult
 UiDocumentInstantiator::instantiate(Box &box, const UiDocumentDefinition &definition) {
   return instantiate_impl(box, definition, nullptr, nullptr, {});
