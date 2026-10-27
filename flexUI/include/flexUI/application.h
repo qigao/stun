@@ -12,6 +12,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <variant>
 #include <vector>
 
 namespace flexUI {
@@ -47,6 +48,15 @@ struct DesktopScopedXmlComponent {
   std::string scope;
   std::string host_id;
   std::string source;
+};
+
+/// Strict initial application-global input declaration for compiled XML
+/// bindings. This is NOT a per-component namespace; duplicate names or
+/// conflicting types are rejected before Box publication. Reload constructs
+/// a new candidate from these immutable seed values.
+struct DesktopBindingInput {
+  std::string name;
+  std::variant<double, bool, std::string> value;
 };
 
 struct DesktopApplicationLimits {
@@ -273,6 +283,14 @@ public:
   /// unsupported until it has its own ownership and cancellation contract.
   DesktopApplicationBuilder &scoped_xml_component(
       std::string scope, std::string host_id, std::string source);
+
+  /// Declare a bounded application-global input before XML bindings mount.
+  /// Input names are shared explicitly across components. Every candidate
+  /// and reload starts with the supplied typed initial value.
+  DesktopApplicationBuilder &binding_input_string(std::string name,
+                                                   std::string value);
+  DesktopApplicationBuilder &binding_input_bool(std::string name, bool value);
+  DesktopApplicationBuilder &binding_input_number(std::string name, double value);
 
   /// Explicit migration-only entry for the retired `.flex` UI syntax.
   DesktopApplicationBuilder &legacy_flex_entry_compatibility(std::string source);
