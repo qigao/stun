@@ -93,6 +93,7 @@ target_link_libraries(dotgraph
 add_library(flex_dotgraph_adapter STATIC
     src/flex_dotgraph.cpp
     src/flexui_dotgraph.cpp
+    src/flexui_dotgraph_snapshot.cpp
 )
 target_include_directories(flex_dotgraph_adapter
     PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
