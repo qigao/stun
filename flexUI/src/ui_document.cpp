@@ -18,6 +18,7 @@
 #include <sstream>
 #include <stdexcept>
 #include <string_view>
+#include <unordered_map>
 #include <unordered_set>
 #include <utility>
 
@@ -1107,6 +1108,65 @@ UiDocumentCompileResult compile_ui_definition(
   return result;
 }
 
+// Remap whole variable identifiers in previously compiled binding expressions
+// without touching literal strings, escaped bytes or function call names.
+// The size cap applies during construction, before any Box is touched.
+std::optional<std::string> remap_scoped_binding_expression(
+    std::string_view source,
+    const std::unordered_map<std::string, std::string> &aliases,
+    std::size_t limit) {
+  std::string result;
+  result.reserve(source.size());
+  const auto append = [&](std::string_view span) {
+    if (result.size() > limit || span.size() > limit - result.size())
+      return false;
+    result.append(span.data(), span.size());
+    return true;
+  };
+  char quote = '\0';
+  for (std::size_t i = 0; i < source.size();) {
+    const char ch = source[i];
+    if (quote != '\0') {
+      if (!append(source.substr(i++, 1))) return std::nullopt;
+      if (ch == '\\' && i < source.size()) {
+        if (!append(source.substr(i++, 1))) return std::nullopt;
+      } else if (ch == quote) {
+        quote = '\0';
+      }
+      continue;
+    }
+    if (ch == '\'' || ch == '"') {
+      quote = ch;
+      if (!append(source.substr(i++, 1))) return std::nullopt;
+      continue;
+    }
+    const bool identifier =
+        (ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z') || ch == '_';
+    if (!identifier) {
+      if (!append(source.substr(i++, 1))) return std::nullopt;
+      continue;
+    }
+    const std::size_t start = i++;
+    while (i < source.size()) {
+      const char c = source[i];
+      if (!((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
+            (c >= '0' && c <= '9') || c == '_')) break;
+      ++i;
+    }
+    const auto name = source.substr(start, i - start);
+    std::size_t end = i;
+    while (end < source.size() &&
+           (source[end] == ' ' || source[end] == '\t')) ++end;
+    const bool call = end < source.size() && source[end] == '(';
+    const auto mapped = call ? aliases.end()
+                             : aliases.find(std::string(name));
+    if (!append(mapped == aliases.end() ? name
+                                        : std::string_view(mapped->second)))
+      return std::nullopt;
+  }
+  return result;
+}
+
 UiDocumentCompileResult compile_scoped_ui_components(
     const CompiledUiProgram &application,
     const std::vector<UiScopedComponent> &components,
@@ -1220,6 +1280,30 @@ UiDocumentCompileResult compile_scoped_ui_components(
       return result;
     }
 
+    std::unordered_map<std::string, std::string> input_aliases;
+    if (instance.input_aliases.size() > limits.max_bindings) {
+      result.error = make_error(UiDocumentErrorCode::BindingLimitExceeded,
+                                "component input alias count exceeds binding budget");
+      return result;
+    }
+    std::unordered_set<std::string> dependencies;
+    for (const auto &binding : instance.program->bindings())
+      for (const auto &dependency : binding.dependencies)
+        dependencies.insert(dependency);
+    for (const auto &alias : instance.input_aliases) {
+      if (!is_binding_identifier(alias.local_name) ||
+          !is_binding_identifier(alias.application_name) ||
+          alias.local_name.size() > limits.max_string_bytes ||
+          alias.application_name.size() > limits.max_string_bytes ||
+          dependencies.count(alias.local_name) == 0 ||
+          !input_aliases.emplace(alias.local_name, alias.application_name).second) {
+        result.error = make_error(UiDocumentErrorCode::InvalidComponentScope,
+                                  "component input alias needs a unique referenced "
+                                  "identifier and valid application input name");
+        return result;
+      }
+    }
+
     UiNodeDefinition subtree = instance.program->definition().root;
     // Validate local semantic references against this one immutable component
     // before qualifying IDs. Never silently link a label/ARIA target from one
@@ -1255,6 +1339,28 @@ UiDocumentCompileResult compile_scoped_ui_components(
           return result;
         }
         node->id = instance.scope + "::" + node->id;
+      }
+      // Static input redirects are lowered before the merged program's one
+      // compiler pass. Dependencies remain application-global typed sources;
+      // this does not install a component-private data/runtime owner.
+      if (!input_aliases.empty()) {
+        for (auto &[name, value] : node->properties) {
+          if (name.rfind("bind.", 0) != 0) continue;
+          auto *expression = std::get_if<std::string>(&value);
+          if (!expression) {
+            result.error = make_error(UiDocumentErrorCode::InvalidBindingExpression,
+                                      "component binding source must be a string");
+            return result;
+          }
+          auto renamed = remap_scoped_binding_expression(
+              *expression, input_aliases, limits.max_string_bytes);
+          if (!renamed) {
+            result.error = make_error(UiDocumentErrorCode::StringLimitExceeded,
+                                      "scoped binding source exceeds string budget");
+            return result;
+          }
+          *expression = std::move(*renamed);
+        }
       }
       // Semantic IDREF attributes, including multi-token ARIA references,
       // must point to this component's OWN known IDs. External URLs remain

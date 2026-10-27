@@ -315,12 +315,22 @@ UiDocumentCompileResult compile_ui_definition(
 /// `scope::local_id`. Component events and bindings use the SAME immutable
 /// app program, ScriptController and UI/Command effect engines. This is
 /// pre-mount composition; dynamic fragment handler registration is NOT opened.
+/// Compile-time source redirection into the one application UiDataContext.
+/// The host must declare the typed application input; no second data owner.
+struct UiScopedInputAlias {
+  std::string local_name;
+  std::string application_name;
+};
+
 struct UiScopedComponent {
   std::string scope;
   /// ID of an existing structural host in the application's BASE document.
   /// Components cannot target a widget host or another component.
   std::string host_id;
   std::shared_ptr<const CompiledUiProgram> program;
+  /// Optional static aliases; existing three-field aggregate callers keep
+  /// shared global input source semantics without an extra owner.
+  std::vector<UiScopedInputAlias> input_aliases = {};
 };
 
 /// Build a single immutable UI program from an XML application and statically
