@@ -1236,6 +1236,92 @@ spec("Scoped XML components preserve local label and accessibility references") 
                 "#costs::field");
   }
 
+
+  it("qualifies plain XML IDREF and local links for each component instance") {
+    const auto app = flexUI::compile_ui_xml(
+        "<ui name=\"App\"><main id=\"root\"><div id=\"left\"/>"
+        "<div id=\"right\"/></main></ui>");
+    const auto component = flexUI::compile_ui_xml(R"xml(
+      <ui name="Plain" xmlns:attr="urn:flexui:attribute">
+        <div id="panel">
+          <label id="plain-label" for="field" aria-labelledby="title hint"
+                 aria-flowto="field hint">Name</label>
+          <span id="title">Title</span>
+          <span id="hint">Help</span>
+          <input id="field" />
+          <span id="detail" aria-details="hint"
+                aria-errormessage="hint" headers="title hint"/>
+          <a id="plain-link" href="#field">Local</a>
+          <a id="external-link" href="https://example.com/#field">External</a>
+        </div>
+      </ui>
+    )xml");
+    check(static_cast<bool>(app));
+    check(static_cast<bool>(component));
+    if (!app || !component) return;
+    const auto registry = flexUI::WidgetRegistry::builtins();
+    const auto combined = flexUI::compile_scoped_ui_components(
+        *app.program, {{"sales", "left", component.program},
+                       {"costs", "right", component.program}}, registry);
+    check(static_cast<bool>(combined));
+    if (!combined) return;
+    flexUI::Box box(nullptr);
+    const auto mounted = flexUI::UiDocumentInstantiator::instantiate(
+        box, *combined.program, registry);
+    check(static_cast<bool>(mounted));
+    if (!mounted) return;
+    check_equal(*box.get_by_id("sales::plain-label")->attribute("for"),
+                "sales::field");
+    check_equal(*box.get_by_id("costs::plain-label")->attribute("for"),
+                "costs::field");
+    check_equal(*box.get_by_id("sales::plain-label")->attribute("aria-labelledby"),
+                "sales::title sales::hint");
+    check_equal(*box.get_by_id("costs::plain-label")->attribute("aria-flowto"),
+                "costs::field costs::hint");
+    check_equal(*box.get_by_id("sales::detail")->attribute("aria-details"),
+                "sales::hint");
+    check_equal(*box.get_by_id("costs::detail")->attribute("aria-errormessage"),
+                "costs::hint");
+    check_equal(*box.get_by_id("sales::detail")->attribute("headers"),
+                "sales::title sales::hint");
+    check_equal(*box.get_by_id("sales::plain-link")->attribute("href"),
+                "#sales::field");
+    check_equal(*box.get_by_id("costs::plain-link")->attribute("href"),
+                "#costs::field");
+    check_equal(*box.get_by_id("sales::external-link")->attribute("href"),
+                "https://example.com/#field");
+  }
+
+  it("rejects conflicting plain/attr aliases and unresolved plain IDREFs") {
+    const auto app = flexUI::compile_ui_xml(
+        "<ui name=\"App\"><main id=\"root\"><div id=\"left\"/></main></ui>");
+    const auto ambiguous = flexUI::compile_ui_xml(R"xml(
+      <ui name="Ambiguous" xmlns:attr="urn:flexui:attribute">
+        <div id="panel">
+          <span id="field"/>
+          <a id="link" href="#field" attr:href="#field">Link</a>
+        </div>
+      </ui>
+    )xml");
+    const auto missing = flexUI::compile_ui_xml(R"xml(
+      <ui name="Missing"><label id="label" for="foreign">Label</label></ui>
+    )xml");
+    check(static_cast<bool>(app));
+    check(static_cast<bool>(ambiguous));
+    check(static_cast<bool>(missing));
+    if (!app || !ambiguous || !missing) return;
+    const auto registry = flexUI::WidgetRegistry::builtins();
+    const auto alias_error = flexUI::compile_scoped_ui_components(
+        *app.program, {{"sales", "left", ambiguous.program}}, registry);
+    check_false(static_cast<bool>(alias_error));
+    check(alias_error.error.code == UiDocumentErrorCode::InvalidProperty);
+    const auto missing_error = flexUI::compile_scoped_ui_components(
+        *app.program, {{"sales", "left", missing.program}}, registry);
+    check_false(static_cast<bool>(missing_error));
+    check(missing_error.error.code == UiDocumentErrorCode::InvalidComponentScope);
+    check_equal(app.program->definition().root.children.size(), std::size_t{1});
+  }
+
   it("rejects unresolved cross-instance references before mounting") {
     const auto app = flexUI::compile_ui_xml(
         "<ui name=\"App\"><main id=\"root\"><div id=\"left\"/>"
