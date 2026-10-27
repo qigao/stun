@@ -92,6 +92,8 @@ public:
 
   ~ControllerEventBridge() { box_.set_framework_event_callback({}); }
 
+  bool is_dispatching() const noexcept { return dispatching_; }
+
   ControllerEventBridge(const ControllerEventBridge &) = delete;
   ControllerEventBridge &operator=(const ControllerEventBridge &) = delete;
 
@@ -126,9 +128,10 @@ private:
       return;
     }
     const UiHandle current_target = box_.handle_for(current_element);
-    const auto program = controller_.program();
-    if (!current_target || program == nullptr ||
-        program->find_event_binding(current_target.id, *kind) == nullptr) {
+    // Use Controller's active pre-resolved routes, not merely the immutable
+    // compiler definition. No secondary event index is maintained by Box.
+    if (!current_target ||
+        !controller_.has_active_event_binding(current_target.id, *kind)) {
       return;
     }
 
@@ -900,6 +903,50 @@ DesktopApplicationResult DesktopApplication::recompose_scoped_xml_components(
                  DesktopApplicationStage::CandidateBuild,
                  "scoped component candidate failed unexpectedly")};
   }
+}
+
+DesktopApplicationResult DesktopApplication::retire_scoped_event_handlers(
+    std::string_view scope) {
+  if (!is_owner_thread()) {
+    return {fail(DesktopApplicationErrorCode::WrongThread,
+                 DesktopApplicationStage::ControllerEventRetirement,
+                 "scoped event retirement requires the application owner thread")};
+  }
+  if (impl_->state != DesktopApplicationState::Ready) {
+    return {fail(DesktopApplicationErrorCode::InvalidState,
+                 DesktopApplicationStage::ControllerEventRetirement,
+                 "scoped event retirement requires the ready state")};
+  }
+  if (!impl_->active->controller || !impl_->active->event_bridge) {
+    return {fail(DesktopApplicationErrorCode::InvalidConfiguration,
+                 DesktopApplicationStage::ControllerEventRetirement,
+                 "scoped event retirement requires a mounted script controller")};
+  }
+  if (impl_->active->event_bridge->is_dispatching()) {
+    return {fail(DesktopApplicationErrorCode::InvalidState,
+                 DesktopApplicationStage::ControllerEventRetirement,
+                 "cannot retire scoped events during native event bubbling")};
+  }
+  const auto defined = std::find_if(
+      impl_->config.scoped_components.begin(),
+      impl_->config.scoped_components.end(),
+      [scope](const DesktopScopedXmlComponent &component) {
+        return std::string_view(component.scope) == scope;
+      });
+  if (defined == impl_->config.scoped_components.end()) {
+    return {fail(DesktopApplicationErrorCode::InvalidConfiguration,
+                 DesktopApplicationStage::ControllerEventRetirement,
+                 "scoped event retirement requires a declared XML component scope")};
+  }
+  auto retired = impl_->active->controller->retire_scoped_event_handlers(scope);
+  if (!retired) {
+    auto error = fail(DesktopApplicationErrorCode::ControllerEventRetirementFailed,
+                      DesktopApplicationStage::ControllerEventRetirement,
+                      retired.error.message);
+    error.controller_error = std::move(retired.error);
+    return {std::move(error)};
+  }
+  return {};
 }
 
 DesktopApplicationBuilder::DesktopApplicationBuilder(flex::Renderer *renderer)

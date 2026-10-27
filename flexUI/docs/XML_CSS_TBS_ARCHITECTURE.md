@@ -3,7 +3,23 @@
 状态：架构决策已采用，实施与验收按下列工作项推进
 日期：2026-08-31
 
-## 2026-10-28 P4.4 M1 结构子树及其 Binding 所有权原子退休（Draft）
+## 2026-10-28 P4.4 M2 作用域脚本事件路由事务性退休（Draft）
+
+新增 `ScriptController::retire_scoped_event_handlers(scope)` 和
+`DesktopApplication::retire_scoped_event_handlers(scope)`，从当前 Controller
+的**唯一活动执行路由表**中原子退休该 `scope::id` 下的所有脚本事件导出，
+不修改不可变 `CompiledUiProgram`。先验证 scope ASCII 规则、完整匹配
+的编译事件和全部可用路由，再独立构造下一张路由表与退休标记，通过
+no-throw swap 完成提交，杜绝半套分发表。相邻 scope 精确隔离，
+重复退休幂等，脚本事件及原生事件冒泡重入拒绝。原生 Bridge 只查询
+Controller 的活动路由，下一代完整 reload/recompose 重建活动分发表。
+
+**仅撤销脚本事件执行资格**，不删除 Element、Binding、Widget、异步服务
+请求、Service Completion 或组件资源。它不是 `unmount(scope)`；
+已合并 #285 的整代组件重组仍是完整移除脚本组件的权威路径，
+真正作用域异步租约回收与资源所有权继续由 #275 跟踪。
+
+## 2026-10-28 P4.4 M1 结构子树及其 Binding 所有权原子退休（已合并 PR #287）
 
 本轮增加 `Box::retire_bound_structural_subtree(id)`，显式处理手工管理的
 **结构子树和它独占的 Binding target 记录**。Box 的既有预检完整验证

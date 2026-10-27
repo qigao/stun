@@ -1,9 +1,11 @@
 #include "flexUI/controller.h"
 
+#include <algorithm>
 #include <cmath>
 #include <exception>
 #include <thread>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 
 namespace flexUI {
@@ -56,6 +58,29 @@ ScriptCallResult safe_call(IScriptModule &module, ScriptExportHandle handle,
   }
 }
 
+// Only complete compiler-valid ASCII component scopes may be retired.
+bool valid_component_event_scope(std::string_view scope,
+                                 std::size_t max_id_bytes) noexcept {
+  if (scope.empty() || scope.size() > max_id_bytes ||
+      max_id_bytes - scope.size() < 3) return false;
+  const char first = scope.front();
+  if (!((first >= 'A' && first <= 'Z') ||
+        (first >= 'a' && first <= 'z') || first == '_')) return false;
+  return std::all_of(scope.begin() + 1, scope.end(), [](char ch) {
+    return (ch >= 'A' && ch <= 'Z') ||
+           (ch >= 'a' && ch <= 'z') ||
+           (ch >= '0' && ch <= '9') ||
+           ch == '_' || ch == '-';
+  });
+}
+
+bool event_id_in_scope(std::string_view element_id,
+                       std::string_view scope) noexcept {
+  return element_id.size() > scope.size() + 2 &&
+         element_id.compare(0, scope.size(), scope) == 0 &&
+         element_id.substr(scope.size(), 2) == "::";
+}
+
 } // namespace
 
 struct ScriptController::Impl {
@@ -76,6 +101,17 @@ struct ScriptController::Impl {
   std::optional<ScriptExportHandle> service_completion_export;
   std::optional<ScriptExportHandle> unmount_export;
   std::unordered_map<const EventBinding *, ScriptExportHandle> event_exports;
+  // One authoritative controller-active event table. The compiler program
+  // remains immutable; retired scope markers distinguish intentional missing
+  // entries from corrupt controller export resolution.
+  std::unordered_set<std::string> retired_event_scopes;
+
+  bool is_retired_event(const EventBinding &binding) const noexcept {
+    return std::any_of(retired_event_scopes.begin(), retired_event_scopes.end(),
+                       [&binding](const std::string &scope) {
+                         return event_id_in_scope(binding.element_id, scope);
+                       });
+  }
 
   bool is_owner_thread() const noexcept { return owner_thread == std::this_thread::get_id(); }
 
@@ -132,6 +168,7 @@ struct ScriptController::Impl {
 
   void clear() noexcept {
     event_exports.clear();
+    retired_event_scopes.clear();
     mount_export.reset();
     frame_export.reset();
     service_completion_export.reset();
@@ -336,6 +373,7 @@ ControllerResult ScriptController::dispatch(const ScriptEventSnapshot &event) {
   }
   const auto resolved = impl_->event_exports.find(binding);
   if (resolved == impl_->event_exports.end()) {
+    if (impl_->is_retired_event(*binding)) return {};
     impl_->state = ControllerState::Faulted;
     return fail(ControllerErrorCode::InternalInvariant, ControllerStage::Event,
                 "resolved handler table does not match compiled UI program");
@@ -363,6 +401,79 @@ ControllerResult ScriptController::dispatch(const ScriptEventSnapshot &event) {
     return applied;
   }
   impl_->state = ControllerState::Mounted;
+  return {};
+}
+
+bool ScriptController::has_active_event_binding(
+    std::string_view element_id, UiEventKind event) const noexcept {
+  if (!impl_->is_owner_thread() || impl_->state != ControllerState::Mounted ||
+      impl_->program == nullptr) return false;
+  const auto *binding = impl_->program->find_event_binding(element_id, event);
+  return binding != nullptr &&
+         impl_->event_exports.find(binding) != impl_->event_exports.end();
+}
+
+ControllerResult ScriptController::retire_scoped_event_handlers(
+    std::string_view scope) {
+  if (!impl_->is_owner_thread()) {
+    return fail(ControllerErrorCode::WrongThread,
+                ControllerStage::EventRetirement,
+                "scoped event retirement requires the controller owner thread");
+  }
+  if (impl_->state != ControllerState::Mounted || !impl_->program) {
+    return fail(ControllerErrorCode::InvalidState,
+                ControllerStage::EventRetirement,
+                "scoped event retirement requires a mounted idle controller");
+  }
+  if (!valid_component_event_scope(scope, impl_->limits.max_element_id_bytes)) {
+    return fail(ControllerErrorCode::InvalidArgument,
+                ControllerStage::EventRetirement,
+                "scoped event retirement requires a bounded ASCII component scope");
+  }
+  const auto already = std::find_if(
+      impl_->retired_event_scopes.begin(), impl_->retired_event_scopes.end(),
+      [scope](const std::string &value) {
+        return std::string_view(value) == scope;
+      });
+  if (already != impl_->retired_event_scopes.end()) return {};
+
+  std::size_t matches = 0;
+  for (const auto &binding : impl_->program->event_bindings()) {
+    if (!event_id_in_scope(binding.element_id, scope)) continue;
+    if (impl_->event_exports.find(&binding) == impl_->event_exports.end()) {
+      return fail(ControllerErrorCode::InternalInvariant,
+                  ControllerStage::EventRetirement,
+                  "active scoped event table mismatches the compiled definition");
+    }
+    ++matches;
+  }
+  if (matches == 0) {
+    return fail(ControllerErrorCode::InvalidArgument,
+                ControllerStage::EventRetirement,
+                "the requested scope has no compiled script event handlers");
+  }
+
+  try {
+    // Stage every allocation privately. Publish all old-handler removals
+    // with a pair of no-throw standard-container swaps, never a partial erase.
+    auto next_routes = impl_->event_exports;
+    auto next_retired = impl_->retired_event_scopes;
+    next_retired.emplace(scope);
+    for (const auto &binding : impl_->program->event_bindings()) {
+      if (event_id_in_scope(binding.element_id, scope))
+        next_routes.erase(&binding);
+    }
+    impl_->event_exports.swap(next_routes);
+    impl_->retired_event_scopes.swap(next_retired);
+  } catch (const std::exception &) {
+    return fail(ControllerErrorCode::EventRetirementFailed,
+                ControllerStage::EventRetirement,
+                "failed to stage scoped Controller event retirement");
+  } catch (...) {
+    return fail(ControllerErrorCode::EventRetirementFailed,
+                ControllerStage::EventRetirement,
+                "unknown scoped Controller event retirement error");
+  }
   return {};
 }
 
