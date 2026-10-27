@@ -1651,6 +1651,41 @@ spec("Desktop XML components share one native ScriptController and Effects engin
     check_equal(probe->created_sources.size(), std::size_t{1});
   }
 
+  it("reserves commands before applying scoped UI mutations, then publishes once") {
+    auto probe = std::make_shared<ModuleProbe>();
+    probe->emit_valid_mutation = true;
+    probe->emit_service_command = true;
+    flexUI::DesktopApplicationBuilder builder(nullptr);
+    builder.xml_entry(
+        "<ui name=\"Dashboard\"><main id=\"root\">"
+        "<section id=\"left\"/></main></ui>")
+        .scoped_xml_component(
+            "sales", "left",
+            "<ui name=\"Panel\" xmlns:on=\"urn:flexui:event\">"
+            "<div id=\"action\" on:click=\"save_document\">Initial</div></ui>")
+        .script("valid-controller", fake_factory(probe));
+    static_cast<void>(configure_storage_service(builder));
+    auto built = builder.build();
+    check(static_cast<bool>(built));
+    if (!built) return;
+
+    auto &app = *built.application;
+    auto* target = app.box().get_by_id("sales::action");
+    check_not_null(target);
+    flexUI::ScriptEventSnapshot event;
+    event.event = flexUI::UiEventKind::Click;
+    event.target = app.box().handle_for(*target);
+    event.current_target = event.target;
+    check(app.controller()->dispatch(event));
+    check_equal(target->text(), "Saved");
+    const auto command = app.try_receive_service_request();
+    check(static_cast<bool>(command));
+    const auto stats = app.service_statistics();
+    check_equal(stats.published, std::uint64_t{1});
+    check_equal(stats.current_pending, std::size_t{1});
+    check(app.controller()->state() == flexUI::ControllerState::Mounted);
+  }
+
   it("preserves active Box/controller when scoped reload compilation fails") {
     auto probe = std::make_shared<ModuleProbe>();
     const std::string root_ui =
