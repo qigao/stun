@@ -29,6 +29,7 @@ struct ApplicationConfig {
   ApplicationCompletionWakeup completion_wakeup;
   UiEntryFormat entry_format = UiEntryFormat::Xml;
   bool script_enabled = false;
+  std::vector<DesktopScopedXmlComponent> scoped_components;
 };
 
 std::optional<UiEventKind> to_ui_event_kind(EventType type) noexcept {
@@ -215,6 +216,56 @@ CandidateResult build_candidate(const ApplicationConfig &config, DesktopApplicat
                         DesktopApplicationStage::UiCompile, compiled.error.message);
       error.ui_error = std::move(compiled.error);
       return {{}, std::move(error)};
+    }
+
+    if (!config.scoped_components.empty()) {
+      if (config.entry_format != UiEntryFormat::Xml) {
+        return {{},
+                fail(DesktopApplicationErrorCode::InvalidConfiguration,
+                     DesktopApplicationStage::Configuration,
+                     "scoped XML components require an XML application entry")};
+      }
+      std::vector<UiScopedComponent> instances;
+      instances.reserve(config.scoped_components.size());
+      for (const auto &component : config.scoped_components) {
+        auto nested = compile_ui_xml(component.source, config.limits.document);
+        if (!nested) {
+          auto error = fail(
+              DesktopApplicationErrorCode::UiCompileFailed,
+              DesktopApplicationStage::UiCompile,
+              "component '" + component.scope + "' XML rejected: " +
+                  nested.error.message);
+          error.ui_error = std::move(nested.error);
+          return {{}, std::move(error)};
+        }
+        instances.push_back({component.scope, component.host_id,
+                             std::move(nested.program)});
+      }
+      auto composed = compile_scoped_ui_components(
+          *compiled.program, instances, config.registry, config.limits.document);
+      if (!composed) {
+        auto error = fail(
+            DesktopApplicationErrorCode::UiCompileFailed,
+            DesktopApplicationStage::UiCompile, composed.error.message);
+        error.ui_error = std::move(composed.error);
+        return {{}, std::move(error)};
+      }
+      compiled = std::move(composed);
+    }
+    // UiHandle id bytes are bounded by the controller contract, not merely
+    // the XML parser's larger maximum string size. Fail before any Box mount
+    // instead of admitting an uncallable scoped handler.
+    for (const auto &binding : compiled.program->event_bindings()) {
+      if (binding.element_id.size() > config.limits.controller.max_element_id_bytes) {
+        auto error = fail(
+            DesktopApplicationErrorCode::UiCompileFailed,
+            DesktopApplicationStage::UiCompile,
+            "compiled event element ID exceeds controller handle limit");
+        error.ui_error = {UiDocumentErrorCode::InvalidComponentScope,
+                          error.message, binding.source.line,
+                          binding.source.column};
+        return {{}, std::move(error)};
+      }
     }
 
     if (auto schema_error = config.registry.validate(*compiled.program, config.limits.document)) {
@@ -700,6 +751,14 @@ DesktopApplicationBuilder &
 DesktopApplicationBuilder::legacy_flex_entry_compatibility(std::string source) {
   impl_->config.entry_format = UiEntryFormat::LegacyFlexCompatibility;
   impl_->sources.ui = std::move(source);
+  return *this;
+}
+
+DesktopApplicationBuilder &
+DesktopApplicationBuilder::scoped_xml_component(
+    std::string scope, std::string host_id, std::string source) {
+  impl_->config.scoped_components.push_back(
+      {std::move(scope), std::move(host_id), std::move(source)});
   return *this;
 }
 
