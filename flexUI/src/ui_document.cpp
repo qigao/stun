@@ -1464,12 +1464,12 @@ UiDocumentCompileResult compile_scoped_ui_components(
       std::size_t parent_index;
       std::size_t child_index;
     };
-    std::vector<PendingOwnerNode> pending;
-    pending.push_back({&subtree, UiScopedOwnedNode::kNoParent,
+    std::vector<PendingOwnerNode> owner_pending;
+    owner_pending.push_back({&subtree, UiScopedOwnedNode::kNoParent,
                        ownership.root_child_index});
-    while (!pending.empty()) {
-      const auto next = pending.back();
-      pending.pop_back();
+    while (!owner_pending.empty()) {
+      const auto next = owner_pending.back();
+      owner_pending.pop_back();
       const auto *descriptor = registry.descriptor(next.node->tag);
       if (descriptor == nullptr) {
         result.error = make_error(UiDocumentErrorCode::UnknownElementTag,
@@ -1489,7 +1489,7 @@ UiDocumentCompileResult compile_scoped_ui_components(
       const auto owner_index = ownership.nodes.size();
       ownership.nodes.push_back(std::move(owned));
       for (std::size_t i = next.node->children.size(); i > 0; --i) {
-        pending.push_back({&next.node->children[i - 1], owner_index, i - 1});
+        owner_pending.push_back({&next.node->children[i - 1], owner_index, i - 1});
       }
     }
     if (ownership.nodes.size() != added) {
