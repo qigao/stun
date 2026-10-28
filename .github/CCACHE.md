@@ -163,3 +163,19 @@ PDB. Linux/macOS compiler flags and independent ASan/UBSan/TSan builds
 are untouched. The actual Windows cacheable compiler calls must become
 nonzero under the unchanged strict stats gate, followed by warm-cache
 acceptance. No CI failure is waived.
+
+## Tango Windows Git Bash path conversion in /Z7 CI override
+
+On the first `/Z7` candidate, CMake's Windows compiler ABI test
+failed BEFORE testing Tango: Git Bash's MSYS argument translation
+rewrote `/MDd` into `C:/Program Files/Git/MDd`, which MSVC interpreted
+as source-file arguments. The command-line debug configuration itself
+was correct, but the shell modified it.
+
+Windows standalone `cmake` now runs with `MSYS_NO_PATHCONV=1` only
+for that configure subprocess. The project source/build arguments are
+relative and the installed SDK prefix was explicitly converted with
+`cygpath -w` already; native `/MDd /Z7 /Ob0 /Od /RTC1` flags thus
+reach CMake unchanged. Linux/macOS config and sanitizers are untouched.
+The existing mandatory ccache stats gate will prove whether the Debug
+MSVC object compilation became truly cacheable.

@@ -158,7 +158,16 @@ jobs:
             cmake_args+=("-DCMAKE_C_FLAGS_DEBUG=/MDd /Z7 /Ob0 /Od /RTC1"
                          "-DCMAKE_CXX_FLAGS_DEBUG=/MDd /Z7 /Ob0 /Od /RTC1")
           fi
-          cmake "${cmake_args[@]}"
+          if [[ "$RUNNER_OS" == Windows ]]; then
+            # Git Bash rewrites bare MSVC flags like /MDd into
+            # "C:/Program Files/Git/MDd" before invoking cmake.exe.
+            # All source/build paths are relative and the imported SDK
+            # prefix above is already native Windows syntax. Disable ONLY
+            # this subprocess's MSYS path conversion, not shell safety.
+            MSYS_NO_PATHCONV=1 cmake "${cmake_args[@]}"
+          else
+            cmake "${cmake_args[@]}"
+          fi
       - name: Build Tango and real static-link test
         shell: bash
         run: cmake --build build/tango --config Debug --parallel 2
