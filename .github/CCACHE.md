@@ -267,6 +267,49 @@ Windows `/Z7` present with `/Zi` absent. This also triggers a second
 same-source-head CI run, whose Windows result must prove REAL restored
 compiler cache hits rather than treating the first save as a warm run.
 
+## UI Core C11 released-SDK native qualification
+
+`.github/workflows/ui-core-c11.yml` now uses the existing SHA-256
+verified `setup-ccache` action for **20 original native C11 tests** on
+Windows x64/MSVC (Ninja generator, genuine Visual C compiler) and macOS
+ARM64/AppleClang (Ninja). Both generated `build.ninja` graphs must
+actually contain the `ccache` compiler launcher before any build is
+considered valid. Original Salts.Native released SDK provenance,
+SHA-256 validation, and 20/20 CTests are unchanged.
+
+The `-fsyntax-only` C11 header/consumer jobs deliberately remain
+independent of ccache: they produce no cacheable object output and
+must not be reported as compiler-cache evidence. Isolated output cache
+profiles (`ui-core-c11-windows`, `ui-core-c11-macos`) avoid mixing
+native build configurations with FlexUI/Tango/GraphLayout.
+
+Changes to `setup-ccache/**` and `report-ccache.sh` trigger both the
+workflow and its `ci-affected.sh` native-scope check. The actual
+compiler invocation/hit/miss counts, 20 CTests and Ninja
+`compile_commands.json` are kept as exact-head CI evidence.
+No warm-cache benefit or speedup is claimed until independently
+measured on another exact SHA.
+
+## UI Core C11 first verified cold-run evidence (PR #307)
+
+On immutable candidate `0eaca57a1d74051cf72c8e59045f1cdc95e9be58`,
+[UI C11 Reflection Contract #40716771115](https://github.com/qigao/stun/actions/runs/40716771115)
+completed successfully, including both original released-SDK 20/20 native
+CTest suites, independent strict syntax-only header tests and the normal
+public/runtime contract workflows.
+
+| Target | Cacheable compiler calls | Hits | Misses | Other calls |
+| --- | ---: | ---: | ---: | ---: |
+| macOS ARM64 AppleClang Ninja | 28 | 0 | 28 | 0 |
+| Windows x64 MSVC Ninja | 26 | 0 | 26 | 4 |
+
+Both compiler caches were saved to immutable, separate ccache 4.14.2
+keys. Cold zero-hit statistics are expected. The next workflow-only
+comment commit intentionally preserves the production C sources and
+CMake compiler configuration, forcing real native jobs to restore
+the prior cache by exact platform/profile prefix; confirm restored
+cache hit statistics instead of relying on the presence of archives.
+
 ## gCanvas native GLES and Android NDK cross-compiler gates
 
 The Linux OpenGLES pixel smoke and gCanvas package contract now use
@@ -314,3 +357,23 @@ and this documentation, so C++ sources, Android ABI/NDK toolchain and
 CMake flags remain identical. Follow-up runs must restore
 compiler-output caches via their prefix keys and report real hits on
 each of the **three** profiles; a zero-call result must fail.
+
+## Completed release qualification (2026-10-28)
+
+These are verified compiler-output hit counts from real native build jobs,
+not GitHub cache-restoration messages or measured wall-time speedups.
+
+| Accepted PR | Exact HEAD | Real cacheable calls / hits | Acceptance |
+| --- | --- | --- | --- |
+| [#307](https://github.com/qigao/stun/pull/307) Windows x64/MSVC C11 | `21a0e10f` | 26 / 26 (100%) | 20/20 native CTests |
+| [#307](https://github.com/qigao/stun/pull/307) macOS ARM64 C11 | `21a0e10f` | 28 / 28 (100%) | 20/20 native CTests |
+| [#308](https://github.com/qigao/stun/pull/308) Linux OpenGLES | `10b7f48a` | 17 / 17 (100%) | GLES pixel smoke |
+| [#308](https://github.com/qigao/stun/pull/308) Linux installed consumer | `10b7f48a` | 17 / 17 (100%) | `find_package(gCanvas)` |
+| [#308](https://github.com/qigao/stun/pull/308) Android NDK ARM64 | `10b7f48a` | 14 / 16 (87.5%) | NDK target/ABI checks |
+
+Full workflows: [UI C11 #40717285861](https://github.com/qigao/stun/actions/runs/40717285861),
+[GLES #40719262944](https://github.com/qigao/stun/actions/runs/40719262944),
+[package/NDK #40719262892](https://github.com/qigao/stun/actions/runs/40719262892).
+Cold snapshots and restored warm snapshots use unchanged production sources
+and compiler flags. The two NDK misses are legitimate, not test failures.
+No controlled wall-time benchmark has been run.
