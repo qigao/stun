@@ -101,3 +101,25 @@ portability error, not a failed GraphLayout algorithm or a ccache miss.
 The fixed command uses a mandatory nonempty `cmake_args` array with
 optional toolchain overrides appended; strict shell error handling is
 unchanged and the exact four-platform CI must pass at the new HEAD.
+
+## GraphLayout first all-four-way green and cache evidence (2026-10-28)
+
+PR #304 exact accepted first full HEAD `d5ebd3f6977aa956a2a03c75722ce46085d685bf`
+([run 40698224003](https://github.com/qigao/stun/actions/runs/40698224003))
+passed all real GraphLayout CTest suites in four toolchains, including
+Windows Ninja + MSVC and pinned SHA-256 checked ccache:
+
+| Compiler | Cacheable calls | Hits | Misses | Classification |
+| --- | ---: | ---: | ---: | --- |
+| Linux GCC | 45 | 45 | 0 | Restored previous commit's GCC cache |
+| Linux Clang | 45 | 45 | 0 | Restored previous commit's Clang cache |
+| Windows MSVC | 44 | 44 | 0 | Restored previous commit's MSVC cache |
+| macOS AppleClang | 45 | 0 | 45 | First successful build: cold cache saved |
+
+The immediately previous HEAD `54d1622b` had already passed Linux
+GCC/Clang and Windows MSVC but failed before macOS CMake configuration
+because Bash 3.2 `set -u` rejected an empty optional array.
+A later no-C++-source-change CI invocation must restore the AppleClang
+snapshot, report real warm compiler hits and rerun native tests before
+we regard AppleClang cache reuse as qualified. This is a separate
+acceptance criterion, not a claim inferred from the first save.

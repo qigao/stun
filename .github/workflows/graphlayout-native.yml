@@ -154,6 +154,9 @@ jobs:
       - name: Run GraphLayout algorithm qualification
         shell: bash
         run: ctest --test-dir build/graphlayout -C Release --no-tests=error --output-on-failure
+      # The first accepted AppleClang run populates a cold cache. Repeat on
+      # a new exact HEAD with unchanged C++ sources to verify real RESTORED
+      # compiler hits, independently from a successful dependency download.
       - name: Require ccache compilation evidence for exact toolchain
         shell: bash
         run: bash .github/scripts/report-ccache.sh graphlayout-${{ matrix.toolchain }}
