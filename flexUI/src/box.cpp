@@ -1237,14 +1237,17 @@ Box::inspect_subtree_borrowers(const Element *subtree_root) const noexcept {
         }
         ++result.widget_hosts;
         const auto widget_owners = element->widget->inspect_local_borrowers();
-        if (!widget_owners.audited) {
-          ++result.unverified_widget_hosts;
-        } else {
-          result.native_widget_callback_owners +=
-              widget_owners.native_callback_owners;
-          if (widget_owners.interaction_or_callback_active)
-            ++result.active_widget_local_borrowers;
-        }
+        if (!widget_owners.audited) ++result.unverified_widget_hosts;
+        // A partial/unsupported audit can still report real borrowers; the
+        // "audited" bit governs admission, not whether diagnostics are kept.
+        result.native_widget_callback_owners +=
+            widget_owners.native_callback_owners;
+        if (widget_owners.interaction_or_callback_active)
+          ++result.active_widget_local_borrowers;
+        result.retained_widget_projection_nodes +=
+            widget_owners.published_projection_nodes;
+        result.deferred_widget_retirement_nodes +=
+            widget_owners.pending_retirement_nodes;
       }
       const auto identity = reinterpret_cast<std::uintptr_t>(element);
       if (transitions_.retains_element(identity))

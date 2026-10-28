@@ -1364,3 +1364,40 @@ spec("C++ Tokenizer") {
         check(has_number);
     }
 }
+
+spec("MarkdownWidget M4b6g scoped projection lifetime probe") {
+  it("reports actual published projection and deferred owner counts without granting retirement") {
+    auto box = std::make_unique<Box>(nullptr);
+    auto *root = box->create("div", "root");
+    auto *widget_host = box->create_widget<MarkdownWidget>(
+        "div", "markdown-projection", "# Heading\n\nBody");
+    auto *sibling = box->create("div", "sibling");
+    root->append(widget_host);
+    root->append(sibling);
+    box->set_root(root);
+    auto *widget = static_cast<MarkdownWidget*>(widget_host->widget);
+    const auto initial = box->inspect_subtree_borrowers(widget_host);
+    check(static_cast<bool>(initial));
+    check_equal(initial.unverified_widget_hosts, std::size_t{1});
+    check_equal(initial.retained_widget_projection_nodes, std::size_t{0});
+    check_equal(initial.deferred_widget_retirement_nodes, std::size_t{0});
+    check_equal(initial.active_widget_local_borrowers, std::size_t{1});
+
+    widget->update(0.0f, *widget_host);
+    const auto projected = box->inspect_subtree_borrowers(widget_host);
+    check(static_cast<bool>(projected));
+    check_equal(projected.unverified_widget_hosts, std::size_t{1});
+    check(projected.retained_widget_projection_nodes > std::size_t{0});
+    check_equal(projected.deferred_widget_retirement_nodes, std::size_t{0});
+    check_equal(projected.active_widget_local_borrowers, std::size_t{1});
+    const auto peer = box->inspect_subtree_borrowers(sibling);
+    check(static_cast<bool>(peer));
+    check_equal(peer.retained_widget_projection_nodes, std::size_t{0});
+    check_equal(peer.deferred_widget_retirement_nodes, std::size_t{0});
+    check_equal(peer.unverified_widget_hosts, std::size_t{0});
+    // No detached/compiled path may bypass the still-unverified projection.
+    check_false(box->retire_bound_structural_subtree("markdown-projection"));
+    check_equal(box->get_by_id("sibling"), sibling);
+    check_equal(box->get_by_id("markdown-projection"), widget_host);
+  }
+}

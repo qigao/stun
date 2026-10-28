@@ -56,6 +56,9 @@ struct BoxSubtreeBorrowSnapshot {
   std::size_t unverified_widget_hosts = 0;
   std::size_t native_widget_callback_owners = 0;
   std::size_t active_widget_local_borrowers = 0;
+  /// Markdown projection pointers may survive outside the visible subtree.
+  std::size_t retained_widget_projection_nodes = 0;
+  std::size_t deferred_widget_retirement_nodes = 0;
   /// These live/stale cache owners must be cleaned in a future physical
   /// detach; neither a current_time check nor a zero-frame snapshot clears.
   std::size_t retained_transition_elements = 0;

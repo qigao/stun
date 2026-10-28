@@ -29,6 +29,10 @@ struct WidgetLocalBorrowSnapshot {
   bool audited = false;
   std::size_t native_callback_owners = 0;
   bool interaction_or_callback_active = false;
+  /// Shadow metrics for Widget-private Box-owned projection identities.
+  /// These counts are diagnostics, not authority to detach their Elements.
+  std::size_t published_projection_nodes = 0;
+  std::size_t pending_retirement_nodes = 0;
 };
 
 /**

@@ -40,6 +40,16 @@ public:
     bool handle_event(const Event& event, Element& elem) override;
     void update(float delta_ms, Element& elem) override;
     const char* type_name() const override { return "MarkdownWidget"; }
+    WidgetLocalBorrowSnapshot inspect_local_borrowers() const noexcept override {
+      // A parsed projection is Box-owned but Markdown keeps borrowed raw
+      // identities, including a possibly DETACHED deferred retirement batch.
+      // Surface both even when still unaudited: the future physical owner
+      // protocol must drain them without parser/frame callbacks.
+      return {false, 0,
+              needs_rebuild_ || rebuilding_ ||
+                  !published_projection_.empty() || !pending_retirement_.empty(),
+              published_projection_.size(), pending_retirement_.size()};
+    }
 
     // Markdown access
     const std::string& markdown() const { return markdown_; }

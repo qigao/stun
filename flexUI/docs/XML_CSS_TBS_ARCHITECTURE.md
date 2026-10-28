@@ -829,3 +829,21 @@ without deleting or corrupting the original tree.
 This is necessary proof for future physical deletion, not permission to
 bypass the compiled tree and Widget lifetime guards. #302 Draft,
 `unmount(scope)` still unavailable.
+
+## 2026-10-28 M4b6g — MarkdownWidget projection borrower evidence
+
+The sole MarkdownWidget C11 RichDoc renderer stores a published projection
+and a separately pending, detached retirement batch. Both are raw Element
+identities whose actual lifetime remains in Box::elements_. A new read-only
+`WidgetLocalBorrowSnapshot` projects **counts** for both lists, plus rebuild
+activity; the Box owner snapshot accumulates those counts even though
+MarkdownWidget deliberately remains `audited=false`. There is no C11 parse,
+callback, reattachment or mutation during inspection. The independent
+native MarkdownWidget test asserts a real parsed projection has positive
+borrower count, does not authorize retirement, and leaves the sibling subtree
+untouched.
+
+This remains fail-closed because Markdown's deferred retirement requires
+separate proof of no reentrant parse/update, staged cleanup of its published
+and detached Element identities, and Widget destruction ordering. Counting
+does NOT turn Markdown into an unmount-safe Widget. #302 Draft, #298/#275 Open.
