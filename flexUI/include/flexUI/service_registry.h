@@ -4,6 +4,7 @@
 #include "flexUI/application_completion.h"
 #include "flexUI/application_service.h"
 
+#include <chrono>
 #include <cstddef>
 #include <memory>
 #include <string>
@@ -36,6 +37,15 @@ struct ApplicationServiceSubmitResult {
   explicit operator bool() const noexcept { return !static_cast<bool>(error); }
 };
 
+/// Scope resource retirement MUST be independent of terminal posting.
+/// Unsupported is the default: no worker-lifetime evidence is invented.
+enum class ApplicationEndpointScopeJoinCode {
+  Joined,
+  Busy,
+  Unsupported,
+  Failed,
+};
+
 /// Lifetime-safe C++ endpoint. On success the endpoint has copied every value
 /// it retains and owns exactly one completion attempt for request.token. On
 /// failure it retains no request/sink reference and posts no completion.
@@ -45,6 +55,17 @@ public:
   virtual ApplicationServiceSubmitResult
   try_submit(const ApplicationServiceRequest &request,
              IApplicationServiceCompletionSink &completion_sink) = 0;
+  /// Exact-scope worker/resource join, NOT completion consumption or a grant
+  /// to delete a compiled UI subtree. A provider must return Joined only
+  /// after every scoped retained resource has retired; BUSY keeps it alive.
+  /// The default fails closed for asynchronous and unknown native endpoints.
+  virtual ApplicationEndpointScopeJoinCode
+  join_scoped_resources(std::string_view scope,
+                        std::chrono::milliseconds timeout) {
+    (void)scope;
+    (void)timeout;
+    return ApplicationEndpointScopeJoinCode::Unsupported;
+  }
 };
 
 struct ApplicationServiceOperationDescriptor {
@@ -101,6 +122,9 @@ enum class ApplicationServiceRegistryErrorCode {
   WrongThread,
   AllocationFailed,
   InternalInvariant,
+  EndpointJoinBusy,
+  EndpointJoinUnsupported,
+  EndpointJoinFailed,
 };
 
 struct ApplicationServiceRegistryError {
@@ -115,6 +139,15 @@ struct ApplicationServiceRegistryError {
 };
 
 struct ApplicationServiceRegistryResult {
+  ApplicationServiceRegistryError error;
+
+  explicit operator bool() const noexcept { return !static_cast<bool>(error); }
+};
+
+/// Bounded per-provider exact-scope join attempt through the one immutable
+/// service registry. A partial join is NEVER an unmount admission certificate.
+struct ApplicationScopedRegistryJoinResult {
+  std::size_t joined_endpoints = 0;
   ApplicationServiceRegistryError error;
 
   explicit operator bool() const noexcept { return !static_cast<bool>(error); }
@@ -178,6 +211,12 @@ public:
   ApplicationServiceResolveResult resolve(const ApplicationServiceRequest &request,
                                           const ApplicationCapabilityManifest &manifest) const;
   bool contains(std::string_view capability) const noexcept;
+  /// Asks each distinct registered Endpoint exactly ONCE for independent
+  /// scoped worker retirement; duplicates of the SAME shared Endpoint are
+  /// not rejoined. Caller must already have retired scope routes and
+  /// consumed real terminal records. No application/Box is modified here.
+  ApplicationScopedRegistryJoinResult join_scoped_resources(
+      std::string_view scope, std::chrono::milliseconds timeout) const;
   std::size_t size() const noexcept;
 
 private:

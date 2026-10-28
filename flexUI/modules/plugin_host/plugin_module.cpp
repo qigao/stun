@@ -545,6 +545,10 @@ void PluginModule::disable_submissions() noexcept {
 
 PluginHostResult PluginModule::join_scoped_workers(
     std::string_view scope, std::chrono::milliseconds timeout) {
+  if (std::this_thread::get_id() != owner_thread_) {
+    return {host_error(PluginHostErrorCode::WrongThread, "join_scope", path(),
+                       "scoped join requires plugin module owner thread", plugin_id_)};
+  }
   std::lock_guard<std::mutex> lifecycle_lock(lifecycle_mutex_);
   if (lifecycle_state_ != LifecycleState::Started || instance_ == nullptr ||
       api_ == nullptr) {
@@ -598,6 +602,16 @@ PluginHostResult PluginModule::join_scoped_workers(
                        plugin_id_, status)};
   }
   return {};
+}
+
+ApplicationEndpointScopeJoinCode
+PluginModule::join_scoped_resources(std::string_view scope,
+                                   std::chrono::milliseconds timeout) {
+  const auto joined = join_scoped_workers(scope, timeout);
+  if (joined) return ApplicationEndpointScopeJoinCode::Joined;
+  if (joined.error.code == PluginHostErrorCode::JoinTimedOut)
+    return ApplicationEndpointScopeJoinCode::Busy;
+  return ApplicationEndpointScopeJoinCode::Failed;
 }
 
 PluginHostResult PluginModule::stop(std::chrono::milliseconds timeout) {

@@ -650,3 +650,22 @@ wrong/foreign scope rejection, same-generation idempotence, and reload reset.
 The low-level Box compiled_program guard remains unchanged: NO physical
 \`unmount(scope)\` has been granted. Plugin/native endpoint joins and
 Widget/Binding disposal remain independent mandatory gates.
+
+## 2026-10-28 P4.4 M4b5d — native Endpoint join proof (Draft #302)
+
+The sole immutable ApplicationServiceRegistry now provides
+`join_scoped_resources(scope,timeout)`: it checks each DISTINCT registered
+endpoint once (shared capabilities do not double-join) and requires explicit
+`IApplicationServiceEndpoint::join_scoped_resources` evidence.
+The default is **Unsupported**, never implicit success. Busy/unsupported
+providers block complete retirement even when the application queue has
+consumed its terminal records. The PluginModule implements the same C++
+contract via its existing strict v2.1 `join_scope` and additionally checks
+module-owner thread affinity.
+
+The registry method neither consumes completions nor changes any Box state,
+and successful joins are NOT proof of an application-scoped route/queue
+quiescence or native UI detach. The future application-owned retirement
+preflight must compose these independent gates on its one owner thread
+in the correct order. No second runtime registry, no provider fallback, and
+`unmount(scope)` remains unimplemented.
