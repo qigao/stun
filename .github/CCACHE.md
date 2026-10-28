@@ -266,3 +266,29 @@ candidate exports Ninja's actual C/C++ compile commands and requires
 Windows `/Z7` present with `/Zi` absent. This also triggers a second
 same-source-head CI run, whose Windows result must prove REAL restored
 compiler cache hits rather than treating the first save as a warm run.
+
+## gCanvas native GLES and Android NDK cross-compiler gates
+
+The Linux OpenGLES pixel smoke and gCanvas package contract now use
+the same SHA-256 verified pinned ccache 4.14.2 action as the other
+native jobs. Three isolated profiles cover:
+- `gcanvas-gles-runtime`: actual Linux Debug OpenGLES and pixel smoke
+- `gcanvas-installed-consumer`: Linux Release GLES producer and real
+  installed `find_package(gCanvas)` consumer built in the same job
+- `gcanvas-android-arm64`: real NDK arm64-v8a C/C++ cross compiler under
+  the pinned Android toolchain, preserving actual NDK `--target` flags
+
+Both CMake `CMAKE_C_COMPILER_LAUNCHER` and
+`CMAKE_CXX_COMPILER_LAUNCHER` are set before Ninja configuration.
+The generated `build.ninja` files must contain `ccache`.
+The compiler-output cache is version/profile/platform/HEAD-scoped and
+does NOT persist an NDK/host object or link artifact across targets.
+No target ABI, sanitized runtime test, package metadata or GPU test
+is weakened.
+
+Changes in the shared ccache action or stats script must trigger these
+workflows AND their separate `ci-affected.sh` classifier. Actual
+cacheable compilations, hit/miss metrics and existing native test
+artifacts are preserved independently. One cold run verifies real
+compiler invocation; warm-hit evidence requires a subsequent same-
+toolchain HEAD with unchanged C/C++ source and flags.

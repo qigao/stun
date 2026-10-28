@@ -6,6 +6,8 @@ on:
     paths:
       - "shared/gcanvas/**"
       - ".github/workflows/gcanvas-package-contract.yml"
+      - ".github/actions/setup-ccache/**"
+      - ".github/scripts/report-ccache.sh"
       - ".github/scripts/ci-affected.sh"
   workflow_dispatch:
 
@@ -50,7 +52,7 @@ jobs:
       - name: Classify latest PR update
         id: scope
         shell: bash
-        run: bash .github/scripts/ci-affected.sh 'shared/gcanvas/*' '.github/workflows/gcanvas-package-contract.yml' '.github/scripts/ci-affected.sh'
+        run: bash .github/scripts/ci-affected.sh 'shared/gcanvas/*' '.github/workflows/gcanvas-package-contract.yml' '.github/actions/setup-ccache/*' '.github/scripts/report-ccache.sh' '.github/scripts/ci-affected.sh'
 
   gles-installed-consumer:
     needs: changes
@@ -69,6 +71,12 @@ jobs:
         env:
           EXPECTED_STUN_SHA: ${{ needs.changes.outputs.source_sha }}
         run: test "$(git rev-parse HEAD)" = "$EXPECTED_STUN_SHA"
+      - name: Install verified native GLES package compiler cache
+        uses: ./.github/actions/setup-ccache
+        with:
+          profile: gcanvas-installed-consumer
+          source_sha: ${{ needs.changes.outputs.source_sha }}
+
       - name: Install package dependencies
         shell: bash
         run: |
@@ -94,6 +102,8 @@ jobs:
             -DGCANVAS_BUILD_WINDOW=OFF \
             -DGCANVAS_BUILD_TESTS=OFF \
             -DGCANVAS_BUILD_EXAMPLES=OFF
+          test -f build/gcanvas-package/build.ninja
+          grep -Fq ccache build/gcanvas-package/build.ninja
           cmake --build build/gcanvas-package --parallel 2
           cmake --install build/gcanvas-package
           echo "GCANVAS_PREFIX=$prefix" >> "$GITHUB_ENV"
@@ -131,6 +141,7 @@ jobs:
           CPP
           cmake -S build/consumer -B build/consumer-build -G Ninja \
             -DCMAKE_PREFIX_PATH="$GCANVAS_PREFIX"
+          grep -Fq ccache build/consumer-build/build.ninja
           cmake --build build/consumer-build --verbose
           build/consumer-build/gcanvas_installed_consumer
           readelf -d build/consumer-build/gcanvas_installed_consumer \
@@ -151,6 +162,21 @@ jobs:
           grep -q 'set(_GCANVAS_GLES_LINK_LIBRARY GLESv3)' "$cmake_file"
           grep -q 'PRIVATE EGL android' "$cmake_file"
 
+      - name: Require native GLES producer and installed-consumer compiler cache
+        shell: bash
+        run: bash .github/scripts/report-ccache.sh gcanvas-installed-consumer
+
+      - name: Archive native GLES package and compiler-cache evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gcanvas-installed-consumer-${{ needs.changes.outputs.source_sha }}
+          retention-days: 3
+          if-no-files-found: warn
+          path: |
+            build/consumer-build/dynamic.txt
+            build/consumer-build/CMakeCache.txt
+            ${{ runner.temp }}/stun-ccache-stats-gcanvas-installed-consumer.tsv
 
   android-default-cmake:
     needs: changes
@@ -169,6 +195,12 @@ jobs:
         env:
           EXPECTED_STUN_SHA: ${{ needs.changes.outputs.source_sha }}
         run: test "$(git rev-parse HEAD)" = "$EXPECTED_STUN_SHA"
+      - name: Install verified ARM64 Android NDK compiler-output cache
+        uses: ./.github/actions/setup-ccache
+        with:
+          profile: gcanvas-android-arm64
+          source_sha: ${{ needs.changes.outputs.source_sha }}
+
       - name: Install compile-contract headers
         shell: bash
         run: |
@@ -221,6 +253,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          test -f build/gcanvas-android/build.ninja
+          grep -Fq ccache build/gcanvas-android/build.ninja
           cmake --build build/gcanvas-android --parallel 2 --verbose \
             --target gcanvas_opengles gcanvas_android_egl
 
@@ -235,3 +269,19 @@ jobs:
           commands=build/gcanvas-android/compile_commands.json
           grep -Eq -- '--target=aarch64(-none)?-linux-android[0-9]*' "$commands"
           ! grep -qi -E 'glad|glfw' "$commands"
+
+      - name: Require real Android NDK C/C++ compiler-cache statistics
+        shell: bash
+        run: bash .github/scripts/report-ccache.sh gcanvas-android-arm64
+
+      - name: Archive NDK target-contract and compiler-cache evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gcanvas-android-arm64-${{ needs.changes.outputs.source_sha }}
+          retention-days: 3
+          if-no-files-found: warn
+          path: |
+            build/gcanvas-android/compile_commands.json
+            build/gcanvas-android/CMakeCache.txt
+            ${{ runner.temp }}/stun-ccache-stats-gcanvas-android-arm64.tsv
