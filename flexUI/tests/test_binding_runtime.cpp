@@ -416,6 +416,30 @@ spec("UiBindingRuntime projects typed C++ inputs through MIR") {
     check(bindings.targets().unbind(sales.id));
   }
 
+  it("rolls back a rejected duplicate value binding without a stale callback") {
+    flexUI::Box box(nullptr);
+    auto* root = box.create("div", "root");
+    auto* field = box.create_widget<flexUI::InputWidget>("input", "sale");
+    root->append(field);
+    box.set_root(root);
+    auto* input = static_cast<flexUI::InputWidget*>(field->widget);
+    auto& runtime = box.bindings();
+    runtime.inputs().set_string("original", "First");
+    runtime.inputs().set_string("rejected", "Unchanged");
+    const auto first = runtime.targets().bind_value(*field, "original");
+    check(first);
+    check_throws_as(runtime.targets().bind_value(*field, "rejected"),
+                    std::invalid_argument);
+    const auto owned = runtime.inspect_target_observers(field);
+    check_equal(owned.binding_count, std::size_t{1});
+    check_equal(owned.value_observers, std::size_t{1});
+    check_equal(owned.blocked_value_observers, std::size_t{0});
+    check(runtime.targets().unbind(first.id));
+    check(input->handle_event(flexUI::Event::text_input("!"), *field));
+    // An accidentally retained rejected observer would mutate this input.
+    check_equal(runtime.inputs().string("rejected"), "Unchanged");
+  }
+
   it("refuses Binding-owned unbind while its callback is executing") {
     flexUI::Box box(nullptr);
     auto* root = box.create("div", "root");

@@ -807,6 +807,16 @@ UiBindingHandle UiBindingTargets::bind_value(Element& target,
 
   const flex::Symbol input_symbol(string_input);
   auto lease = std::make_shared<ValueObserverLease>();
+  // Prepare all potentially allocating target fields before registering an
+  // observer. No copy/allocation is allowed between registration and the
+  // exception-protected add_binding() publication below.
+  UiBindingRuntime::Impl::Binding binding;
+  binding.element = &target;
+  binding.target = ValueTarget{value_widget, 0, lease, value_widget->text_value()};
+  binding.source = BindingSource::StringInput;
+  binding.string_input = input_symbol;
+  binding.dependencies = {input_symbol};
+
   const TextValueObserverId observer_id = value_widget->add_edit_observer(
       [runtime = runtime_, lease, input = std::move(string_input)](
           const std::string& value) {
@@ -823,13 +833,7 @@ UiBindingHandle UiBindingTargets::bind_value(Element& target,
         runtime->inputs().set_string(input, value);
       });
 
-  UiBindingRuntime::Impl::Binding binding;
-  binding.element = &target;
-  binding.target =
-      ValueTarget{value_widget, observer_id, lease, value_widget->text_value()};
-  binding.source = BindingSource::StringInput;
-  binding.string_input = input_symbol;
-  binding.dependencies = {input_symbol};
+  std::get<ValueTarget>(binding.target).observer_id = observer_id;
   try {
     return runtime_->impl_->add_binding(std::move(binding));
   } catch (...) {
