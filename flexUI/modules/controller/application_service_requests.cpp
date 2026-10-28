@@ -24,6 +24,7 @@ struct RequestSlot {
   RequestSlotState state = RequestSlotState::Free;
   ApplicationRequestToken token;
   std::uint64_t script_request_id = 0;
+  std::string origin_scope;
   std::string capability;
   std::string operation;
   std::string payload;
@@ -46,6 +47,7 @@ void release_string(std::string &value) noexcept {
 }
 
 void clear_slot(RequestSlot &slot) noexcept {
+  release_string(slot.origin_scope);
   release_string(slot.capability);
   release_string(slot.operation);
   release_string(slot.payload);
@@ -276,6 +278,9 @@ ApplicationServiceRequestQueue::reserve(const ApplicationCommandBatch &batch) {
 
     std::vector<ApplicationServiceRequest> requests;
     requests.reserve(count);
+    // Stage every provenance allocation before publishing ANY live slot.
+    std::vector<std::string> scoped_owners;
+    scoped_owners.reserve(count);
     std::vector<ReservationKey> reservation;
     reservation.reserve(count);
     for (std::size_t index = 0; index < count; ++index) {
@@ -286,6 +291,7 @@ ApplicationServiceRequestQueue::reserve(const ApplicationCommandBatch &batch) {
                           command.capability,
                           command.operation,
                           command.payload});
+      scoped_owners.emplace_back(batch.origin_scope());
       reservation.emplace_back(free_indices[index], token_id);
     }
 
@@ -296,6 +302,7 @@ ApplicationServiceRequestQueue::reserve(const ApplicationCommandBatch &batch) {
       slot.state = RequestSlotState::Reserved;
       slot.token = request.token;
       slot.script_request_id = request.script_request_id;
+      slot.origin_scope = std::move(scoped_owners[index]);
       slot.capability = std::move(request.capability);
       slot.operation = std::move(request.operation);
       slot.payload = std::move(request.payload);
@@ -469,6 +476,36 @@ ApplicationServiceRequestQueue::resolve_completion(ApplicationCompletion complet
   return {ApplicationServicePollStatus::Ready,
           std::optional<ApplicationServiceCompletion>(std::move(resolved)),
           {}};
+}
+
+ApplicationServiceScopeLeases ApplicationServiceRequestQueue::inspect_scope_leases(
+    std::string_view scope) const {
+  ApplicationServiceScopeLeases leases;
+  if (!impl_->is_owner_thread()) {
+    leases.error = service_fail(ApplicationServiceErrorCode::WrongThread,
+                                "scope lease inspection requires the owner thread");
+    return leases;
+  }
+  if (impl_->state != ApplicationServiceRequestState::Accepting) {
+    leases.error = service_fail(ApplicationServiceErrorCode::Closed,
+                                "closed service queue cannot inspect scope leases");
+    return leases;
+  }
+  if (scope.empty()) {
+    leases.error = service_fail(ApplicationServiceErrorCode::InvalidRequest,
+                                "scope lease inspection requires a nonempty scope");
+    return leases;
+  }
+  for (const auto &slot : impl_->slots) {
+    if (std::string_view(slot.origin_scope) != scope) continue;
+    switch (slot.state) {
+    case RequestSlotState::Reserved: ++leases.reserved; break;
+    case RequestSlotState::Published: ++leases.published; break;
+    case RequestSlotState::InFlight: ++leases.in_flight; break;
+    case RequestSlotState::Free: break;
+    }
+  }
+  return leases;
 }
 
 ApplicationServiceControlResult

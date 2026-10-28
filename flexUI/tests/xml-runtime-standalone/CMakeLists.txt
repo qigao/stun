@@ -54,13 +54,16 @@ set(BUILD_TESTING ON)
 add_custom_target(stun_xml_runtime_qualification)
 foreach(test IN ITEMS test_ui_content_models test_ui_xml_admission test_ui_xml
     test_ui_document test_widget_registry test_desktop_application
-    test_script_controller)
+    test_script_controller test_application_service_requests)
   add_executable(${test} "${STUN_ROOT}/flexUI/tests/${test}.cpp")
   target_link_libraries(${test} PRIVATE FlexUI::Controller Salts::TinyTest)
   add_test(NAME ${test} COMMAND ${test})
   set_tests_properties(${test} PROPERTIES TIMEOUT 120)
   add_dependencies(stun_xml_runtime_qualification ${test})
 endforeach()
+# Exercise the real private service queue against published FlexUI providers.
+target_include_directories(test_application_service_requests PRIVATE
+    "${STUN_ROOT}/flexUI/modules/controller")
 
 # Reuse the production ChartFrame XML/component adapter and its real
 # TinyTest/snapshot suite in the installed-SDK ASan/UBSan and LSan gate.

@@ -392,6 +392,16 @@ ControllerResult ScriptController::dispatch(const ScriptEventSnapshot &event) {
     result.error.source = binding->source;
     return result;
   }
+  // Attribute commands to the COMPILED handler, not an untrusted payload
+  // or the original event target (which may have bubbled to this handler).
+  // The borrowed scope remains alive in the immutable program throughout
+  // the synchronous reservation transaction.
+  if (!called.commands.empty()) {
+    const auto separator = binding->element_id.find("::");
+    if (separator != std::string::npos && separator != 0)
+      called.commands.origin_scope_ =
+          std::string_view(binding->element_id).substr(0, separator);
+  }
   if (auto applied = impl_->apply_effects(called, ControllerStage::Event, binding->handler);
       !applied) {
     impl_->state = ControllerState::Faulted;

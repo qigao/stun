@@ -7,6 +7,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -22,6 +23,18 @@ struct ApplicationServiceControlResult {
   ApplicationServiceError error;
 
   explicit operator bool() const noexcept { return !static_cast<bool>(error); }
+};
+
+/// Owner-thread read-only breakdown of trusted component-origin leases.
+/// Inspecting never cancels or frees a request or its host work.
+struct ApplicationServiceScopeLeases {
+  std::size_t reserved = 0;
+  std::size_t published = 0;
+  std::size_t in_flight = 0;
+  ApplicationServiceError error;
+
+  explicit operator bool() const noexcept { return !static_cast<bool>(error); }
+  std::size_t total() const noexcept { return reserved + published + in_flight; }
 };
 
 struct ApplicationServiceRequestQueueCreateResult;
@@ -49,6 +62,8 @@ public:
   ApplicationServiceResolveResult
   resolve_service(const ApplicationServiceRequest &request) const;
   ApplicationServiceCompletionResult resolve_completion(ApplicationCompletion completion);
+  /// Origin-scoped leases are retained through in-flight host execution.
+  ApplicationServiceScopeLeases inspect_scope_leases(std::string_view scope) const;
 
   /// Validates the fallible part before the mailbox generation changes.
   ApplicationServiceControlResult validate_generation_reset(std::uint64_t next_generation) const;

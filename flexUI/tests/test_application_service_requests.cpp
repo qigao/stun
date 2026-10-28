@@ -1,4 +1,7 @@
 #include <flexUI/application_service.h>
+#include <flexUI/controller.h>
+#include <flexUI/ui_xml.h>
+#include <flexUI/widget_registry.h>
 
 #include "application_service_requests.hpp"
 
@@ -8,10 +11,36 @@
 #include <limits>
 #include <memory>
 #include <string>
+#include <string_view>
 #include <thread>
 #include <utility>
 
 namespace {
+
+class ScopedServiceModule final : public flexUI::IScriptModule {
+public:
+  flexUI::ScriptResolveResult resolve_export(
+      std::string_view name, flexUI::ScriptCallbackKind kind) override {
+    if (name == "issue_request" && kind == flexUI::ScriptCallbackKind::Event)
+      return {flexUI::ScriptExportHandle{1}, {}};
+    return {};
+  }
+
+  flexUI::ScriptCallResult call(
+      flexUI::ScriptExportHandle handle, const flexUI::ScriptCallContext &) override {
+    if (handle.value != 1)
+      return {{flexUI::ScriptModuleErrorCode::InvalidExport, "bad scoped export"}};
+    flexUI::ScriptCallResult result;
+    auto added = result.commands.append(
+        {next_id_++, "storage/1", "read", "payload"});
+    if (!added)
+      return {{flexUI::ScriptModuleErrorCode::RuntimeFailure,
+               "cannot append scoped test command"}};
+    return result;
+  }
+private:
+  std::uint64_t next_id_ = 1000;
+};
 
 class TestServiceEndpoint final : public flexUI::IApplicationServiceEndpoint {
 public:
@@ -272,6 +301,81 @@ spec("FlexUI application service requests") {
     check(resolved.completion->status == flexUI::ApplicationCompletionStatus::Failed);
     check_equal(resolved.completion->error_code, std::string("service-failed"));
     check_equal(resolved.completion->error_message, std::string("service operation failed"));
+  }
+
+  it("retains real compiled scope origins through published and in-flight leases") {
+    auto created = registered_queue(20);
+    check(created);
+    if (!created) return;
+    flexUI::ApplicationCommandEngine engine(*created.queue);
+    const auto root = flexUI::compile_ui_xml(
+        "<ui name=\"App\"><main id=\"root\">"
+        "<section id=\"sale_host\"/><section id=\"sales_host\"/></main></ui>");
+    const auto panel = flexUI::compile_ui_xml(
+        "<ui name=\"Panel\" xmlns:on=\"urn:flexui:event\">"
+        "<button id=\"action\" on:click=\"issue_request\">Go</button></ui>");
+    check(static_cast<bool>(root));
+    check(static_cast<bool>(panel));
+    if (!root || !panel) return;
+    const auto combined = flexUI::compile_scoped_ui_components(
+        *root.program,
+        {{"sale", "sale_host", panel.program},
+         {"sales", "sales_host", panel.program}},
+        flexUI::WidgetRegistry::builtins());
+    check(static_cast<bool>(combined));
+    if (!combined) return;
+    flexUI::ScriptController controller(flexUI::ControllerEffects{nullptr, &engine});
+    check(controller.load(std::make_unique<ScopedServiceModule>(), combined.program));
+    check(controller.mount());
+
+    const auto dispatch_from = [&](std::string id) {
+      flexUI::ScriptEventSnapshot event;
+      event.event = flexUI::UiEventKind::Click;
+      event.target = {std::move(id), 1};
+      event.current_target = event.target;
+      return controller.dispatch(event);
+    };
+    check(dispatch_from("sale::action"));
+    check(dispatch_from("sales::action"));
+    auto sale = created.queue->inspect_scope_leases("sale");
+    auto sales = created.queue->inspect_scope_leases("sales");
+    check(sale);
+    check(sales);
+    check_equal(sale.published, std::size_t{1});
+    check_equal(sales.published, std::size_t{1});
+    check_equal(sale.in_flight, std::size_t{0});
+    check_equal(created.queue->inspect_scope_leases("sal").total(), std::size_t{0});
+
+    auto received_sale = created.queue->try_receive_request();
+    check(received_sale);
+    sale = created.queue->inspect_scope_leases("sale");
+    check_equal(sale.in_flight, std::size_t{1});
+    check_equal(sale.published, std::size_t{0});
+    check_equal(created.queue->inspect_scope_leases("sales").published, std::size_t{1});
+    auto received_sales = created.queue->try_receive_request();
+    check(received_sales);
+    if (!received_sale || !received_sales) return;
+    check(created.queue->resolve_completion(completion(received_sale.request->token)));
+    check_equal(created.queue->inspect_scope_leases("sale").total(), std::size_t{0});
+    check_equal(created.queue->inspect_scope_leases("sales").in_flight, std::size_t{1});
+
+    check(controller.retire_scoped_event_handlers("sales"));
+    check(dispatch_from("sales::action")); // route no-op must not issue a new command
+    check_equal(created.queue->inspect_scope_leases("sales").in_flight, std::size_t{1});
+    check(created.queue->resolve_completion(completion(received_sales.request->token)));
+    check_equal(created.queue->inspect_scope_leases("sales").total(), std::size_t{0});
+
+    check(dispatch_from("sale::action"));
+    check_equal(created.queue->inspect_scope_leases("sale").published, std::size_t{1});
+    created.queue->reset_generation(21);
+    check_equal(created.queue->inspect_scope_leases("sale").total(), std::size_t{0});
+    check_equal(created.queue->inspect_scope_leases("sales").total(), std::size_t{0});
+    flexUI::ApplicationServiceScopeLeases foreign_result;
+    std::thread worker([&] { foreign_result = created.queue->inspect_scope_leases("sale"); });
+    worker.join();
+    check(foreign_result.error.code == flexUI::ApplicationServiceErrorCode::WrongThread);
+    check(created.queue->inspect_scope_leases("").error.code ==
+          flexUI::ApplicationServiceErrorCode::InvalidRequest);
   }
 
   it("restricts request control and consumption to the owner thread") {

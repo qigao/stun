@@ -3,7 +3,21 @@
 状态：架构决策已采用，实施与验收按下列工作项推进
 日期：2026-08-31
 
-## 2026-10-28 P4.4 M2 作用域脚本事件路由事务性退休（Draft）
+## 2026-10-28 P4.4 M3a 作用域服务请求来源与租约快照（Draft）
+
+真正命中的编译事件处理器由唯一 ScriptController 在脚本返回后、命令预约
+前写入只读来源（`scope::local_id` 的 scope，而非可伪造的脚本命令字段，
+也不是事件冒泡原始 target）；全局 frame / service completion 回调
+来源为空。ApplicationServiceRequestQueue 在预约事务的私有暂存阶段复制来源
+字符串，保持 Reserved / Published / InFlight 身份；只读
+`inspect_scope_leases(scope)` 检查精确作用域和 owner-thread，覆盖相邻
+scope、出队、completion、generation reset。
+
+**本阶段不取消宿主正在运行的工作，不吞掉迟到 completion，也不允许
+组件动态卸载**。后续需另行证明协作取消、completion 抑制及资源租约安全，
+才能进入真正 in-place `unmount(scope)`。
+
+## 2026-10-28 P4.4 M2 作用域脚本事件路由事务性退休（已合并 PR #288）
 
 新增 `ScriptController::retire_scoped_event_handlers(scope)` 和
 `DesktopApplication::retire_scoped_event_handlers(scope)`，从当前 Controller
