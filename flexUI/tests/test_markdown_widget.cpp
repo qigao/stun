@@ -1017,6 +1017,15 @@ spec("MarkdownWidget Parsing") {
         auto* visible = md->child_at(0u);
         check(visible->text() == "可见内容 ✅");
         check(box->owned_element_count() == steady_count + 1u);
+        // The old projection is now detached but STILL Box-owned. The
+        // visible tree traversal alone cannot find this pending resource;
+        // the Widget's independent pending-retirement metric must.
+        const auto pending_owner = box->inspect_subtree_borrowers(md);
+        check(static_cast<bool>(pending_owner));
+        check_equal(pending_owner.unverified_widget_hosts, std::size_t{1});
+        check(pending_owner.retained_widget_projection_nodes > std::size_t{0});
+        check(pending_owner.deferred_widget_retirement_nodes > std::size_t{0});
+        check_equal(box->get_by_id("md-c11-focus-throw-231"), md);
 
         // Even repeated source changes cannot admit another projection
         // while an old detached subtree is still held by Box.
@@ -1037,6 +1046,11 @@ spec("MarkdownWidget Parsing") {
             check(md->child_at(0u)->text() == "延后处理 🏯");
         check(box->owned_element_count() == steady_count);
         check(box->focused_element() == nullptr);
+        const auto retired_owner = box->inspect_subtree_borrowers(md);
+        check(static_cast<bool>(retired_owner));
+        check_equal(retired_owner.deferred_widget_retirement_nodes, std::size_t{0});
+        check(retired_owner.retained_widget_projection_nodes > std::size_t{0});
+        check_equal(retired_owner.unverified_widget_hosts, std::size_t{1});
     }
 
     it("projects owned SAFE link/image metadata without exposing unsafe URIs") {

@@ -847,3 +847,11 @@ This remains fail-closed because Markdown's deferred retirement requires
 separate proof of no reentrant parse/update, staged cleanup of its published
 and detached Element identities, and Widget destruction ordering. Counting
 does NOT turn Markdown into an unmount-safe Widget. #302 Draft, #298/#275 Open.
+
+The existing real FocusOut-throw Markdown regression now asserts that the
+snapshot reports a POSITIVE deferred-retirement count after the old
+projection is detached but retained in the sole Box owner. With the
+throwing callback still present, repeated attempts cannot clear that
+count or publish extra projections. Once the callback is removed,
+a successful update clears only the pending owners, while the newly
+published projection continues to be reported as retained.
