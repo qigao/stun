@@ -143,3 +143,23 @@ The original CTest gates are not skipped or relaxed.
 Accept only after the independent Tango workflow passes on an exact
 source HEAD for all three platforms and reports nonzero cacheable
 compilation calls; cold and warm-run hit rates must be distinguished.
+
+## Tango Windows/MSVC Debug compiler-cache rejection (2026-10-28)
+
+First Tango CI head `da5ad9a1` completed its real C11/C++17 Windows
+native tests, but the ccache gate correctly rejected **0 cacheable
+compiles out of 22 invocations**. We examined the unmodified
+`tango-native-Windows-X64` workflow TSV: the only rejection reason was
+`unsupported_compiler_option=22`, not a failure to install ccache or
+run the actual compiler. MSVC's default Ninja Debug flags use `/Zi`,
+which writes compiler PDB files and is not ccache-cacheable.
+
+The follow-up explicitly configures **Windows only** with
+`CMAKE_C_FLAGS_DEBUG` and `CMAKE_CXX_FLAGS_DEBUG` set to
+`/MDd /Z7 /Ob0 /Od /RTC1`. This retains MSVC's Debug CRT, runtime
+checks, unoptimized compilation and debug symbols; `/Z7` embeds
+symbols in each object instead of an independently mutable compiler
+PDB. Linux/macOS compiler flags and independent ASan/UBSan/TSan builds
+are untouched. The actual Windows cacheable compiler calls must become
+nonzero under the unchanged strict stats gate, followed by warm-cache
+acceptance. No CI failure is waived.

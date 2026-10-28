@@ -144,11 +144,21 @@ jobs:
           set -euo pipefail
           prefix="$SALTS_ROOT"
           if [[ "$RUNNER_OS" == Windows ]]; then prefix="$(cygpath -w "$prefix")"; fi
-          cmake -S tango -B build/tango -G Ninja -DCMAKE_BUILD_TYPE=Debug -DBUILD_TESTING=ON \
-            -DTANGO_BUILD_CPP_INTEROP_TESTS=ON \
-            "-DCMAKE_PREFIX_PATH=$prefix" \
-            -DCMAKE_FIND_USE_PACKAGE_REGISTRY=OFF \
-            -DCMAKE_FIND_USE_SYSTEM_PACKAGE_REGISTRY=OFF
+          # MSVC's default Debug /Zi emits a compiler PDB; ccache rejects it
+          # as unsupported_compiler_option. /Z7 preserves debug symbols in
+          # each .obj without creating shared compiler PDB state. Keep /MDd,
+          # /RTC1 and Debug tests unchanged; only the CI compiler flag differs.
+          cmake_args=(-S tango -B build/tango -G Ninja
+                      -DCMAKE_BUILD_TYPE=Debug -DBUILD_TESTING=ON
+                      -DTANGO_BUILD_CPP_INTEROP_TESTS=ON
+                      "-DCMAKE_PREFIX_PATH=$prefix"
+                      -DCMAKE_FIND_USE_PACKAGE_REGISTRY=OFF
+                      -DCMAKE_FIND_USE_SYSTEM_PACKAGE_REGISTRY=OFF)
+          if [[ "$RUNNER_OS" == Windows ]]; then
+            cmake_args+=("-DCMAKE_C_FLAGS_DEBUG=/MDd /Z7 /Ob0 /Od /RTC1"
+                         "-DCMAKE_CXX_FLAGS_DEBUG=/MDd /Z7 /Ob0 /Od /RTC1")
+          fi
+          cmake "${cmake_args[@]}"
       - name: Build Tango and real static-link test
         shell: bash
         run: cmake --build build/tango --config Debug --parallel 2
