@@ -1,17 +1,6 @@
 name: Markdown highlighter loader portability
 
 on:
-  push:
-    branches:
-      - draft/markdownwidget-single-c11-parser-229
-    paths:
-      - "flexUI/src/highlighters/**"
-      - "flexUI/src/syntax_highlighter.cpp"
-      - "flexUI/include/flexUI/syntax_highlighter.h"
-      - "flexUI/tests/highlighter_loader_contract/**"
-      - ".github/workflows/markdown-highlighter-loader.yml"
-      - ".github/actions/setup-ccache/**"
-      - ".github/scripts/report-ccache.sh"
   pull_request:
     paths:
       - "flexUI/src/highlighters/**"
