@@ -467,6 +467,13 @@ spec("FlexUI scoped live Box topology preflight") {
     check(owners[1].nodes[0].qualified_id == "other::frame");
     const auto checked = app.inspect_scoped_component_topology("eventless");
     check(static_cast<bool>(checked));
+    const auto borrowers = app.inspect_scoped_component_borrowers("eventless");
+    check(static_cast<bool>(borrowers));
+    check(borrowers.borrowers.mounted_elements >= std::size_t{3});
+    check(borrowers.borrowers.widget_hosts >= std::size_t{1});
+    const auto sibling_borrow = app.inspect_scoped_component_borrowers("missing");
+    check(sibling_borrow.error.code ==
+          flexUI::DesktopApplicationErrorCode::InvalidConfiguration);
     check(checked.resolved_compiled_nodes == std::size_t{3});
     check(checked.compiled_widget_hosts == std::size_t{1});
     check(checked.compiled_event_nodes == std::size_t{0});

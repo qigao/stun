@@ -191,6 +191,16 @@ struct DesktopScopedComponentTopologySnapshot {
   explicit operator bool() const noexcept { return !static_cast<bool>(error); }
 };
 
+/// Application-validated scoped root plus the sole Box's read-only borrower
+/// snapshot. No resource is freed, no worker joins, and no unmount is granted.
+struct DesktopScopedComponentBorrowSnapshot {
+  BoxSubtreeBorrowSnapshot borrowers;
+  DesktopApplicationError error;
+  explicit operator bool() const noexcept {
+    return !static_cast<bool>(error) && static_cast<bool>(borrowers);
+  }
+};
+
 struct DesktopApplicationBuildResult {
   std::unique_ptr<DesktopApplication> application;
   DesktopApplicationError error;
@@ -253,6 +263,12 @@ public:
   /// stage of the future unmount preflight, NOT resource release evidence.
   DesktopScopedComponentTopologySnapshot
   inspect_scoped_component_topology(std::string_view scope) const;
+  /// Read current Box borrowers of the exact compiled component root after
+  /// validating topology. The root is located by host ID and compiler ordinal,
+  /// never a possibly missing/root-local Element ID. This does not validate
+  /// plugin join, Binding observer release, or safe unmount.
+  DesktopScopedComponentBorrowSnapshot
+  inspect_scoped_component_borrowers(std::string_view scope) const;
   ScriptController *controller() noexcept;
   const ScriptController *controller() const noexcept;
   const DesktopApplicationSources &sources() const noexcept;

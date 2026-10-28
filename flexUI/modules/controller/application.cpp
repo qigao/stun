@@ -676,6 +676,51 @@ DesktopApplication::inspect_scoped_component_topology(std::string_view scope) co
   }
 }
 
+DesktopScopedComponentBorrowSnapshot
+DesktopApplication::inspect_scoped_component_borrowers(std::string_view scope) const {
+  DesktopScopedComponentBorrowSnapshot result;
+  const auto topology = inspect_scoped_component_topology(scope);
+  if (!topology) {
+    result.error = topology.error;
+    return result;
+  }
+  const auto found = std::find_if(
+      impl_->active->scoped_ownership.begin(),
+      impl_->active->scoped_ownership.end(),
+      [scope](const UiScopedComponentOwnership &item) {
+        return std::string_view(item.scope) == scope;
+      });
+  if (found == impl_->active->scoped_ownership.end()) {
+    result.error = fail(DesktopApplicationErrorCode::InvalidConfiguration,
+                        DesktopApplicationStage::CandidateBuild,
+                        "validated scoped owner disappeared");
+    return result;
+  }
+  auto &box = *impl_->active->box;
+  const auto *host = box.get_by_id(found->host_id);
+  if (!host || found->root_child_index >= host->children().size()) {
+    result.error = fail(DesktopApplicationErrorCode::InvalidState,
+                        DesktopApplicationStage::CandidateBuild,
+                        "scoped root position changed during owner inspection");
+    return result;
+  }
+  const auto *root = dynamic_cast<const Element *>(
+      host->children()[found->root_child_index]);
+  if (!root) {
+    result.error = fail(DesktopApplicationErrorCode::InvalidState,
+                        DesktopApplicationStage::CandidateBuild,
+                        "scoped root is no longer an Element");
+    return result;
+  }
+  result.borrowers = box.inspect_subtree_borrowers(root);
+  if (!result.borrowers) {
+    result.error = fail(DesktopApplicationErrorCode::InvalidState,
+                        DesktopApplicationStage::CandidateBuild,
+                        "mounted Box cannot safely inspect scoped root borrowers");
+  }
+  return result;
+}
+
 ScriptController *DesktopApplication::controller() noexcept {
   return impl_->active->controller.get();
 }
