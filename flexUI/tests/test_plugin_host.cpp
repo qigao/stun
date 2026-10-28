@@ -240,6 +240,30 @@ suite("FlexUI PluginHost") {
                   static_cast<int>(flexUI::PluginHostErrorCode::UnsupportedAbi));
     }
 
+    it("rejects malformed or cross-thread scoped join without stopping plugins") {
+      auto built = build_echo_host();
+      check_true(static_cast<bool>(built));
+      if (!built) return;
+
+      for (const char *invalid : {"", "sale::action", "2sale", "sale."}) {
+        const auto result = built.host->join_scoped_workers(
+            invalid, std::chrono::milliseconds(0));
+        check_false(static_cast<bool>(result));
+        check_equal(static_cast<int>(result.error.code),
+                    static_cast<int>(flexUI::PluginHostErrorCode::InvalidScope));
+      }
+      flexUI::PluginHostResult foreign;
+      std::thread thread([&] {
+        foreign = built.host->join_scoped_workers(
+            "sale", std::chrono::milliseconds(0));
+      });
+      thread.join();
+      check_false(static_cast<bool>(foreign));
+      check_equal(static_cast<int>(foreign.error.code),
+                  static_cast<int>(flexUI::PluginHostErrorCode::WrongThread));
+      check_true(static_cast<bool>(built.host->stop(std::chrono::seconds(1))));
+    }
+
     it("reports create failure without publishing a partial plugin") {
       flexUI::PluginHostBuilder builder;
       const auto result = builder.load_plugin(

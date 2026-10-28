@@ -3,13 +3,8 @@
 
 static const flexui_plugin_api_v2 bad_api = {
     sizeof(flexui_plugin_api_v2),
-#if defined(FLEXUI_TEST_OLD_MINOR)
-    FLEXUI_PLUGIN_ABI_MAJOR,
-    0u, /* v2.0 deliberately rejected: no join_scope proof. */
-#else
     99u,
     FLEXUI_PLUGIN_ABI_MINOR,
-#endif
     0u,
     0,
     0,

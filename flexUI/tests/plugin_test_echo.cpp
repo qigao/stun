@@ -450,14 +450,20 @@ const flexui_plugin_service_descriptor_v2 services[] = {
      static_cast<std::uint32_t>(sizeof(operations) / sizeof(operations[0])),
      literal_view(FLEXUI_TEST_PLUGIN_SERVICE), operations, {0}}};
 
+#if defined(FLEXUI_TEST_OLD_MINOR)
+constexpr std::uint32_t kPluginMinor = 0;
+#else
+constexpr std::uint32_t kPluginMinor = FLEXUI_PLUGIN_ABI_MINOR;
+#endif
+
 const flexui_plugin_descriptor_v2 descriptor = {
-    sizeof(flexui_plugin_descriptor_v2), FLEXUI_PLUGIN_ABI_MINOR,
+    sizeof(flexui_plugin_descriptor_v2), kPluginMinor,
     literal_view(FLEXUI_TEST_PLUGIN_ID),
     literal_view("1.0.0"), 1, 0, services, {0}};
 
 const flexui_plugin_api_v2 api = {
     sizeof(flexui_plugin_api_v2), FLEXUI_PLUGIN_ABI_MAJOR,
-    FLEXUI_PLUGIN_ABI_MINOR,      0,
+    kPluginMinor,                0,
     &descriptor,                  &create_instance,
     &start_instance,             &submit_request,
     &stop_instance,              &join_instance,

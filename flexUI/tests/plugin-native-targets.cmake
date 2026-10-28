@@ -11,7 +11,7 @@ function(flexui_add_native_plugin_tests)
   endif()
   add_library(flexui_test_plugin_missing_entry MODULE "${FLEXUI_PLUGIN_NATIVE_TESTS_DIR}/plugin_test_missing_entry.c")
   add_library(flexui_test_plugin_bad_abi MODULE "${FLEXUI_PLUGIN_NATIVE_TESTS_DIR}/plugin_test_bad_abi.c")
-  add_library(flexui_test_plugin_old_minor MODULE "${FLEXUI_PLUGIN_NATIVE_TESTS_DIR}/plugin_test_bad_abi.c")
+  add_library(flexui_test_plugin_old_minor MODULE "${FLEXUI_PLUGIN_NATIVE_TESTS_DIR}/plugin_test_echo.cpp")
   target_compile_definitions(flexui_test_plugin_old_minor
     PRIVATE FLEXUI_TEST_OLD_MINOR=1)
   add_library(flexui_test_plugin_echo MODULE "${FLEXUI_PLUGIN_NATIVE_TESTS_DIR}/plugin_test_echo.cpp")
