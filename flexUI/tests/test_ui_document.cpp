@@ -9,6 +9,18 @@
 #include <flexUI/widgets/dropdown_widget.h>
 #include <flexUI/widgets/tabs_widget.h>
 #include <flexUI/widgets/accordion_widget.h>
+#include <flexUI/widgets/tooltip_widget.h>
+#include <flexUI/widgets/modal_widget.h>
+#include <flexUI/widgets/toast_widget.h>
+#include <flexUI/widgets/spinner_widget.h>
+#include <flexUI/widgets/divider_widget.h>
+#include <flexUI/widgets/badge_widget.h>
+#include <flexUI/widgets/card_widget.h>
+#include <flexUI/widgets/group_button_widget.h>
+#include <flexUI/widgets/toggle_group_widget.h>
+#include <flexUI/widgets/breadcrumb_widget.h>
+#include <flexUI/widgets/pagination_widget.h>
+#include <flexUI/widgets/stepper_widget.h>
 #include <flexUI/widget.h>
 #include <flexUI/keyed_repeater.h>
 
@@ -2130,5 +2142,84 @@ spec("FlexUI M4b6c built-in Widget owner audits") {
     // Existing compiled/Widget guards remain intact despite all audits.
     check_false(box.retire_bound_structural_subtree("scope"));
     check_not_null(box.get_by_id("scope"));
+  }
+}
+
+spec("FlexUI M4b6d overlay, timer and simple native callback owner audits") {
+  it("keeps active overlays and perpetual animation visible to scoped preflight") {
+    flexUI::TooltipWidget tooltip("Hint");
+    flexUI::ModalWidget modal("Heading");
+    flexUI::ToastWidget toast("Done");
+    flexUI::SpinnerWidget spinner;
+    check(tooltip.inspect_local_borrowers().audited);
+    check(modal.inspect_local_borrowers().audited);
+    check(toast.inspect_local_borrowers().audited);
+    check(spinner.inspect_local_borrowers().audited);
+    check_false(tooltip.inspect_local_borrowers().interaction_or_callback_active);
+    check_false(modal.inspect_local_borrowers().interaction_or_callback_active);
+    check_false(toast.inspect_local_borrowers().interaction_or_callback_active);
+    check(spinner.inspect_local_borrowers().interaction_or_callback_active);
+    tooltip.show();
+    modal.open();
+    toast.show();
+    check(tooltip.inspect_local_borrowers().interaction_or_callback_active);
+    check(modal.inspect_local_borrowers().interaction_or_callback_active);
+    check(toast.inspect_local_borrowers().interaction_or_callback_active);
+    modal.set_close_callback([] {});
+    toast.set_dismiss_callback([] {});
+    check_equal(modal.inspect_local_borrowers().native_callback_owners, std::size_t{1});
+    check_equal(toast.inspect_local_borrowers().native_callback_owners, std::size_t{1});
+    modal.set_close_callback({});
+    toast.set_dismiss_callback({});
+    check_equal(modal.inspect_local_borrowers().native_callback_owners, std::size_t{0});
+    check_equal(toast.inspect_local_borrowers().native_callback_owners, std::size_t{0});
+  }
+
+  it("audits static presentation and six independent native UI callback types") {
+    flexUI::DividerWidget divider;
+    flexUI::BadgeWidget badge("New");
+    flexUI::CardWidget card;
+    check(divider.inspect_local_borrowers().audited);
+    check(badge.inspect_local_borrowers().audited);
+    check(card.inspect_local_borrowers().audited);
+    check_false(divider.inspect_local_borrowers().interaction_or_callback_active);
+    check_false(badge.inspect_local_borrowers().interaction_or_callback_active);
+    check_false(card.inspect_local_borrowers().interaction_or_callback_active);
+    check_equal(card.inspect_local_borrowers().native_callback_owners, std::size_t{0});
+
+    flexUI::GroupButtonWidget group_button;
+    flexUI::ToggleGroupWidget toggle_group;
+    flexUI::BreadcrumbWidget breadcrumb;
+    flexUI::PaginationWidget pagination;
+    flexUI::StepperWidget stepper;
+    check(group_button.inspect_local_borrowers().audited);
+    check(toggle_group.inspect_local_borrowers().audited);
+    check(breadcrumb.inspect_local_borrowers().audited);
+    check(pagination.inspect_local_borrowers().audited);
+    check(stepper.inspect_local_borrowers().audited);
+    group_button.set_click_callback([] {});
+    toggle_group.set_change_callback([](int, const std::string&) {});
+    breadcrumb.set_click_callback([](int, const std::string&) {});
+    pagination.set_page_change_callback([](int) {});
+    stepper.set_change_callback([](int) {});
+    for (const flexUI::Widget* item : {
+         static_cast<flexUI::Widget*>(&group_button),
+         static_cast<flexUI::Widget*>(&toggle_group),
+         static_cast<flexUI::Widget*>(&breadcrumb),
+         static_cast<flexUI::Widget*>(&pagination),
+         static_cast<flexUI::Widget*>(&stepper)}) {
+      check_equal(item->inspect_local_borrowers().native_callback_owners,
+                  std::size_t{1});
+    }
+    group_button.set_click_callback({});
+    toggle_group.set_change_callback({});
+    breadcrumb.set_click_callback({});
+    pagination.set_page_change_callback({});
+    stepper.set_change_callback({});
+    check_equal(group_button.inspect_local_borrowers().native_callback_owners, std::size_t{0});
+    check_equal(toggle_group.inspect_local_borrowers().native_callback_owners, std::size_t{0});
+    check_equal(breadcrumb.inspect_local_borrowers().native_callback_owners, std::size_t{0});
+    check_equal(pagination.inspect_local_borrowers().native_callback_owners, std::size_t{0});
+    check_equal(stepper.inspect_local_borrowers().native_callback_owners, std::size_t{0});
   }
 }

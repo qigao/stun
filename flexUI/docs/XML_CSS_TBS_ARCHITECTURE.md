@@ -780,3 +780,19 @@ borrowed Tabs page, accordion animation, and exact-scope Box isolation.
 A zero borrower count is NOT a physical unmount contract: other built-ins,
 third-party Widgets, owned Widget part lifetimes and the compiled tree/Binding
 commit remain outstanding. #302 stays Draft; #298/#275 open.
+
+## 2026-10-28 M4b6d — 12 more registered Widget-local borrower audits
+
+The owner probe covers Tooltip/Modal/Toast overlay and timers, Spinner's
+active loader animation, static Divider/Badge/Card presentation, and
+GroupButton/ToggleGroup/Breadcrumb/Pagination/Stepper native callbacks,
+pressed/hover interactions. Headless `test_ui_document` asserts that
+even when the callbacks have been removed, an active overlay/spinner
+still retains Widget-local work. These are read-only state probes only;
+there is no unmount, Widget destruction, or new resource table.
+
+Widgets with retained external sources or complex runtime projections
+(e.g. Image, Markdown) continue to report unaudited and reject retirement.
+A future physical deletion transaction still needs explicit callback
+retirement, external resource release, and no-throw Element/Widget part
+ownership transfer. #302 remains Draft and #298/#275 open.
