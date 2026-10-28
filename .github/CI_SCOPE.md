@@ -13,9 +13,16 @@ work on feature branches.
 
 Each affected-component workflow starts with a small `changes` job. On a PR
 `synchronize` event it compares the webhook's `before` and `after` commits;
-only jobs whose files changed in that update run. It checks both sides of
-renamed/moved files. If Git history, event metadata or the comparison is
-unavailable, the check **runs**, rather than silently being skipped.
+only jobs whose files changed in that update run. On a `master` push the
+classifier also compares the event's exact `before` and `after` commits:
+only source-owning native/SDK gates execute, including for multi-commit pushes
+or squash merges. It checks both sides of renamed/moved files. If Git
+history, event metadata, checkout identity or the comparison is unavailable,
+the check **runs**, rather than silently being skipped.
+
+`workflow_dispatch` and PR `ci/full` remain explicit full-qualification
+overrides. The fast repository-wide parser architecture check remains required
+on every PR and master push.
 
 The rapid-iteration path is:
 
