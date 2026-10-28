@@ -3,7 +3,7 @@
 状态：架构决策已采用，实施与验收按下列工作项推进
 日期：2026-08-31
 
-## 2026-10-28 P4.4 M3c 应用层安全准入门禁（预研/待 M3b 合并）
+## 2026-10-28 P4.4 M3c 应用层安全准入门禁（Draft PR #291，基于已合并 #290）
 
 单个 DesktopApplication 可调用
 `quiesce_retired_scoped_service_requests(scope)`，但**只能在**
@@ -17,7 +17,7 @@ ScriptController 暴露自己已持有的退休标记只读查询，
 回调状态。Scope 内已发到宿主的请求仍保持直到真实 completion；
 **不会提前卸载 Element、Binding、Widget、能力权限或服务资源。**
 
-## 2026-10-28 P4.4 M3b 私有作用域命令队列有界静默排空（Draft）
+## 2026-10-28 P4.4 M3b 私有作用域命令队列有界静默排空（已合并 PR #290）
 
 新增私有 ApplicationServiceRequestQueue::quiesce_scope_requests(scope)，先
 检查 owner-thread / 有界 scope、拒绝该 scope 尚有的 Prepared 预约，
