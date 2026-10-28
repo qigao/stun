@@ -3,7 +3,29 @@
 状态：架构决策已采用，实施与验收按下列工作项推进
 日期：2026-08-31
 
-## 2026-10-28 P4.4 M3a 作用域服务请求来源与租约快照（Draft）
+## 2026-10-28 P4.4 M3b 私有作用域命令队列有界静默排空（Draft）
+
+新增私有 ApplicationServiceRequestQueue::quiesce_scope_requests(scope)，先
+检查 owner-thread / 有界 scope、拒绝该 scope 尚有的 Prepared 预约，
+验证整个已发布 FIFO，再预分配已关闭来源集合；提交后不再允许此来源预约。
+未发送到服务端的 Published 请求在原队列环中稳定压缩和取消，
+其他 scope 保持 FIFO 顺序。已经交付宿主的 InFlight 请求绝不伪装为
+已取消：保留 token 到真实完成时，释放槽但返回显式 Suppressed 状态，
+不向脚本回调投递；GCanvas 主机有界 pump 在存在脚本 completion 处理器时继续取后面的
+有效 completion，防止被抑制的结果阻塞同一脚本队列。没有该处理器时
+保留原有 raw mailbox 轮询权，宿主不能擅自吞掉用户的 completion。
+整代 reload 重置来源门禁。
+
+M3b 还将真实 `gcanvas_window_host.cpp` 作为独立 Object 源码目标纳入
+Linux（ASan/UBSan + LSan）与 Windows/macOS Headless 构建矩阵；
+这验证生产 WindowHost 的编译接口，但**不声称**已运行真实 GPU
+窗口或可选 WindowHost 事件循环行为测试。
+
+**仍未实现真实 Service Endpoint 的协作取消、host 资源租约释放及
+完整原地 unmount(scope)。** 此片独立验证队列端排空/消息抑制，不得
+以此作为外部执行已结束的证明。
+
+## 2026-10-28 P4.4 M3a 作用域服务请求来源与租约快照（已合并 PR #289）
 
 真正命中的编译事件处理器由唯一 ScriptController 在脚本返回后、命令预约
 前写入只读来源（`scope::local_id` 的 scope，而非可伪造的脚本命令字段，

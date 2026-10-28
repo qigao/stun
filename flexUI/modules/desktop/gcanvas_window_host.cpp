@@ -308,6 +308,8 @@ struct GCanvasWindowHost::Impl {
   }
 
   GCanvasWindowHostResult drain_service_completions() {
+    // When there is no scripted completion export the caller may own the
+    // raw mailbox consumer; preserve that existing ownership contract.
     ScriptController *active_controller = application->controller();
     if (active_controller == nullptr ||
         !active_controller->has_service_completion_handler()) {
@@ -332,10 +334,18 @@ struct GCanvasWindowHost::Impl {
                      GCanvasWindowHostStage::ServiceCompletion,
                      "ready desktop application exposed a closed completion mailbox")};
       }
-      if (!dispatched.completion.has_value() || !dispatched.dispatched) {
+      if (dispatched.status == ApplicationServicePollStatus::Suppressed) {
+        // A real worker finished, but its quiesced scope is no longer allowed
+        // to receive callbacks. Count the consumed record and continue so a
+        // following active-scope completion is not stranded behind it.
+        ++consumed;
+        continue;
+      }
+      if (dispatched.status != ApplicationServicePollStatus::Ready ||
+          !dispatched.completion.has_value() || !dispatched.dispatched) {
         return {fail(GCanvasWindowHostErrorCode::InvalidState,
                      GCanvasWindowHostStage::ServiceCompletion,
-                     "scripted completion dispatch violated its ready-state contract")};
+                     "service completion dispatch violated its ready-state contract")};
       }
       ++consumed;
       if (application->state() != DesktopApplicationState::Ready) {

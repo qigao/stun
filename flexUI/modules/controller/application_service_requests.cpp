@@ -7,6 +7,7 @@
 #include <stdexcept>
 #include <string_view>
 #include <thread>
+#include <unordered_set>
 #include <type_traits>
 #include <utility>
 
@@ -25,6 +26,7 @@ struct RequestSlot {
   ApplicationRequestToken token;
   std::uint64_t script_request_id = 0;
   std::string origin_scope;
+  bool suppress_completion = false;
   std::string capability;
   std::string operation;
   std::string payload;
@@ -53,6 +55,7 @@ void clear_slot(RequestSlot &slot) noexcept {
   release_string(slot.payload);
   slot.token = {};
   slot.script_request_id = 0;
+  slot.suppress_completion = false;
   slot.state = RequestSlotState::Free;
 }
 
@@ -80,6 +83,16 @@ struct ApplicationServiceRequestQueue::Impl {
   std::size_t published_tail = 0;
   std::size_t published_count = 0;
   ApplicationServiceStatistics stats;
+  // Bounded set of closed compiled-handler origins for this generation. It
+  // retains no external host or controller ownership and is reset on reload.
+  std::unordered_set<std::string> quiesced_scopes;
+
+  bool is_quiesced(std::string_view scope) const noexcept {
+    return std::any_of(quiesced_scopes.begin(), quiesced_scopes.end(),
+                       [scope](const std::string &value) {
+                         return std::string_view(value) == scope;
+                       });
+  }
 
   bool is_owner_thread() const noexcept { return owner_thread == std::this_thread::get_id(); }
 
@@ -227,6 +240,10 @@ ApplicationServiceRequestQueue::reserve(const ApplicationCommandBatch &batch) {
   if (batch.empty()) {
     return command_fail(ApplicationCommandErrorCode::EmptyBatch, 0,
                         "service request batch must not be empty");
+  }
+  if (!batch.origin_scope().empty() && impl_->is_quiesced(batch.origin_scope())) {
+    return command_fail(ApplicationCommandErrorCode::ScopeQuiesced, 0,
+                        "scoped component service requests are quiesced");
   }
 
   for (std::size_t index = 0; index < batch.commands().size(); ++index) {
@@ -464,6 +481,17 @@ ApplicationServiceRequestQueue::resolve_completion(ApplicationCompletion complet
                          "service completion arrived before request dispatch")};
   }
 
+  // Preserve the host token until its real completion is received. Suppressed
+  // is distinct from Empty: callers must keep draining already-woken mailboxes
+  // so later, unrelated completions are not stranded.
+  if (found->suppress_completion) {
+    clear_slot(*found);
+    --impl_->stats.current_pending;
+    ++impl_->stats.completed;
+    ++impl_->stats.suppressed_completions;
+    return {ApplicationServicePollStatus::Suppressed, {}, {}};
+  }
+
   ApplicationServiceCompletion resolved;
   resolved.script_request_id = found->script_request_id;
   resolved.status = completion.status;
@@ -496,6 +524,7 @@ ApplicationServiceScopeLeases ApplicationServiceRequestQueue::inspect_scope_leas
                                 "scope lease inspection requires a nonempty scope");
     return leases;
   }
+  leases.quiesced = impl_->is_quiesced(scope);
   for (const auto &slot : impl_->slots) {
     if (std::string_view(slot.origin_scope) != scope) continue;
     switch (slot.state) {
@@ -506,6 +535,114 @@ ApplicationServiceScopeLeases ApplicationServiceRequestQueue::inspect_scope_leas
     }
   }
   return leases;
+}
+
+ApplicationServiceScopeQuiesceResult ApplicationServiceRequestQueue::quiesce_scope_requests(
+    std::string_view scope) {
+  ApplicationServiceScopeQuiesceResult result;
+  if (!impl_->is_owner_thread()) {
+    result.error = service_fail(ApplicationServiceErrorCode::WrongThread,
+                                "scope quiescence requires the owner thread");
+    return result;
+  }
+  if (impl_->state != ApplicationServiceRequestState::Accepting) {
+    result.error = service_fail(ApplicationServiceErrorCode::Closed,
+                                "closed service queue cannot quiesce a scope");
+    return result;
+  }
+  // Match the compiler's public component-scope grammar exactly, instead
+  // of letting an internal caller create impossible admission tombstones.
+  const auto is_start = [](char ch) noexcept {
+    return (ch >= 'A' && ch <= 'Z') ||
+           (ch >= 'a' && ch <= 'z') || ch == '_';
+  };
+  const auto is_rest = [&](char ch) noexcept {
+    return is_start(ch) || (ch >= '0' && ch <= '9') ||
+           ch == '_' || ch == '-';
+  };
+  if (scope.empty() || scope.size() > 253 || !is_start(scope.front()) ||
+      !std::all_of(scope.begin() + 1, scope.end(), is_rest)) {
+    result.error = service_fail(ApplicationServiceErrorCode::InvalidRequest,
+                                "scope quiescence requires a compiler-valid ASCII scope");
+    return result;
+  }
+  if (impl_->is_quiesced(scope)) return result; // Stable and idempotent.
+
+  // PreparedApplicationServiceRequests may still own a reservation. Never
+  // detach those slots: its later noexcept publish/discard contract depends on
+  // their identity. Reject without changing routes, queue or admission gate.
+  for (const auto &slot : impl_->slots) {
+    if (slot.state == RequestSlotState::Reserved &&
+        std::string_view(slot.origin_scope) == scope) {
+      result.error = service_fail(ApplicationServiceErrorCode::InvalidState,
+                                  "scope still has a prepared command reservation");
+      return result;
+    }
+  }
+  // Validate the ENTIRE published FIFO before making any change; the commit
+  // below only performs noexcept slot clear, flag writes and ring compaction.
+  for (std::size_t n = 0; n < impl_->published_count; ++n) {
+    const auto index = impl_->published_indices[
+        (impl_->published_head + n) % impl_->limits.capacity];
+    if (index >= impl_->slots.size() ||
+        impl_->slots[index].state != RequestSlotState::Published) {
+      result.error = service_fail(ApplicationServiceErrorCode::InternalInvariant,
+                                  "published FIFO is inconsistent");
+      return result;
+    }
+  }
+  try {
+    // Stage every fallible allocation before publishing the scoped gate.
+    // The bound prevents untrusted callers growing the origin tombstone set
+    // indefinitely in a single generation (there is no secondary table).
+    if (impl_->quiesced_scopes.size() >= 256) {
+      result.error = service_fail(ApplicationServiceErrorCode::InvalidState,
+                                  "scoped quiescence capacity is exhausted");
+      return result;
+    }
+    auto next_quiesced = impl_->quiesced_scopes;
+    next_quiesced.emplace(scope);
+    impl_->quiesced_scopes.swap(next_quiesced);
+  } catch (const std::exception &) {
+    result.error = service_fail(ApplicationServiceErrorCode::AllocationFailed,
+                                "failed to stage scope quiescence");
+    return result;
+  } catch (...) {
+    result.error = service_fail(ApplicationServiceErrorCode::AllocationFailed,
+                                "unexpected scope quiescence staging failure");
+    return result;
+  }
+
+  for (auto &slot : impl_->slots) {
+    if (slot.state == RequestSlotState::InFlight &&
+        std::string_view(slot.origin_scope) == scope) {
+      slot.suppress_completion = true;
+      ++result.suppressed_in_flight;
+    }
+  }
+
+  const std::size_t old_count = impl_->published_count;
+  std::size_t kept = 0;
+  for (std::size_t n = 0; n < old_count; ++n) {
+    const auto read_index = (impl_->published_head + n) % impl_->limits.capacity;
+    const auto slot_index = impl_->published_indices[read_index];
+    auto &slot = impl_->slots[slot_index];
+    if (std::string_view(slot.origin_scope) == scope) {
+      clear_slot(slot);
+      --impl_->stats.current_pending;
+      ++impl_->stats.cancelled;
+      ++result.cancelled_published;
+    } else {
+      // Reading forward and writing only into earlier FIFO positions makes
+      // this stable in-place compaction safe even across ring wraparound.
+      impl_->published_indices[(impl_->published_head + kept) % impl_->limits.capacity] =
+          slot_index;
+      ++kept;
+    }
+  }
+  impl_->published_count = kept;
+  impl_->published_tail = (impl_->published_head + kept) % impl_->limits.capacity;
+  return result;
 }
 
 ApplicationServiceControlResult
@@ -530,6 +667,7 @@ void ApplicationServiceRequestQueue::reset_generation(std::uint64_t next_generat
     std::terminate();
   }
   static_cast<void>(impl_->cancel_all());
+  impl_->quiesced_scopes.clear();
   impl_->generation = next_generation;
 }
 

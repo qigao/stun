@@ -38,6 +38,9 @@ enum class ApplicationServicePollStatus {
   Ready,
   Empty,
   Closed,
+  /// One accepted host completion was consumed but intentionally not delivered
+  /// to an application callback after scoped request quiescence.
+  Suppressed,
 };
 
 enum class ApplicationServiceErrorCode {
@@ -76,6 +79,7 @@ struct ApplicationServiceStatistics {
   std::uint64_t queue_full = 0;
   std::uint64_t rejected_duplicate = 0;
   std::uint64_t rejected_unknown = 0;
+  std::uint64_t suppressed_completions = 0;
 };
 
 struct ApplicationServiceRequestResult {
