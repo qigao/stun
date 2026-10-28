@@ -12,6 +12,7 @@
 #include "../render_command.h"
 #include "../shapes.h"
 #include <string>
+#include <algorithm>
 #include <vector>
 #include <functional>
 
@@ -32,6 +33,9 @@ public:
   bool handle_event(const Event& event, Element& elem) override;
   void update(float delta_ms, Element& elem) override;
   const char* type_name() const override { return "AccordionWidget"; }
+  WidgetLocalBorrowSnapshot inspect_local_borrowers() const noexcept override {
+    return {true, on_change_ ? std::size_t{1} : std::size_t{0}, animation_progress_.size() != sections_.size() || std::any_of(animation_progress_.begin(), animation_progress_.end(), [this, i = std::size_t{0}](float progress) mutable { return progress != (sections_[i++].expanded ? 1.0f : 0.0f); })};
+  }
 
   void add_section(const std::string& title, const std::string& id, float content_height = 100.0f);
   void remove_section(const std::string& id);

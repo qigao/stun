@@ -46,6 +46,9 @@ public:
                                 float available_height, float& out_width,
                                 float& out_height) const override;
     const char* type_name() const override { return "CheckboxWidget"; }
+  WidgetLocalBorrowSnapshot inspect_local_borrowers() const noexcept override {
+    return {true, change_callback_ ? std::size_t{1} : std::size_t{0}, checkmark_scale_ != target_checkmark_scale_};
+  }
     bool paints_host_box() const override { return true; }
     bool paints_part_box(std::string_view part_name) const override;
     bool emit_part_render_commands(const Element& host, const Element& part,

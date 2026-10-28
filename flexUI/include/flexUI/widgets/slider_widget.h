@@ -44,6 +44,9 @@ public:
     bool handle_event(const Event& event, Element& elem) override;
     void update(float delta_ms, Element& elem) override;
     const char* type_name() const override { return "SliderWidget"; }
+  WidgetLocalBorrowSnapshot inspect_local_borrowers() const noexcept override {
+    return {true, change_callback_ ? std::size_t{1} : std::size_t{0}, is_dragging_ || current_thumb_scale_ != target_thumb_scale_};
+  }
     bool wants_mouse_capture() const override { return is_dragging_; }
     void sync_host_semantics_for_layout(Element& elem) override;
 

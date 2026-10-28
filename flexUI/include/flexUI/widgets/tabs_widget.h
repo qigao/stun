@@ -12,6 +12,7 @@
 #include "../group.h"
 #include "../shapes.h"
 #include <string>
+#include <algorithm>
 #include <vector>
 #include <functional>
 
@@ -41,6 +42,9 @@ public:
                               float available_height, float& out_width,
                               float& out_height) const override;
   const char* type_name() const override { return "TabsWidget"; }
+  WidgetLocalBorrowSnapshot inspect_local_borrowers() const noexcept override {
+    return {true, on_change_ ? std::size_t{1} : std::size_t{0}, indicator_x_ != target_indicator_x_ || indicator_width_ != target_indicator_width_ || std::any_of(tabs_.begin(), tabs_.end(), [](const Tab& tab) { return tab.page != nullptr; })};
+  }
   bool paints_host_box() const override { return true; }
 
   // Tab management

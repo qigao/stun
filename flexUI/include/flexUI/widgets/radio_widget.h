@@ -48,6 +48,9 @@ public:
                                 float available_height, float& out_width,
                                 float& out_height) const override;
     const char* type_name() const override { return "RadioWidget"; }
+  WidgetLocalBorrowSnapshot inspect_local_borrowers() const noexcept override {
+    return {true, change_callback_ ? std::size_t{1} : std::size_t{0}, dot_scale_ != target_dot_scale_};
+  }
 
     // State access
     bool is_checked() const { return checked_; }

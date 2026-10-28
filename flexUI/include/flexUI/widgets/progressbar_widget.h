@@ -37,6 +37,9 @@ public:
     void update(float delta_ms, Element& elem) override;
     bool needs_frame_update(const Element& elem) const override;
     const char* type_name() const override { return "ProgressBarWidget"; }
+  WidgetLocalBorrowSnapshot inspect_local_borrowers() const noexcept override {
+    return {true, 0, indeterminate_};
+  }
     bool paints_host_box() const override { return true; }
     void sync_host_semantics_for_layout(Element& elem) override;
 

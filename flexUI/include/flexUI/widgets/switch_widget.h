@@ -44,6 +44,9 @@ public:
                                 float available_height, float& out_width,
                                 float& out_height) const override;
     const char* type_name() const override { return "SwitchWidget"; }
+  WidgetLocalBorrowSnapshot inspect_local_borrowers() const noexcept override {
+    return {true, change_callback_ ? std::size_t{1} : std::size_t{0}, thumb_position_ != target_thumb_position_};
+  }
     bool paints_host_box() const override { return true; }
     void sync_host_semantics_for_layout(Element& elem) override;
 
