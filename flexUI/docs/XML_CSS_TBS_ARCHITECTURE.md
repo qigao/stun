@@ -23,7 +23,7 @@ Native C++ Endpoint 可以自主观察该标志、停止自己持有的工作后
 插件 ABI 变更与全部服务资源/Join 生命周期仍在 Issue #292。
 不允许用本地 Suppressed 状态代替真实 worker 完成。
 
-## 2026-10-28 P4.4 M3d M0 服务端取消前置 Native 门禁（Draft，Issue #292）
+## 2026-10-28 P4.4 M3d M0 服务端取消前置 Native 门禁（已合并 PR #293）
 
 将已有真实生产 `ApplicationServiceRegistry`、
 `ApplicationCompletionMailbox` 与 `ApplicationServiceDispatcher` 的
@@ -39,7 +39,7 @@ InFlight 请求仍需真实端点的精确 token 协作取消与终态证明；
 队列 `Suppressed` 作为 worker 已停止的证据。契约单独记录在 #292，
 `unmount(scope)` 继续由 #275 跟踪。
 
-## 2026-10-28 P4.4 M3c 应用层安全准入门禁（Draft PR #291，基于已合并 #290）
+## 2026-10-28 P4.4 M3c 应用层安全准入门禁（已合并 PR #291）
 
 单个 DesktopApplication 可调用
 `quiesce_retired_scoped_service_requests(scope)`，但**只能在**
