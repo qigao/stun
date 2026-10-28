@@ -155,6 +155,28 @@ struct DesktopApplicationScopedServiceQuiesceResult {
   explicit operator bool() const noexcept { return !static_cast<bool>(error); }
 };
 
+/// Owner-thread view of the sole queue's outstanding exact-origin request
+/// leases AND the one Controller's scoped event route retirement marker.
+/// This contains no worker join or plugin DLL resource-lifetime evidence.
+struct DesktopApplicationScopedServiceDrainSnapshot {
+  bool event_routes_retired = false;
+  bool admission_quiesced = false;
+  std::size_t reserved = 0;
+  std::size_t published = 0;
+  std::size_t in_flight = 0;
+  DesktopApplicationError error;
+
+  explicit operator bool() const noexcept { return !static_cast<bool>(error); }
+  std::size_t pending() const noexcept { return reserved + published + in_flight; }
+  /// Ready for the NEXT resource-lifetime preflight, not for unmount!
+  /// A worker can retain the cancellation lease after completion was posted;
+  /// an endpoint must still provide independent release/join proof.
+  bool queue_drained() const noexcept {
+    return !static_cast<bool>(error) && event_routes_retired &&
+           admission_quiesced && pending() == 0;
+  }
+};
+
 struct DesktopApplicationBuildResult {
   std::unique_ptr<DesktopApplication> application;
   DesktopApplicationError error;
@@ -309,6 +331,14 @@ public:
   /// retained until real completion and suppressed from script delivery.
   DesktopApplicationScopedServiceQuiesceResult
   quiesce_retired_scoped_service_requests(std::string_view scope);
+
+  /// Nonmutating, generation-local snapshot of the current compiled XML
+  /// scope's retired event routes, admission tombstone, and pending service
+  /// token leases. Even queue_drained()==true does NOT prove host worker exit,
+  /// plugin join, Box/Widget/Binding ownership release, or safe unmount.
+  /// No endpoint callbacks or completion mailbox consumption occur here.
+  DesktopApplicationScopedServiceDrainSnapshot
+  inspect_scoped_service_drain(std::string_view scope) const;
 
 private:
   struct Impl;

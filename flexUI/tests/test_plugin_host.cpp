@@ -449,12 +449,31 @@ suite("FlexUI PluginHost") {
       auto first = dispatcher.dispatcher->pump();
       check_true(static_cast<bool>(first));
       check_equal(first.submitted, std::size_t{1});
+      const auto outstanding = app.inspect_scoped_service_drain("sale");
+      check_true(static_cast<bool>(outstanding));
+      check_true(outstanding.in_flight == std::size_t{1});
+      check_false(outstanding.event_routes_retired);
+      check_false(outstanding.admission_quiesced);
+      check_false(outstanding.queue_drained());
       check_true(static_cast<bool>(app.retire_scoped_event_handlers("sale")));
       auto q = app.quiesce_retired_scoped_service_requests("sale");
       check_true(static_cast<bool>(q));
       check_equal(q.cancelled_queued, std::size_t{0});
       check_equal(q.newly_suppressed_in_flight, std::size_t{1});
       check_equal(app.service_statistics().current_pending, std::size_t{2});
+      // The DSO may have already POSTED a true CANCELLED, but no owner has
+      // claimed it yet. The queue identity remains live and must not be
+      // mistaken for safe resource/DLL teardown.
+      const auto before_terminal = app.inspect_scoped_service_drain("sale");
+      check_true(static_cast<bool>(before_terminal));
+      check_true(before_terminal.event_routes_retired);
+      check_true(before_terminal.admission_quiesced);
+      check_true(before_terminal.in_flight == std::size_t{1});
+      check_false(before_terminal.queue_drained());
+      const auto active_sibling = app.inspect_scoped_service_drain("sales");
+      check_true(static_cast<bool>(active_sibling));
+      check_false(active_sibling.event_routes_retired);
+      check_false(active_sibling.queue_drained());
 
       auto second = dispatcher.dispatcher->pump();
       check_true(static_cast<bool>(second));
@@ -467,6 +486,11 @@ suite("FlexUI PluginHost") {
         if (result.error) break;
         if (result.status == flexUI::ApplicationServicePollStatus::Suppressed) {
           ++suppressed;
+          // Only after consuming the DSO's actual terminal record is the
+          // queue token retired. Plugin worker join is still a separate step.
+          const auto after_terminal = app.inspect_scoped_service_drain("sale");
+          check_true(after_terminal.queue_drained());
+          check_true(after_terminal.pending() == std::size_t{0});
         } else if (result.status == flexUI::ApplicationServicePollStatus::Ready) {
           check_true(result.dispatched);
           ++delivered;
@@ -488,6 +512,10 @@ suite("FlexUI PluginHost") {
                   std::uint64_t{1});
       check_equal(app.service_statistics().current_pending, std::size_t{0});
       check_true(app.controller()->state() == flexUI::ControllerState::Mounted);
+      const auto final_drain = app.inspect_scoped_service_drain("sale");
+      check_true(final_drain.queue_drained());
+      // Do not treat that queue-only status as a worker-exit proof. The real
+      // PluginHost still owns the dynamic DLL and must stop/join successfully.
       check_true(static_cast<bool>(host.host->stop(std::chrono::seconds(2))));
       check_true(static_cast<bool>(app.request_close()));
       check_true(static_cast<bool>(app.shutdown()));
