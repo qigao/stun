@@ -376,7 +376,11 @@ spec("UiBindingRuntime projects typed C++ inputs through MIR") {
     // this witness and the Binding callback, even after unbind removes it.
     flexUI::UiBindingId sale_id = 0;
     bool unbound_during_edit = false;
+    bool notification_frame_visible = false;
     const auto witness = input->add_edit_observer([&](const std::string&) {
+      const auto active = box.inspect_subtree_borrowers(input_element);
+      notification_frame_visible = static_cast<bool>(active) &&
+                                   active.widget_observer_notifications_active;
       unbound_during_edit = bindings.targets().unbind(sale_id);
     });
     const auto sale = bindings.targets().bind_value(*input_element, "sale_value");
@@ -389,11 +393,16 @@ spec("UiBindingRuntime projects typed C++ inputs through MIR") {
     check_equal(before.binding_targets, std::size_t{1});
     check_equal(before.value_observers, std::size_t{1});
     check_equal(before.blocked_value_observers, std::size_t{0});
+    check_equal(before.widget_edit_observers, std::size_t{2});
+    check_equal(before.unowned_widget_edit_observers, std::size_t{1});
+    check_false(before.widget_observer_notifications_active);
+    check_false(before.uninspectable_edit_widget);
     check_false(before.binding_mutation_active);
     check_false(before.invalid_binding_ownership);
 
     check(input->handle_event(flexUI::Event::text_input("!"), *input_element));
     check(unbound_during_edit);
+    check(notification_frame_visible);
     // The copied Binding callback was retired before its turn. It must not
     // write to the shared application input or use a destroyed Binding owner.
     check_equal(bindings.inputs().string("sale_value"), "original");
@@ -402,16 +411,30 @@ spec("UiBindingRuntime projects typed C++ inputs through MIR") {
     const auto after = box.inspect_subtree_borrowers(input_element);
     check(static_cast<bool>(after));
     check_equal(after.value_observers, std::size_t{0});
+    check_equal(after.widget_edit_observers, std::size_t{0});
+    check_equal(after.unowned_widget_edit_observers, std::size_t{0});
     const auto sibling = box.inspect_subtree_borrowers(textarea_element);
     check(static_cast<bool>(sibling));
     check_equal(sibling.value_observers, std::size_t{1});
     check_equal(sibling.blocked_value_observers, std::size_t{0});
+    check_equal(sibling.widget_edit_observers, std::size_t{1});
+    check_equal(sibling.unowned_widget_edit_observers, std::size_t{0});
 
     // M4b4's observer proof grants NO raw Box retirement of a Widget.
     check_false(box.retire_bound_structural_subtree("sales"));
     check_equal(bindings.stats().binding_count, std::size_t{1});
+    bool textarea_frame_visible = false;
+    const auto textarea_witness = textarea->add_edit_observer(
+        [&](const std::string&) {
+          const auto active = box.inspect_subtree_borrowers(textarea_element);
+          textarea_frame_visible = static_cast<bool>(active) &&
+              active.widget_observer_notifications_active &&
+              active.unowned_widget_edit_observers == std::size_t{1};
+        });
     check(textarea->handle_event(flexUI::Event::text_input("?"),
                                  *textarea_element));
+    check(textarea_frame_visible);
+    check(textarea->remove_edit_observer(textarea_witness));
     check_equal(bindings.inputs().string("sales_value"), textarea->text());
     check(bindings.targets().unbind(sales.id));
   }

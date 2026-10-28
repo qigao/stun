@@ -4,6 +4,8 @@
 
 #include <flexUI/box.h>
 #include <flexUI/renderer.h>
+#include <flexUI/text_value_widget.h>
+#include <flexUI/widget.h>
 #include <flexUI/layout_manager.h>
 #include <flexUI/render_manager.h>
 #include <flexUI/view_pipeline.h>
@@ -1193,6 +1195,25 @@ Box::inspect_subtree_borrowers(const Element *subtree_root) const noexcept {
       result.blocked_value_observers += observer.blocked_value_observers;
       result.binding_mutation_active |= observer.binding_mutation_active;
       result.invalid_binding_ownership |= observer.invalid_ownership;
+      if (element->widget) {
+        if (const auto* editable =
+                dynamic_cast<const TextValueWidget*>(element->widget)) {
+          TextValueObserverSnapshot widget_observers;
+          if (!editable->inspect_edit_observers(widget_observers)) {
+            result.uninspectable_edit_widget = true;
+          } else {
+            result.widget_edit_observers += widget_observers.registered;
+            result.widget_observer_notifications_active |=
+                widget_observers.notifying_depth != 0;
+            if (widget_observers.registered < observer.value_observers) {
+              result.invalid_binding_ownership = true;
+            } else {
+              result.unowned_widget_edit_observers +=
+                  widget_observers.registered - observer.value_observers;
+            }
+          }
+        }
+      }
       if (element->click_callback()) ++result.native_click_callbacks;
       if (element->is_focus() || element->is_hover() || element->is_active())
         result.local_interaction_state = true;

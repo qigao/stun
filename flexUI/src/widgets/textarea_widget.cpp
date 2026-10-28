@@ -462,7 +462,19 @@ bool TextAreaWidget::remove_edit_observer(TextValueObserverId id) {
   return true;
 }
 
+bool TextAreaWidget::inspect_edit_observers(TextValueObserverSnapshot& out) const noexcept {
+  out.registered = edit_observers_.size();
+  out.notifying_depth = notifying_edit_observers_depth_;
+  return true;
+}
+
 void TextAreaWidget::notify_edit_observers() {
+  // Copied observer callbacks remain callable after an original-list erase.
+  struct NotificationFrame {
+    std::size_t& depth;
+    explicit NotificationFrame(std::size_t& d) noexcept : depth(d) { ++depth; }
+    ~NotificationFrame() { --depth; }
+  } frame(notifying_edit_observers_depth_);
   const auto observers = edit_observers_;
   for (const auto& entry : observers) {
     if (entry.second) {

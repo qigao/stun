@@ -577,3 +577,17 @@ endpoint/PluginHost worker, remove the installed compiled program, or authorize
 Widgets and any installed compiled program. M4b4's remaining Widget-owner
 contract, M4b5 independent scope worker join and M4b6 atomic physical detach
 are separate mandatory gates under #298/#275.
+
+
+## 2026-10-28 P4.4 M4b4b — Widget observer frame diagnostics (Draft #302)
+
+InputWidget and TextAreaWidget report the complete registered editable-observer
+count and notification-frame depth through `inspect_edit_observers`. The depth
+covers the copied notification batch and unwinds even on exception. The
+single Box borrower snapshot compares actual Widget listeners to Binding-owned
+leases, exposing external/unowned observers, active notification frames and
+uninspectable third-party text Widget adapters (fail-closed).
+
+This is independent read-only evidence, NOT an observer disconnect, PluginHost
+join, or permission to remove compiled Elements. Other non-text Widget owners
+still require their own lifecycle evidence. #298/#275 remain open.
