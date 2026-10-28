@@ -491,6 +491,11 @@ suite("FlexUI PluginHost") {
       check_false(outstanding.event_routes_retired);
       check_false(outstanding.admission_quiesced);
       check_false(outstanding.queue_drained());
+      const auto app_premature = app.join_scoped_service_resources(
+          "sale", std::chrono::milliseconds(0));
+      check_false(static_cast<bool>(app_premature));
+      check(app_premature.error.code ==
+            flexUI::DesktopApplicationErrorCode::InvalidState);
       // Before a terminal is posted, an exact-scope join must fail closed.
       const auto before_post = host.host->join_scoped_workers(
           "sale", std::chrono::milliseconds(0));
@@ -559,11 +564,13 @@ suite("FlexUI PluginHost") {
       // Actual terminal was consumed, but the fixture worker intentionally
       // remains alive until a separate release request. This is deterministic
       // and MUST block physical unmount even though queue_drained() is true.
-      const auto still_live = host.host->join_scoped_workers(
+      const auto still_live = app.join_scoped_service_resources(
           "sale", std::chrono::milliseconds(0));
       check_false(static_cast<bool>(still_live));
-      check_equal(static_cast<int>(still_live.error.code),
-                  static_cast<int>(flexUI::PluginHostErrorCode::JoinTimedOut));
+      check(still_live.error.code ==
+            flexUI::DesktopApplicationErrorCode::ServiceRegistryFailed);
+      check(still_live.error.registry_error.code ==
+            flexUI::ApplicationServiceRegistryErrorCode::EndpointJoinBusy);
 
       // This independent test-only native request releases only the held
       // worker; the application and sales scope remain mounted.
@@ -575,8 +582,14 @@ suite("FlexUI PluginHost") {
         check_true(static_cast<bool>(endpoint->try_submit(release, release_sink)));
         check_true(release_sink.wait_for_count(1, std::chrono::seconds(1)));
       }
+      const auto app_joined = app.join_scoped_service_resources(
+          "sale", std::chrono::seconds(2));
+      check_true(static_cast<bool>(app_joined));
+      check_equal(app_joined.generation, app.generation());
+      check_equal(app_joined.joined_endpoints, std::size_t{1});
+      // Provider-level scope barrier is idempotent; no sibling scope stop.
       check_true(static_cast<bool>(host.host->join_scoped_workers(
-          "sale", std::chrono::seconds(2))));
+          "sale", std::chrono::seconds(1))));
       check_true(static_cast<bool>(host.host->join_scoped_workers(
           "sales", std::chrono::seconds(1))));
       check_equal(static_cast<int>(host.host->state()),

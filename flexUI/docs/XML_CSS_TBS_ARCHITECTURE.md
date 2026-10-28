@@ -697,3 +697,11 @@ registry, raw pointer persistence, retry or alternate provider was added.
 Queued lease retirement is still NOT external worker exit. Physical unmount
 still requires the separate exact-scope provider JOIN, Widget/Binding lifetime
 and no-throw physical subtree commit; #302 stays Draft and unmerged.
+
+The native DSO/DLL acceptance now drives **the actual application facade**
+`join_scoped_service_resources`, not merely `PluginHost` directly:
+before script-route retirement it refuses; after real terminal consumption
+the deliberately still-live worker makes Registry report EndpointJoinBusy.
+Only a separate provider release permits a returned generation and exact
+joined provider count; the sibling `sales` continues to publish another
+real service request afterwards. No `unmount(scope)` is implied.
