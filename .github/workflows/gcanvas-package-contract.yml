@@ -18,11 +18,12 @@ permissions:
   contents: read
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}-${{ github.event.action == 'labeled' && github.event.label.name != 'ci/full' && github.run_id || 'qualification' }}
   cancel-in-progress: true
 
 jobs:
   changes:
+    if: github.event.action != 'labeled' || github.event.label.name == 'ci/full'
     name: Component change scope
     runs-on: ubuntu-24.04
     outputs:
