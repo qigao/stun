@@ -73,3 +73,20 @@ them too. This workflow change triggers a fresh Linux full native build,
 allowing the first run's Linux compiler-output snapshot to prove restore
 and recompile correctness. Continue to evaluate the real exact-HEAD stats;
 do not count a skip as proof.
+
+## GraphLayout 4-way compiler-cache rollout (Draft follow-up)
+
+GraphLayout's former GCC/Clang build used independently installed, mutable
+ccache packages plus a source-path hash; Windows Visual Studio compilation
+had no compiler cache. The dedicated GraphLayout CI follow-up reuses the
+same SHA-256-pinned ccache 4.14.2 Action and machine-readable stats gate
+on four isolated profiles: Linux GCC, Linux Clang, macOS AppleClang,
+and Windows MSVC. Windows switches the build **generator** to Ninja under
+the real x64 MSVC environment; this is required to honor CMake compiler
+launchers and must pass the actual GraphLayout regression suite. There is
+no fallback generator or compiler on a failed cache installation.
+
+All four entries compile the real independent GraphLayout libraries in
+Release, require nonzero ccache invocations, run CTest and archive exact
+source-HEAD stats. The full 4-way exact-head CI is mandatory before
+claiming the follow-up accepted or merging it.
