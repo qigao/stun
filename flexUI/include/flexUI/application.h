@@ -212,6 +212,25 @@ struct DesktopScopedComponentBorrowSnapshot {
   }
 };
 
+/// Generation-local READ-ONLY composition of the three independent
+/// retirement observations. It is expressly NOT a safe-unmount certificate:
+/// it cannot join native workers, disconnect callback closures/observers,
+/// stage compiled-program or Widget destruction, or authorize deletion.
+struct DesktopScopedRetirementDiagnostics {
+  std::uint64_t generation = 0;
+  DesktopScopedComponentTopologySnapshot topology;
+  DesktopScopedComponentBorrowSnapshot element_borrowers;
+  DesktopApplicationScopedServiceDrainSnapshot service_drain;
+  DesktopApplicationError error;
+
+  explicit operator bool() const noexcept {
+    return !static_cast<bool>(error) &&
+           static_cast<bool>(topology) &&
+           static_cast<bool>(element_borrowers) &&
+           static_cast<bool>(service_drain);
+  }
+};
+
 struct DesktopApplicationBuildResult {
   std::unique_ptr<DesktopApplication> application;
   DesktopApplicationError error;
@@ -280,6 +299,12 @@ public:
   /// plugin join, Binding observer release, or safe unmount.
   DesktopScopedComponentBorrowSnapshot
   inspect_scoped_component_borrowers(std::string_view scope) const;
+  /// Combine compiler topology, current Box borrowers (including external
+  /// closure owners), and exact-scope service drain under one generation.
+  /// Read-only, no join/detach/retire, and intentionally NO ready-to-unmount
+  /// predicate: joined Endpoint/Widget/Binding lifetimes are not proved here.
+  DesktopScopedRetirementDiagnostics
+  inspect_scoped_retirement_diagnostics(std::string_view scope) const;
   ScriptController *controller() noexcept;
   const ScriptController *controller() const noexcept;
   const DesktopApplicationSources &sources() const noexcept;

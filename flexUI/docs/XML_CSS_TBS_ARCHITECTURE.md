@@ -976,3 +976,23 @@ A native DesktopApplication regression replaces a true compiled component
 root with an externally allocated lookalike (even propagating owner_box_),
 requires both topology and borrower preflights to refuse, then restores
 the real node and validates its sibling's original UiHandle.
+
+## 2026-10-28 M4b6n — one read-only app-scoped retirement diagnostic
+
+`DesktopApplication::inspect_scoped_retirement_diagnostics(scope)`
+composes the existing exact compiler ledger validation, sole-Box
+borrower snapshot and registered-scope service queue drain under
+one current application generation, and rechecks that generation before
+returning. It allocates no new persistent registry and does not call a
+service Endpoint. It cannot grant an unmount certificate, because it has
+neither independent native worker JOIN evidence nor Widget/Binding
+observer disconnect and failure-atomic physical Box transaction.
+
+A real headless scriptless application with `sale` and `sales` scopes
+now retires the former's event routes and drains its queue while a
+sibling Element and public Box event callback still capture its raw
+Element pointer. The composed diagnostic must report queue_drained()
+TRUE and the two independent foreign-closure counts NONZERO; each
+explicit callback release removes only its own blocker. The compiled
+target and exact sibling UiHandles survive all checks. Unknown
+scope and foreign-thread requests fail with typed errors.

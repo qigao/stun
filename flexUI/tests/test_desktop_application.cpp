@@ -3191,3 +3191,90 @@ spec("Desktop M4b6m compiled topology authenticates live Box-owned Node addresse
     check_equal(app.box().get_by_id("sales::label"), sibling);
   }
 }
+
+spec("Desktop M4b6n read-only exact-generation retirement diagnostics") {
+  it("does not mistake a drained queue for released foreign native callbacks") {
+    flexUI::DesktopApplicationBuilder builder(nullptr);
+    builder.xml_entry(
+        "<ui name=\"Retirement\"><main id=\"root\">"
+        "<section id=\"left\"/><section id=\"right\"/></main></ui>")
+        .scoped_xml_component(
+            "sale", "left",
+            "<ui name=\"Panel\"><div id=\"panel\">"
+            "<label id=\"caption\">Sale</label></div></ui>")
+        .scoped_xml_component(
+            "sales", "right",
+            "<ui name=\"Panel\"><label id=\"caption\">Sibling</label></ui>");
+    auto built = builder.build();
+    check(static_cast<bool>(built));
+    if (!built) return;
+    auto &app = *built.application;
+    auto *sale = app.box().get_by_id("sale::panel");
+    auto *sales = app.box().get_by_id("sales::caption");
+    check_not_null(sale);
+    check_not_null(sales);
+    if (!sale || !sales) return;
+    const auto saved = app.box().handle_for(*sales);
+
+    const auto before = app.inspect_scoped_retirement_diagnostics("sale");
+    check(static_cast<bool>(before));
+    check_equal(before.generation, app.generation());
+    check_equal(before.topology.compiled_event_nodes, std::size_t{0});
+    check_false(before.service_drain.admission_quiesced);
+    check_equal(before.element_borrowers.borrowers.foreign_native_click_callbacks,
+                std::size_t{0});
+
+    // An opaque native sibling closure may retain the target even after
+    // independent exact-scope event-route and request-queue retirement.
+    sales->on_click([sale] { (void)sale; });
+    app.box().set_event_callback(
+        [sale](flexUI::Element&, const flexUI::Event&) { (void)sale; });
+    check(app.retire_scoped_event_handlers("sale"));
+    check(static_cast<bool>(app.quiesce_retired_scoped_service_requests("sale")));
+    const auto composed = app.inspect_scoped_retirement_diagnostics("sale");
+    check(static_cast<bool>(composed));
+    check_equal(composed.generation, before.generation);
+    check(composed.service_drain.queue_drained());
+    check_equal(composed.element_borrowers.borrowers.foreign_native_click_callbacks,
+                std::size_t{1});
+    check_equal(
+        composed.element_borrowers.borrowers.opaque_global_event_callback_owners,
+        before.element_borrowers.borrowers.opaque_global_event_callback_owners + 1u);
+    check_equal(app.box().resolve_handle(saved), sales);
+    check_equal(app.box().get_by_id("sale::panel"), sale);
+
+    // Clearing each independent source affects ONLY its respective count.
+    sales->on_click({});
+    const auto one = app.inspect_scoped_retirement_diagnostics("sale");
+    check(static_cast<bool>(one));
+    check(one.service_drain.queue_drained());
+    check_equal(one.element_borrowers.borrowers.foreign_native_click_callbacks,
+                std::size_t{0});
+    check_equal(
+        one.element_borrowers.borrowers.opaque_global_event_callback_owners,
+        before.element_borrowers.borrowers.opaque_global_event_callback_owners + 1u);
+    app.box().set_event_callback({});
+    const auto none = app.inspect_scoped_retirement_diagnostics("sale");
+    check(static_cast<bool>(none));
+    check(none.service_drain.queue_drained());
+    check_equal(
+        none.element_borrowers.borrowers.opaque_global_event_callback_owners,
+        before.element_borrowers.borrowers.opaque_global_event_callback_owners);
+    // This method still performs NO Endpoint join, Widget/Binding retirement,
+    // compiled ledger rewrite, or physical Element deletion.
+    check_equal(app.box().resolve_handle(saved), sales);
+    check_equal(app.box().get_by_id("sale::panel"), sale);
+
+    const auto missing = app.inspect_scoped_retirement_diagnostics("not-declared");
+    check_false(static_cast<bool>(missing));
+    check(missing.error.code ==
+          flexUI::DesktopApplicationErrorCode::InvalidConfiguration);
+    flexUI::DesktopApplicationErrorCode wrong_thread =
+        flexUI::DesktopApplicationErrorCode::None;
+    std::thread other([&] {
+      wrong_thread = app.inspect_scoped_retirement_diagnostics("sale").error.code;
+    });
+    other.join();
+    check(wrong_thread == flexUI::DesktopApplicationErrorCode::WrongThread);
+  }
+}

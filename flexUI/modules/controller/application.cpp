@@ -755,6 +755,44 @@ DesktopApplication::inspect_scoped_component_borrowers(std::string_view scope) c
   }
 }
 
+DesktopScopedRetirementDiagnostics
+DesktopApplication::inspect_scoped_retirement_diagnostics(
+    std::string_view scope) const {
+  DesktopScopedRetirementDiagnostics result;
+  if (!is_owner_thread()) {
+    result.error = fail(DesktopApplicationErrorCode::WrongThread,
+                        DesktopApplicationStage::CandidateBuild,
+                        "scoped retirement diagnostics require the application owner thread");
+    return result;
+  }
+  const auto before_generation = generation();
+  result.topology = inspect_scoped_component_topology(scope);
+  if (!result.topology) {
+    result.error = result.topology.error;
+    return result;
+  }
+  result.element_borrowers = inspect_scoped_component_borrowers(scope);
+  if (!result.element_borrowers) {
+    result.error = result.element_borrowers.error;
+    return result;
+  }
+  result.service_drain = inspect_scoped_service_drain(scope);
+  if (!result.service_drain) {
+    result.error = result.service_drain.error;
+    return result;
+  }
+  // Even a read-only preflight must not return a misleading mixed-generation
+  // view when a custom Widget introspection implementation reenters reload.
+  if (generation() != before_generation) {
+    result.error = fail(DesktopApplicationErrorCode::InvalidState,
+                        DesktopApplicationStage::CandidateBuild,
+                        "scoped retirement evidence changed application generation");
+    return result;
+  }
+  result.generation = before_generation;
+  return result;
+}
+
 ScriptController *DesktopApplication::controller() noexcept {
   return impl_->active->controller.get();
 }
