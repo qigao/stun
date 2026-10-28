@@ -1,13 +1,18 @@
 #include <tinytest.hpp>
 
 #include <flexUI/plugin_host.h>
+#include <flexUI/application_service_dispatcher.h>
+#include <flexUI/controller.h>
+#include <flexUI/ui_xml.h>
 
 #include <chrono>
 #include <condition_variable>
 #include <cstdint>
 #include <filesystem>
 #include <mutex>
+#include <memory>
 #include <stdexcept>
+#include <thread>
 #include <string>
 #include <vector>
 
@@ -76,6 +81,54 @@ private:
   bool reject_first_ = false;
   std::size_t attempts_ = 0;
   std::vector<flexUI::ApplicationCompletion> completions_;
+};
+
+class ScopedPluginScript final : public flexUI::IScriptModule {
+public:
+  explicit ScopedPluginScript(
+      std::shared_ptr<std::vector<flexUI::ApplicationServiceCompletion>> completions)
+      : completions_(std::move(completions)) {}
+
+  flexUI::ScriptResolveResult resolve_export(
+      std::string_view name, flexUI::ScriptCallbackKind kind) override {
+    if (name == "start_plugin_request" && kind == flexUI::ScriptCallbackKind::Event)
+      return {flexUI::ScriptExportHandle{1}, {}};
+    if (name == "on_service_completion" &&
+        kind == flexUI::ScriptCallbackKind::ServiceCompletion)
+      return {flexUI::ScriptExportHandle{2}, {}};
+    return {};
+  }
+
+  flexUI::ScriptCallResult call(flexUI::ScriptExportHandle handle,
+                                const flexUI::ScriptCallContext &context) override {
+    flexUI::ScriptCallResult output;
+    if (handle.value == 1 && context.callback == flexUI::ScriptCallbackKind::Event &&
+        context.event != nullptr) {
+      const auto &id = context.event->current_target.id;
+      const bool retiring = id == "sale::action";
+      if (!retiring && id != "sales::action")
+        return {{flexUI::ScriptModuleErrorCode::RuntimeFailure,
+                 "unexpected scoped plugin event target"}};
+      auto appended = output.commands.append(
+          {retiring ? 501u : 502u, "test.echo/1",
+           retiring ? "cancel-watch" : "echo", "native-payload"});
+      if (!appended)
+        return {{flexUI::ScriptModuleErrorCode::ResourceLimitExceeded,
+                 appended.error.message}};
+      return output;
+    }
+    if (handle.value == 2 &&
+        context.callback == flexUI::ScriptCallbackKind::ServiceCompletion &&
+        context.service_completion != nullptr) {
+      completions_->push_back(*context.service_completion);
+      return output;
+    }
+    return {{flexUI::ScriptModuleErrorCode::RuntimeFailure,
+             "unexpected scoped plugin callback"}};
+  }
+
+private:
+  std::shared_ptr<std::vector<flexUI::ApplicationServiceCompletion>> completions_;
 };
 
 class BuiltinEndpoint final : public flexUI::IApplicationServiceEndpoint {
@@ -335,6 +388,109 @@ suite("FlexUI PluginHost") {
       check_equal(rejection.error.message,
                   std::string("request rejected by test plugin"));
       check_true(static_cast<bool>(built.host->stop(std::chrono::seconds(1))));
+    }
+  }
+
+  group("ABI v2 cooperative cancellation") {
+    it("real DSO worker observes exact scoped token then publishes terminal") {
+      auto host = build_echo_host();
+      check_true(static_cast<bool>(host));
+      if (!host) return;
+
+      auto completions =
+          std::make_shared<std::vector<flexUI::ApplicationServiceCompletion>>();
+      const std::string root =
+          "<ui name=\"PluginScope\"><main id=\"root\">"
+          "<section id=\"left\"/><section id=\"right\"/></main></ui>";
+      const std::string panel =
+          "<ui name=\"Panel\" xmlns:on=\"urn:flexui:event\">"
+          "<button id=\"action\" on:key_down=\"start_plugin_request\">Run</button></ui>";
+      flexUI::DesktopApplicationBuilder builder(nullptr);
+      builder.xml_entry(root)
+          .scoped_xml_component("sale", "left", panel)
+          .scoped_xml_component("sales", "right", panel)
+          .services(host.registry, {{"test.echo/1"}, {"test.echo/1"}})
+          .script("real-plugin-v2", [completions](std::string_view,
+                                                  std::string_view) {
+            return flexUI::ScriptModuleFactoryResult{
+                std::make_unique<ScopedPluginScript>(completions), {}};
+          });
+      auto app_built = builder.build();
+      check_true(static_cast<bool>(app_built));
+      if (!app_built) {
+        check_true(static_cast<bool>(host.host->stop(std::chrono::seconds(2))));
+        return;
+      }
+      auto &app = *app_built.application;
+      auto *sale = app.box().get_by_id("sale::action");
+      auto *sales = app.box().get_by_id("sales::action");
+      check_not_null(sale);
+      check_not_null(sales);
+      if (!sale || !sales) {
+        check_true(static_cast<bool>(host.host->stop(std::chrono::seconds(2))));
+        return;
+      }
+      app.box().set_focus(sale);
+      auto event = flexUI::Event::key_down(flexUI::KeyCode::A);
+      check_true(static_cast<bool>(app.dispatch_event(event)));
+      app.box().set_focus(sales);
+      event = flexUI::Event::key_down(flexUI::KeyCode::A);
+      check_true(static_cast<bool>(app.dispatch_event(event)));
+      check_equal(app.service_statistics().current_pending, std::size_t{2});
+
+      flexUI::ApplicationServiceDispatcherLimits limits;
+      limits.max_requests_per_pump = 1;
+      auto dispatcher = flexUI::ApplicationServiceDispatcher::create(app, limits);
+      check_true(static_cast<bool>(dispatcher));
+      if (!dispatcher) {
+        check_true(static_cast<bool>(host.host->stop(std::chrono::seconds(2))));
+        return;
+      }
+      auto first = dispatcher.dispatcher->pump();
+      check_true(static_cast<bool>(first));
+      check_equal(first.submitted, std::size_t{1});
+      check_true(static_cast<bool>(app.retire_scoped_event_handlers("sale")));
+      auto q = app.quiesce_retired_scoped_service_requests("sale");
+      check_true(static_cast<bool>(q));
+      check_equal(q.cancelled_queued, std::size_t{0});
+      check_equal(q.newly_suppressed_in_flight, std::size_t{1});
+      check_equal(app.service_statistics().current_pending, std::size_t{2});
+
+      auto second = dispatcher.dispatcher->pump();
+      check_true(static_cast<bool>(second));
+      check_equal(second.submitted, std::size_t{1});
+      std::size_t suppressed = 0;
+      std::size_t delivered = 0;
+      for (int n = 0; n < 3000 && suppressed + delivered < 2; ++n) {
+        auto result = app.try_dispatch_service_completion();
+        check_false(static_cast<bool>(result.error));
+        if (result.error) break;
+        if (result.status == flexUI::ApplicationServicePollStatus::Suppressed) {
+          ++suppressed;
+        } else if (result.status == flexUI::ApplicationServicePollStatus::Ready) {
+          check_true(result.dispatched);
+          ++delivered;
+        } else if (result.status == flexUI::ApplicationServicePollStatus::Empty) {
+          std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        } else {
+          check_true(false);
+          break;
+        }
+      }
+      check_equal(suppressed, std::size_t{1});
+      check_equal(delivered, std::size_t{1});
+      check_equal(completions->size(), std::size_t{1});
+      if (!completions->empty()) {
+        check_equal(completions->front().script_request_id, std::uint64_t{502});
+        check_equal(completions->front().payload, std::string("native-payload"));
+      }
+      check_equal(app.service_statistics().suppressed_completions,
+                  std::uint64_t{1});
+      check_equal(app.service_statistics().current_pending, std::size_t{0});
+      check_true(app.controller()->state() == flexUI::ControllerState::Mounted);
+      check_true(static_cast<bool>(host.host->stop(std::chrono::seconds(2))));
+      check_true(static_cast<bool>(app.request_close()));
+      check_true(static_cast<bool>(app.shutdown()));
     }
   }
 

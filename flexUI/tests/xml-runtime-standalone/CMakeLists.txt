@@ -19,7 +19,7 @@ include("${STUN_ROOT}/cmake/Sanitizers.cmake")
 set(BUILD_TESTING OFF)
 set(BUILD_SHARED_LIBS OFF)
 set(NANOGUI_BUILD_EXAMPLES OFF)
-set(FLEXUI_ENABLE_PLUGINS OFF)
+set(FLEXUI_ENABLE_PLUGINS ON)
 set(FLEXUI_ENABLE_TURBOSCRIPT OFF)
 foreach(option IN ITEMS GCANVAS_BUILD_OPENGL GCANVAS_BUILD_GLES
     GCANVAS_BUILD_ANDROID_EGL GCANVAS_BUILD_VULKAN GCANVAS_BUILD_SVG
@@ -76,24 +76,15 @@ add_test(NAME test_plugin_abi COMMAND test_plugin_abi)
 set_tests_properties(test_plugin_abi PROPERTIES TIMEOUT 120)
 add_dependencies(stun_xml_runtime_qualification test_plugin_abi)
 
-add_library(stun_plugin_module_v2_compile OBJECT
-    "${STUN_ROOT}/flexUI/modules/plugin_host/plugin_module.cpp")
-target_link_libraries(stun_plugin_module_v2_compile PRIVATE
-    FlexUI::Services FlexUI::PluginSDK Salts::Core)
-target_include_directories(stun_plugin_module_v2_compile PRIVATE
-    "${STUN_ROOT}/flexUI/modules/plugin_host")
-# Match the real PluginHost's Windows definition set; unlike the actual
-# production target, this source-only object gate has no inherited defines.
-if(WIN32)
-  target_compile_definitions(stun_plugin_module_v2_compile PRIVATE
-      NOMINMAX WIN32_LEAN_AND_MEAN)
-endif()
-add_dependencies(stun_xml_runtime_qualification stun_plugin_module_v2_compile)
-
-add_library(stun_plugin_v2_fixture_compile OBJECT
-    "${STUN_ROOT}/flexUI/tests/plugin_test_echo.cpp")
-target_link_libraries(stun_plugin_v2_fixture_compile PRIVATE FlexUI::PluginSDK)
-add_dependencies(stun_xml_runtime_qualification stun_plugin_v2_fixture_compile)
+# ABI v2 is now qualified through the actual dynamically loaded PluginHost,
+# provider fixtures, worker completion protocol and stop/join tests rather
+# than by compiling isolated object files and guessing runtime behavior.
+include("${STUN_ROOT}/flexUI/tests/plugin-native-targets.cmake")
+flexui_add_native_plugin_tests()
+foreach(test IN ITEMS test_plugin_host test_plugin_manifest test_plugin_create_unwind)
+  set_tests_properties(${test} PROPERTIES TIMEOUT 120)
+  add_dependencies(stun_xml_runtime_qualification ${test})
+endforeach()
 
 # Exercise the real private service queue against published FlexUI providers.
 target_include_directories(test_application_service_requests PRIVATE

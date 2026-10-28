@@ -23,18 +23,21 @@ flexUI::PluginHostError load_failure(const CreateUnwindFixtureApi& fixture,
     const auto result = builder.load_plugin(FLEXUI_TEST_CREATE_UNWIND_PLUGIN);
     check_false(static_cast<bool>(result));
     error = result.error;
-    check_equal(fixture.statistics().destroyed, std::uint32_t{1});
+    check_true(fixture.statistics().destroyed == std::uint32_t{1});
   }
-  check_equal(fixture.statistics().created, std::uint32_t{1});
-  check_equal(fixture.statistics().destroyed, std::uint32_t{1});
-  check_equal(fixture.statistics().lifecycle_calls, std::uint32_t{0});
-  check_equal(fixture.statistics().live_exceptions, std::uint32_t{0});
-  check_equal(fixture.statistics().destroys_during_exception, std::uint32_t{0});
+  check_true(fixture.statistics().created == std::uint32_t{1});
+  check_true(fixture.statistics().destroyed == std::uint32_t{1});
+  check_true(fixture.statistics().lifecycle_calls == std::uint32_t{0});
+  check_true(fixture.statistics().live_exceptions == std::uint32_t{0});
+  check_true(fixture.statistics().destroys_during_exception == std::uint32_t{0});
   return error;
 }
 
 } // namespace
 
+// TinyTest's variadic check_equal sentinel does not expand under the pinned
+// current MSVC preprocessor for this fixture. Keep EXACT equality assertions
+// using its already-required check_true primitive on every platform.
 suite("FlexUI PluginHost create ownership") {
   // An explicit test-owned library keeps the observation API alive after the
   // host releases its own library. API pointers alone never retain a module.
@@ -59,27 +62,23 @@ suite("FlexUI PluginHost create ownership") {
 
   it("releases an owned instance returned with create rejection") {
     const auto error = load_failure(*fixture, CreateUnwindMode::Reject);
-    check_equal(static_cast<int>(error.code),
-                static_cast<int>(flexUI::PluginHostErrorCode::CreateFailed));
+    check_true(error.code == flexUI::PluginHostErrorCode::CreateFailed);
   }
 
   it("releases an owned instance when create throws bad_alloc") {
     const auto error = load_failure(*fixture, CreateUnwindMode::BadAllocation);
-    check_equal(static_cast<int>(error.code),
-                static_cast<int>(flexUI::PluginHostErrorCode::AllocationFailed));
+    check_true(error.code == flexUI::PluginHostErrorCode::AllocationFailed);
   }
 
   it("releases an owned instance when create throws a standard exception") {
     const auto error = load_failure(*fixture, CreateUnwindMode::StandardException);
-    check_equal(static_cast<int>(error.code),
-                static_cast<int>(flexUI::PluginHostErrorCode::InternalInvariant));
-    check_equal(error.message,
-                std::string("test create threw after returning ownership"));
+    check_true(error.code == flexUI::PluginHostErrorCode::InternalInvariant);
+    check_true(error.message ==
+               std::string("test create threw after returning ownership"));
   }
 
   it("releases an owned instance when create throws a nonstandard exception") {
     const auto error = load_failure(*fixture, CreateUnwindMode::OtherException);
-    check_equal(static_cast<int>(error.code),
-                static_cast<int>(flexUI::PluginHostErrorCode::InternalInvariant));
+    check_true(error.code == flexUI::PluginHostErrorCode::InternalInvariant);
   }
 };
