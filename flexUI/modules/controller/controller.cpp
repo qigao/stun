@@ -426,6 +426,17 @@ bool ScriptController::has_active_event_binding(
          impl_->event_exports.find(binding) != impl_->event_exports.end();
 }
 
+bool ScriptController::is_scoped_event_route_retired(
+    std::string_view scope) const noexcept {
+  if (!impl_->is_owner_thread() || impl_->state != ControllerState::Mounted)
+    return false;
+  return std::any_of(impl_->retired_event_scopes.begin(),
+                     impl_->retired_event_scopes.end(),
+                     [scope](const std::string &value) {
+                       return std::string_view(value) == scope;
+                     });
+}
+
 ControllerResult ScriptController::retire_scoped_event_handlers(
     std::string_view scope) {
   if (!impl_->is_owner_thread()) {

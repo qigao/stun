@@ -142,6 +142,19 @@ struct DesktopApplicationResult {
   explicit operator bool() const noexcept { return !static_cast<bool>(error); }
 };
 
+/// Outcome of a queue-only quiescence after the same component's SCRIPT
+/// event routes have already been retired. This does NOT stop worker execution
+/// or detach Elements/Bindings/Widgets/resources.
+struct DesktopApplicationScopedServiceQuiesceResult {
+  std::size_t cancelled_queued = 0;
+  /// Newly marked InFlight tokens on this call, NOT total outstanding host
+  /// work. The worker continues until its real completion is observed.
+  std::size_t newly_suppressed_in_flight = 0;
+  DesktopApplicationError error;
+
+  explicit operator bool() const noexcept { return !static_cast<bool>(error); }
+};
+
 struct DesktopApplicationBuildResult {
   std::unique_ptr<DesktopApplication> application;
   DesktopApplicationError error;
@@ -288,6 +301,14 @@ public:
   /// This is not a component unmount operation.
   DesktopApplicationResult retire_scoped_event_handlers(
       std::string_view scope);
+
+  /// Quiesce request admission only AFTER the controller has retired every
+  /// event route in this registered scope. Rejects a live event route and any
+  /// callback/native bubbling reentrance; does not unmount component state.
+  /// Published unsubmitted commands are cancelled; in-flight host tokens are
+  /// retained until real completion and suppressed from script delivery.
+  DesktopApplicationScopedServiceQuiesceResult
+  quiesce_retired_scoped_service_requests(std::string_view scope);
 
 private:
   struct Impl;
