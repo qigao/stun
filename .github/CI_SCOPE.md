@@ -87,6 +87,22 @@ the exact-head full qualification as a mandatory release/merge review rule;
 if repository rulesets need automated enforcement, require a dedicated
 non-skippable full-acceptance check rather than treating `skipped` as passed.
 
+## Isolate unrelated PR labels from real CI execution
+
+The nine workflows listening for `labeled` events accept `ci/full` as an
+explicit same-HEAD requalification. Any other label must not cancel a
+queued/running check or claim a green test. For unrelated label events,
+workflow concurrency uses a unique `github.run_id` suffix, and `changes`
+is skipped before a runner is allocated. Normal `opened`, `synchronize`,
+`reopened`, `push`, and `ci/full` keep the original shared per-PR or
+per-ref `qualification` concurrency group, so new source heads can still
+cancel obsolete executions.
+
+The existing classifier also ignores unrelated label events (defense in
+depth). `test_ci_affected.py` statically checks all nine label-sensitive
+workflow guards and concurrency groups. A skipped label event must never
+be presented as an executed native test.
+
 ## Maintenance
 
 - Add new files/paths to both the top-level trigger and
