@@ -1,5 +1,8 @@
 name: gCanvas OpenGLES runtime
 
+# Warm-cache evidence: changing this comment does not modify any C/C++
+# source/flags, but forces a fresh exact-HEAD native Ninja build to restore
+# the previous commit's real compiler-output archive.
 on:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review, labeled]

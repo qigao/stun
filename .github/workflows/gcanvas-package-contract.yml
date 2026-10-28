@@ -1,5 +1,7 @@
 name: gCanvas package contract
 
+# Verify that each isolated Linux GLES and NDK cache restores the previous
+# exact HEAD's compiler results; do not reuse host objects for Android.
 on:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review, labeled]

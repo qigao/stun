@@ -292,3 +292,25 @@ cacheable compilations, hit/miss metrics and existing native test
 artifacts are preserved independently. One cold run verifies real
 compiler invocation; warm-hit evidence requires a subsequent same-
 toolchain HEAD with unchanged C/C++ source and flags.
+
+## gCanvas first verified cold-run evidence (PR #308)
+
+[Exact cold HEAD `62f1fa96`](https://github.com/qigao/stun/commit/62f1fa96f1d0f4421b6fb7e8722dc518f8699d9b),
+[OpenGLES native run #40718548050](https://github.com/qigao/stun/actions/runs/40718548050)
+and [package/NDK run #40718548133](https://github.com/qigao/stun/actions/runs/40718548133)
+completed **SUCCESS**, including the actual GLSL/GLES pixel smoke,
+installed package consumer and NDK ABI target-contract gates.
+
+| Build profile | Cacheable C/C++ compilations | Hits | Misses |
+| --- | ---: | ---: | ---: |
+| `gcanvas-gles-runtime` | 17 | 0 | 17 |
+| `gcanvas-installed-consumer` | 17 | 1 | 16 |
+| `gcanvas-android-arm64` | 16 | 0 | 16 |
+
+All three compiler-output caches were saved with separate immutable
+ccache 4.14.2 keys; the one same-job native consumer hit is not
+cross-run evidence. The next SHA touches only these workflow comments
+and this documentation, so C++ sources, Android ABI/NDK toolchain and
+CMake flags remain identical. Follow-up runs must restore
+compiler-output caches via their prefix keys and report real hits on
+each of the **three** profiles; a zero-call result must fail.
