@@ -591,3 +591,33 @@ uninspectable third-party text Widget adapters (fail-closed).
 This is independent read-only evidence, NOT an observer disconnect, PluginHost
 join, or permission to remove compiled Elements. Other non-text Widget owners
 still require their own lifecycle evidence. #298/#275 remain open.
+
+
+## 2026-10-28 P4.4 M4b5 — sole mandatory Plugin ABI v2.1 scoped JOIN (Draft #302)
+
+The one `flexui_plugin_get_api_v2` now requires ABI minor **1** and an
+explicit `join_scope` callback: neither old v2.0 nor a separate provider
+may silently fall back. The one `ApplicationServiceRequestQueue` owns the
+compiler-derived `origin_scope` and copies it into its exact-token
+cancellation lease before any slot publication. PluginHost hands only its
+borrowed byte view to a native plugin's `submit`; a worker must copy it.
+
+`PluginHost::join_scoped_workers(scope, timeout)` validates the owner thread,
+current Started host, bounded compiler-scope grammar, and no unposted
+exact-scope service terminal before calling each plugin's independent
+`join_scope`. On BUSY or TIMED_OUT the provider and DLL remain live for
+retry. This never triggers global plugin `stop`, joins `sales` when
+asked for `sale`, or consumes a terminal.
+
+A REAL dynamic plugin fixture retains a cooperative `sale` worker
+**after** posting CANCELLED and after the application's queue_drained becomes
+true. Scoped join must time out until a separate test-only native release
+signal arrives. The independent join then succeeds, the shared PluginHost
+remains Started, and sibling `sales` has received its completion.
+
+**Not sufficient for physical unmount:** this only certifies this trusted
+PluginHost's workers at a point in time. Full application admission
+quiescence + queue terminal consumption, native non-plugin endpoint lifetime
+proof, ALL Widget/Binding leases and an atomic compiled-subtree disposal
+transaction are still mandatory. No `unmount(scope)` on #302; keep #298/#275
+OPEN and Draft unmerged.

@@ -455,6 +455,12 @@ suite("FlexUI PluginHost") {
       check_false(outstanding.event_routes_retired);
       check_false(outstanding.admission_quiesced);
       check_false(outstanding.queue_drained());
+      // Before a terminal is posted, an exact-scope join must fail closed.
+      const auto before_post = host.host->join_scoped_workers(
+          "sale", std::chrono::milliseconds(0));
+      check_false(static_cast<bool>(before_post));
+      check_equal(static_cast<int>(before_post.error.code),
+                  static_cast<int>(flexUI::PluginHostErrorCode::JoinTimedOut));
       check_true(static_cast<bool>(app.retire_scoped_event_handlers("sale")));
       auto q = app.quiesce_retired_scoped_service_requests("sale");
       check_true(static_cast<bool>(q));
@@ -514,8 +520,33 @@ suite("FlexUI PluginHost") {
       check_true(app.controller()->state() == flexUI::ControllerState::Mounted);
       const auto final_drain = app.inspect_scoped_service_drain("sale");
       check_true(final_drain.queue_drained());
-      // Do not treat that queue-only status as a worker-exit proof. The real
-      // PluginHost still owns the dynamic DLL and must stop/join successfully.
+      // Actual terminal was consumed, but the fixture worker intentionally
+      // remains alive until a separate release request. This is deterministic
+      // and MUST block physical unmount even though queue_drained() is true.
+      const auto still_live = host.host->join_scoped_workers(
+          "sale", std::chrono::milliseconds(0));
+      check_false(static_cast<bool>(still_live));
+      check_equal(static_cast<int>(still_live.error.code),
+                  static_cast<int>(flexUI::PluginHostErrorCode::JoinTimedOut));
+
+      // This independent test-only native request releases only the held
+      // worker; the application and sales scope remain mounted.
+      auto release = request(999, "release-scoped-worker", "release");
+      auto endpoint = resolve(host, release).endpoint;
+      check_not_null(endpoint.get());
+      RecordingSink release_sink;
+      if (endpoint) {
+        check_true(static_cast<bool>(endpoint->try_submit(release, release_sink)));
+        check_true(release_sink.wait_for_count(1, std::chrono::seconds(1)));
+      }
+      check_true(static_cast<bool>(host.host->join_scoped_workers(
+          "sale", std::chrono::seconds(2))));
+      check_true(static_cast<bool>(host.host->join_scoped_workers(
+          "sales", std::chrono::seconds(1))));
+      check_equal(static_cast<int>(host.host->state()),
+                  static_cast<int>(flexUI::PluginHostState::Started));
+      check_not_null(app.box().get_by_id("sales::action"));
+      // Scope join cannot unload a DLL or close unrelated sibling routes.
       check_true(static_cast<bool>(host.host->stop(std::chrono::seconds(2))));
       check_true(static_cast<bool>(app.request_close()));
       check_true(static_cast<bool>(app.shutdown()));

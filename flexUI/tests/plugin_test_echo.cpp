@@ -79,6 +79,7 @@ struct TestInstance {
   std::mutex mutex;
   std::condition_variable idle;
   std::size_t active_workers = 0;
+  bool release_scoped_worker = false;
   std::vector<WorkerRecord> workers;
 };
 
@@ -213,6 +214,15 @@ submit_request(flexui_plugin_instance *opaque,
   if (operation == "hold") {
     return FLEXUI_PLUGIN_STATUS_OK;
   }
+  if (operation == "release-scoped-worker") {
+    {
+      std::lock_guard<std::mutex> lock(instance.mutex);
+      instance.release_scoped_worker = true;
+      instance.idle.notify_all();
+    }
+    return post_completion(instance, request->token_id,
+                           request->token_generation, payload);
+  }
   if (operation == "cancel-watch") {
     std::uint32_t requested = 0;
     const auto status = instance.host.cancel_requested(
@@ -256,8 +266,14 @@ submit_request(flexui_plugin_instance *opaque,
               if (status != FLEXUI_PLUGIN_STATUS_OK) break;
               if (requested != 0) {
                 (void)post_cancelled(instance, token_id, generation);
-                // Terminal posting deliberately precedes actual thread exit.
-                std::this_thread::sleep_for(std::chrono::milliseconds(650));
+                // Deterministic proof: the terminal is ALREADY posted, but
+                // the worker remains alive until an independent release call
+                // or global stop. Queue drain must never impersonate join.
+                std::unique_lock<std::mutex> lock(instance.mutex);
+                instance.idle.wait(lock, [&instance] {
+                  return instance.release_scoped_worker ||
+                         instance.stopping.load();
+                });
                 break;
               }
               std::this_thread::sleep_for(kRetryDelay);
@@ -314,6 +330,7 @@ stop_instance(flexui_plugin_instance *opaque,
   }
 #endif
   instance.stopping.store(true);
+  instance.idle.notify_all();
   return FLEXUI_PLUGIN_STATUS_OK;
 }
 
@@ -414,6 +431,8 @@ const flexui_plugin_operation_descriptor_v2 operations[] = {
      4096, {0}},
     {sizeof(flexui_plugin_operation_descriptor_v2), 0, literal_view("hold"),
      4096, {0}},
+    {sizeof(flexui_plugin_operation_descriptor_v2), 0,
+     literal_view("release-scoped-worker"), 4096, {0}},
     {sizeof(flexui_plugin_operation_descriptor_v2), 0,
      literal_view("cancel-watch"), 4096, {0}},
     {sizeof(flexui_plugin_operation_descriptor_v2), 0, literal_view("retry"),
