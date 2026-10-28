@@ -308,12 +308,13 @@ struct GCanvasWindowHost::Impl {
   }
 
   GCanvasWindowHostResult drain_service_completions() {
-    // Always consume accepted completion tokens, including scoped tombstones,
-    // even when the optional script completion export is absent. The window
-    // host owns this mailbox consumer; leaving it unread leaks queue slots.
+    // When there is no scripted completion export the caller may own the
+    // raw mailbox consumer; preserve that existing ownership contract.
     ScriptController *active_controller = application->controller();
-    if (active_controller == nullptr) return {};
-    const bool has_script_handler = active_controller->has_service_completion_handler();
+    if (active_controller == nullptr ||
+        !active_controller->has_service_completion_handler()) {
+      return {};
+    }
 
     std::size_t consumed = 0;
     while (consumed < config.max_service_completions_per_pump) {
@@ -341,9 +342,7 @@ struct GCanvasWindowHost::Impl {
         continue;
       }
       if (dispatched.status != ApplicationServicePollStatus::Ready ||
-          !dispatched.completion.has_value() ||
-          (has_script_handler && !dispatched.dispatched) ||
-          (!has_script_handler && dispatched.dispatched)) {
+          !dispatched.completion.has_value() || !dispatched.dispatched) {
         return {fail(GCanvasWindowHostErrorCode::InvalidState,
                      GCanvasWindowHostStage::ServiceCompletion,
                      "service completion dispatch violated its ready-state contract")};

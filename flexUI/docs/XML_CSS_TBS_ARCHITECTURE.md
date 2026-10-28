@@ -11,8 +11,10 @@
 未发送到服务端的 Published 请求在原队列环中稳定压缩和取消，
 其他 scope 保持 FIFO 顺序。已经交付宿主的 InFlight 请求绝不伪装为
 已取消：保留 token 到真实完成时，释放槽但返回显式 Suppressed 状态，
-不向脚本回调投递；GCanvas 主机有界 pump 继续取后面的有效 completion，
-防止一个被忽略的结果使其他组件消息永久滞留。整代 reload 重置来源门禁。
+不向脚本回调投递；GCanvas 主机有界 pump 在存在脚本 completion 处理器时继续取后面的
+有效 completion，防止被抑制的结果阻塞同一脚本队列。没有该处理器时
+保留原有 raw mailbox 轮询权，宿主不能擅自吞掉用户的 completion。
+整代 reload 重置来源门禁。
 
 **仍未实现真实 Service Endpoint 的协作取消、host 资源租约释放及
 完整原地 unmount(scope)。** 此片独立验证队列端排空/消息抑制，不得
