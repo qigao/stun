@@ -1249,7 +1249,13 @@ spec("Box structural subtree retirement rejects unsafe lifetime owners") {
     check_false(box.retire_unbound_structural_subtree("not-present"));
     check_equal(box.owned_element_count(), count);
 
+    // The old raw Element pointer becomes stale after actual deletion.
+    // Inspection must authenticate its ADDRESS against Box-owned unique_ptr
+    // entries before reading any freed bytes, including owner_box_/parent_.
+    const flexUI::Element *stale_panel_address = panel;
     check(box.retire_unbound_structural_subtree("scope::panel"));
+    const auto stale_snapshot = box.inspect_subtree_borrowers(stale_panel_address);
+    check(stale_snapshot.error == flexUI::BoxSubtreeBorrowErrorCode::InvalidRoot);
     check_equal(box.owned_element_count(), count - 3u);
     check_equal(host->child_count(), std::size_t{2});
     check_equal(host->child_at(0), left);

@@ -1139,25 +1139,48 @@ Box::inspect_subtree_borrowers(const Element *subtree_root) const noexcept {
     result.error = BoxSubtreeBorrowErrorCode::WrongThread;
     return result;
   }
-  if (!subtree_root || subtree_root == root_ || !owns_element(subtree_root)) {
+  if (!subtree_root || subtree_root == root_) {
     result.error = BoxSubtreeBorrowErrorCode::InvalidRoot;
     return result;
   }
-  // Detached Box-owned staged nodes are not live subtree roots. Validate
-  // the exact ancestor chain without calling a Widget or a native callback.
-  const Element *ancestor = subtree_root;
-  std::size_t hops = 0;
-  while (ancestor != root_) {
-    if (!ancestor || ++hops > elements_.size()) {
+
+  try {
+    // An Element* is only an opaque address until the Box's UNIQUE
+    // unique_ptr<Element> owner table confirms its current membership.
+    // In particular, calling owns_element() or parent_elem() first would
+    // dereference an already-retired raw UiElement pointer (ASan UAF).
+    // Stage exactly one temporary owner-membership set, not another runtime
+    // ownership registry. Allocation failure cannot change the live Box.
+    std::unordered_set<const Element *> owned_elements;
+    owned_elements.reserve(elements_.size());
+    for (const auto &owner : elements_) {
+      if (!owner || !owned_elements.insert(owner.get()).second) {
+        result.error = BoxSubtreeBorrowErrorCode::InconsistentTree;
+        return result;
+      }
+    }
+    if (owned_elements.count(subtree_root) == 0 ||
+        owned_elements.count(root_) == 0 ||
+        !owns_element(subtree_root)) {
       result.error = BoxSubtreeBorrowErrorCode::InvalidRoot;
       return result;
     }
-    ancestor = ancestor->parent_elem();
-  }
-  result.native_event_dispatching = events_.is_dispatching();
-  result.layout_or_widget_traversal_active = borrowed_tree_depth_ != 0;
 
-  try {
+    // Detached Box-owned staged nodes are not live roots. Every ancestor
+    // address must be a CURRENT Box-owned Element before any dereference.
+    const Element *ancestor = subtree_root;
+    std::size_t hops = 0;
+    while (ancestor != root_) {
+      if (!ancestor || owned_elements.count(ancestor) == 0 ||
+          ++hops > elements_.size()) {
+        result.error = BoxSubtreeBorrowErrorCode::InvalidRoot;
+        return result;
+      }
+      ancestor = ancestor->parent_elem();
+    }
+    result.native_event_dispatching = events_.is_dispatching();
+    result.layout_or_widget_traversal_active = borrowed_tree_depth_ != 0;
+
     // Bounded temporary set of ACTUALLY live descendants. This includes
     // Widget-owned internal parts as well as Box-owned compiled Elements,
     // so event focus/capture pointing into a Widget part is never missed.
@@ -1174,23 +1197,8 @@ Box::inspect_subtree_borrowers(const Element *subtree_root) const noexcept {
     }
     const std::size_t budget = elements_.size() +
         widgets_.size() * kMaximumPartsPerWidget + kExtraStructuralBudget;
-    // owner_box_ is only a back-reference. Element::append() may copy it
-    // into an externally allocated child, which must NEVER become eligible
-    // for Box physical deletion. Prove every actual descendant appears in
-    // the one unique_ptr<Element> ownership vector, without persisting a
-    // second owner registry.
-    std::unordered_set<const Element *> owned_elements;
-    owned_elements.reserve(elements_.size());
-    for (const auto &owner : elements_) {
-      if (!owner || !owned_elements.insert(owner.get()).second) {
-        result.error = BoxSubtreeBorrowErrorCode::InconsistentTree;
-        return result;
-      }
-    }
-    if (owned_elements.count(subtree_root) == 0) {
-      result.error = BoxSubtreeBorrowErrorCode::InvalidRoot;
-      return result;
-    }
+    // Descendant membership uses the same staged sole-Box owner set that
+    // already authenticated the root and every ancestor above.
     std::vector<const Element *> pending{subtree_root};
     std::unordered_set<const Element *> visited;
     while (!pending.empty()) {

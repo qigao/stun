@@ -871,3 +871,20 @@ open/close pair with zero intervening frames does NOT falsely report active
 borrowers. The production SelectWidget state machine and its conservative
 `inspect_local_borrowers()` contract remain unchanged. This fixes the
 test's faulty timing assumption without weakening the physical unmount gate.
+
+## 2026-10-28 M4b6h — authenticate raw Element addresses before dereference
+
+The scoped Box borrower inspector's original `owns_element(subtree_root)`
+read `owner_box_` BEFORE proving that the pointer was a live member of the
+sole `elements_` unique_ptr store. A caller retaining a raw pointer after
+`retire_unbound_structural_subtree` could therefore turn a read-only
+preflight into a use-after-free. The inspector now stages a temporary owner
+membership set first and refuses invalid/stale root or ancestor addresses
+without dereferencing them. Every later descendant also uses that same
+single authoritative set, and all fallible staging occurs before any Box
+mutation (this inspector never mutates anything).
+
+The existing real native structural deletion suite now passes a stale raw
+Element pointer to the inspector after deletion, requires InvalidRoot and
+still checks surviving sibling IDs and handles. This does not authorize
+compiled component unmount or modify the physical deletion guards.
