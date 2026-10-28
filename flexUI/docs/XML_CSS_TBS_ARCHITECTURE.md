@@ -20,8 +20,15 @@ PluginHost stop/join 验证 DLL 生命周期；调用回调时不持有队列锁
 同时编译并运行真实 PluginHost / manifest / create unwind / C11 ABI，
 保留 PTY/ConPTY；没有动态插件运行时证据不可合并或宣称取消已完成。
 **即使本测试成功，仍不代表所有插件按请求取消能力已经验证。**
+[PR #295](https://github.com/qigao/stun/pull/295) 已以 `750b951b` 合并至 master，验收 feature HEAD `eaff4490`。
+其完整 Windows/macOS、Linux ASan/UBSan 与独立 LSan、Public dependency 均通过。
+本 M2b [PR #296](https://github.com/qigao/stun/pull/296) 基于该合并 HEAD
+重新提交为 `2871188e`，保留真实 DLL/DSO 测试与 Windows
+`test_plugin_create_unwind` 的等价断言修复；只有其自身精确 HEAD 的
+完整原生矩阵通过后才允许合并。不得以 M2a 的绿色 CI 替代 M2b。
 
-## 2026-10-28 P4.4 M3d M2a 单一插件 ABI v2 的 exact-token 取消查询（Draft）
+
+## 2026-10-28 P4.4 M3d M2a 单一插件 ABI v2 的 exact-token 取消查询（已合并 PR #295）
 
 `plugin_abi.h` 与 PluginHost 使用唯一 C11 ABI 2.0、入口
 `flexui_plugin_get_api_v2`。宿主函数表在 `post_completion` 之后
@@ -37,7 +44,7 @@ ABI v1 不受理也不尝试旧入口，仓库内 C 示例与测试插件同步�
 中编译；运行时 DLL 加载、跨 DLL worker 取消与 stop/join 竞态将在 M2b
 单独正式验收。**仅源码编译不能宣称插件协作取消已完成**。
 
-## 2026-10-28 P4.4 M3d M1 原生服务请求只读协作取消租约（Draft）
+## 2026-10-28 P4.4 M3d M1 原生服务请求只读协作取消租约（已合并 PR #294）
 
 在生产 `ApplicationServiceRequest` 中增加由唯一
 `ApplicationServiceRequestQueue` 创建的 exact-token/generation
