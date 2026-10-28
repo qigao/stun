@@ -82,6 +82,12 @@ jobs:
           & $exe --selftest
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
+      - name: Install per-profile native C/C++ compiler cache
+        uses: ./.github/actions/setup-ccache
+        with:
+          profile: flexui-tango
+          source_sha: ${{ steps.source.outputs.sha }}
+
       - name: Verify immutable checkout and restore script tests
         shell: bash
         run: |
@@ -357,6 +363,10 @@ jobs:
             --repeat until-fail:5 \
             -R "^tui_streaming_demo_win32_conpty_plain"
 
+      - name: Require real ccache compiler invocations and report hit rate
+        shell: bash
+        run: bash .github/scripts/report-ccache.sh flexui-tango
+
       - name: Preserve exact-head cross-platform test evidence
         if: always()
         uses: actions/upload-artifact@v4
@@ -368,3 +378,4 @@ jobs:
             ${{ runner.temp }}/flexui-tango-sdk/flexui-tango-sdk-provenance.json
             build/flexui-tango-cross/Testing/Temporary/LastTest.log
             build/flexui-tango-cross/Testing/Temporary/CTestCostData.txt
+            ${{ runner.temp }}/stun-ccache-stats-flexui-tango.tsv
