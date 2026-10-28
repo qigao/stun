@@ -2,7 +2,7 @@ name: gCanvas shader toolchain cache contract
 
 on:
   pull_request:
-    types: [opened, synchronize, reopened, ready_for_review, labeled]
+    types: [opened, synchronize, reopened, labeled]
     paths:
       - "shared/gcanvas/**"
       - "tools/gcanvas-shaderc/**"

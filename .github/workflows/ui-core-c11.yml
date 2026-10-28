@@ -5,7 +5,7 @@ name: UI C11 Reflection Contract
 # the previous cold-head compiler-output archive and run all 20 CTests.
 on:
   pull_request:
-    types: [opened, synchronize, reopened, ready_for_review, labeled]
+    types: [opened, synchronize, reopened, labeled]
     paths:
       - 'shared/markdown/**'
       - 'CMakeLists.txt'

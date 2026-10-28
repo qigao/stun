@@ -86,6 +86,11 @@ non-skippable full-acceptance check rather than treating `skipped` as passed.
   `.github/scripts/ci-affected.sh` invocation when expanding subsystem scope.
 - Keep `push` for shared path-specific workflows restricted to `master`, so
   a feature branch with an open PR does not duplicate every job.
+- Run PR qualification for `opened`, `synchronize`, and `reopened`; retain
+  `labeled` solely for explicit `ci/full` requalification. Do **not** schedule
+  duplicate full suites on `ready_for_review`: the PR head SHA and source did
+  not change, and draft PRs have already run their normal checks. Use `ci/full`
+  when a same-HEAD requalification is explicitly needed.
 - Keep `concurrency.cancel-in-progress` for obsolete results but never
   interpret cancellation as test success.
 - Keep full runtime integration, independent published-SDK tests, sanitizers,
