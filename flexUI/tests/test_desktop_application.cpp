@@ -2377,10 +2377,17 @@ spec("Desktop XML components share one native ScriptController and Effects engin
     check(rejected.error.controller_error.code ==
           flexUI::ControllerErrorCode::ControllerFaulted);
     check_equal(probe->events.size(), std::size_t{1});
+    const auto retained = app.box().handle_for(*action);
     const auto retired = app.retire_scoped_event_handlers("sales");
     check_false(static_cast<bool>(retired));
+    check(retired.error.code ==
+          flexUI::DesktopApplicationErrorCode::ControllerEventRetirementFailed);
     check(retired.error.controller_error.code ==
           flexUI::ControllerErrorCode::InvalidState);
+    check(retired.error.controller_error.stage ==
+          flexUI::ControllerStage::EventRetirement);
+    check_equal(app.box().resolve_handle(retained), action);
+    check_false(app.controller()->is_scoped_event_route_retired("sales"));
   }
 
 

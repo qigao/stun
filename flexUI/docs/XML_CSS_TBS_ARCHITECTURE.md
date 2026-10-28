@@ -705,3 +705,16 @@ the deliberately still-live worker makes Registry report EndpointJoinBusy.
 Only a separate provider release permits a returned generation and exact
 joined provider count; the sibling `sales` continues to publish another
 real service request afterwards. No `unmount(scope)` is implied.
+
+## 2026-10-28 M4b5h — retain faulted Controller error contract
+
+Exact-head CI on 32be0299 found one real cross-platform RED in
+`test_desktop_application`: moving the live compiler-topology check ahead of
+Controller state validation caused a faulted script module to report a plain
+DesktopApplication InvalidState, dropping the historical nested
+`ControllerErrorCode::InvalidState` with EventRetirement stage.
+The application now preserves the Controller's original fail-fast typed error
+before the read-only topology check whenever the controller is not Mounted.
+This does not retire routes, synthesize an eventless handler or change the
+Box owner graph. Native regression asserts the exact nested code/stage,
+unchanged live Element handle and absence of a retired marker.

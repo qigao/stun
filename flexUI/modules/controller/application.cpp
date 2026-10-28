@@ -1109,6 +1109,25 @@ DesktopApplicationResult DesktopApplication::retire_scoped_event_handlers(
                  DesktopApplicationStage::ControllerEventRetirement,
                  "scoped event retirement requires a declared XML component scope")};
   }
+  // A faulted/unmounted Controller must continue to report its OWN typed
+  // lifecycle error. The later topology preflight rejects the same state,
+  // but cannot replace ControllerErrorCode::InvalidState with a generic
+  // application error: real callers rely on the nested fault contract.
+  // The Controller public API refuses before touching its route table.
+  if (impl_->active->controller &&
+      impl_->active->controller->state() != ControllerState::Mounted) {
+    auto refused = impl_->active->controller->retire_scoped_event_handlers(scope);
+    if (refused) {
+      return {fail(DesktopApplicationErrorCode::InvalidState,
+                   DesktopApplicationStage::ControllerEventRetirement,
+                   "controller unexpectedly accepted route retirement outside Mounted")};
+    }
+    auto error = fail(DesktopApplicationErrorCode::ControllerEventRetirementFailed,
+                      DesktopApplicationStage::ControllerEventRetirement,
+                      refused.error.message);
+    error.controller_error = std::move(refused.error);
+    return {std::move(error)};
+  }
   // The exact compiler ledger, including anonymous/Widget roots, must
   // still match the currently mounted Box before any route marker is staged.
   const auto topology = inspect_scoped_component_topology(scope);
