@@ -206,6 +206,10 @@ protected:
   bool dirty_ = true;
 
 private:
+  // The one Box is already the sole owner of Widget allocation/lifetime.
+  // Its read-only subtree preflight must validate the native host link
+  // without allocating, dispatching, or exposing it as a public Widget API.
+  friend class Box;
   Element* host_element_ = nullptr;
   bool semantic_tree_rendering_ = false;
   std::unordered_map<Symbol, Element*, SymbolHash> parts_;
