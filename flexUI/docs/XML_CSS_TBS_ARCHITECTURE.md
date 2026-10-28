@@ -682,3 +682,18 @@ rechecks generation and queue tombstone, rejecting reentrant reload.
 The returned result certifies only service worker retirement, not Widget or
 Binding observer teardown, physical deletion, DLL unload or safe unmount.
 No `unmount(scope)` implementation; #302 Draft, #298/#275 Open.
+
+## 2026-10-28 P4.4 M4b5f — no stale token re-admission after scoped JOIN
+
+The authoritative queue's existing cancellation lease now has a separate
+atomic `retired` bit, set on every real terminal consumption or slot
+discard BEFORE the queue drops ownership. This is distinct from a cooperative
+`requested` cancellation signal. Native PluginModule checks the existing
+lease's exact token/generation and refuses stale/retired/cancelled requests at
+submission, so a copied host request cannot start new work for an already
+drained and joined scope after terminal consumption. No second token-owner
+registry, raw pointer persistence, retry or alternate provider was added.
+
+Queued lease retirement is still NOT external worker exit. Physical unmount
+still requires the separate exact-scope provider JOIN, Widget/Binding lifetime
+and no-throw physical subtree commit; #302 stays Draft and unmerged.

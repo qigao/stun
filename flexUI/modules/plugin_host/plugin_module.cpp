@@ -396,7 +396,8 @@ ApplicationServiceSubmitResult PluginModule::try_submit(
   if (!request.token || request.script_request_id == 0 ||
       (request.cancellation &&
        (request.cancellation->token().id != request.token.id ||
-        request.cancellation->token().generation != request.token.generation))) {
+        request.cancellation->token().generation != request.token.generation ||
+        request.cancellation->requested() || request.cancellation->retired()))) {
     std::lock_guard<std::mutex> lock(slots_mutex_);
     ++statistics_.rejected;
     return {submit_error(ApplicationServiceSubmitErrorCode::InvalidRequest,

@@ -50,6 +50,10 @@ void release_string(std::string &value) noexcept {
 }
 
 void clear_slot(RequestSlot &slot) noexcept {
+  // A retained C++ request may outlive terminal consumption or even this
+  // queue generation. Mark the SAME authoritative lease stale before removing
+  // it, so a reused token cannot start a new worker after scoped JOIN.
+  if (slot.cancellation) slot.cancellation->retire();
   slot.cancellation.reset();
   release_string(slot.origin_scope);
   release_string(slot.capability);
