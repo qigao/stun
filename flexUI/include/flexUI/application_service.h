@@ -8,6 +8,8 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <string_view>
+#include <utility>
 
 namespace flexUI {
 
@@ -23,17 +25,21 @@ public:
   ApplicationServiceCancellationLease &operator=(const ApplicationServiceCancellationLease &) = delete;
 
   ApplicationRequestToken token() const noexcept { return token_; }
+  /// Trusted immutable compiler scope from the one owning request queue.
+  std::string_view origin_scope() const noexcept { return origin_scope_; }
   bool requested() const noexcept {
     return requested_.load(std::memory_order_acquire);
   }
 
 private:
-  explicit ApplicationServiceCancellationLease(ApplicationRequestToken token) noexcept
-      : token_(token) {}
+  explicit ApplicationServiceCancellationLease(ApplicationRequestToken token,
+                                               std::string scope)
+      : token_(token), origin_scope_(std::move(scope)) {}
   void request_cancel() noexcept {
     requested_.store(true, std::memory_order_release);
   }
   ApplicationRequestToken token_;
+  const std::string origin_scope_;
   std::atomic<bool> requested_{false};
   friend class ApplicationServiceRequestQueue;
 };

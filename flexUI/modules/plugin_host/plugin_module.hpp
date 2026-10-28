@@ -10,6 +10,7 @@
 #include <memory>
 #include <mutex>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace flexUI::plugin_host_detail {
@@ -42,6 +43,9 @@ public:
   PluginHostResult start();
   void disable_submissions() noexcept;
   PluginHostResult stop(std::chrono::milliseconds timeout);
+  /// Independent scope worker join; never a queue-drain or unmount grant.
+  PluginHostResult join_scoped_workers(std::string_view scope,
+                                       std::chrono::milliseconds timeout);
   PluginHostStatistics statistics() const noexcept;
   const std::vector<ApplicationServiceDescriptor> &services() const noexcept;
   const std::string &plugin_id() const noexcept;

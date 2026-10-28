@@ -315,7 +315,7 @@ ApplicationServiceRequestQueue::reserve(const ApplicationCommandBatch &batch) {
                           command.payload});
       scoped_owners.emplace_back(batch.origin_scope());
       cancel_leases.emplace_back(new ApplicationServiceCancellationLease(
-          {token_id, impl_->generation}));
+          {token_id, impl_->generation}, scoped_owners.back()));
       reservation.emplace_back(free_indices[index], token_id);
     }
 

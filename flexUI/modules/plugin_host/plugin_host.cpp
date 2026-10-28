@@ -391,6 +391,45 @@ PluginHost::~PluginHost() {
   impl_->state.store(PluginHostState::Stopped);
 }
 
+PluginHostResult PluginHost::join_scoped_workers(
+    std::string_view scope, std::chrono::milliseconds timeout) {
+  if (std::this_thread::get_id() != impl_->owner_thread) {
+    return {make_error(PluginHostErrorCode::WrongThread, "join_scope",
+                       "scoped join belongs to the host owner thread")};
+  }
+  if (impl_->state.load() != PluginHostState::Started) {
+    return {make_error(PluginHostErrorCode::InvalidState, "join_scope",
+                       "scoped join requires started PluginHost")};
+  }
+  if (timeout.count() < 0) {
+    return {make_error(PluginHostErrorCode::InvalidLimits, "join_scope",
+                       "scoped join timeout must not be negative")};
+  }
+  const auto starts = [](char ch) {
+    return (ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z') || ch == '_';
+  };
+  const auto continues = [&](char ch) {
+    return starts(ch) || (ch >= '0' && ch <= '9') || ch == '-';
+  };
+  if (scope.empty() || scope.size() > 253 || !starts(scope.front()) ||
+      !std::all_of(scope.begin() + 1, scope.end(), continues)) {
+    return {make_error(PluginHostErrorCode::InvalidScope, "join_scope",
+                       "scope must be a compiler-valid ASCII identifier")};
+  }
+  const bool infinite = timeout == std::chrono::milliseconds::max();
+  const auto deadline = infinite ? std::chrono::steady_clock::time_point::max()
+                                 : std::chrono::steady_clock::now() + timeout;
+  for (const auto &module : impl_->modules) {
+    const auto now = std::chrono::steady_clock::now();
+    const auto remaining = infinite ? std::chrono::milliseconds::max()
+        : now >= deadline ? std::chrono::milliseconds(0)
+        : std::chrono::duration_cast<std::chrono::milliseconds>(deadline - now);
+    const auto joined = module->join_scoped_workers(scope, remaining);
+    if (!joined) return joined;
+  }
+  return {};
+}
+
 PluginHostResult PluginHost::stop(std::chrono::milliseconds timeout) {
   if (std::this_thread::get_id() != impl_->owner_thread) {
     return {make_error(PluginHostErrorCode::WrongThread, "stop",
