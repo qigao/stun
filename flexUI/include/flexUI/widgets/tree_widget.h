@@ -35,6 +35,9 @@ public:
   bool handle_event(const Event& event, Element& elem) override;
   void update(float delta_ms, Element& elem) override;
   const char* type_name() const override { return "TreeWidget"; }
+  WidgetLocalBorrowSnapshot inspect_local_borrowers() const noexcept override {
+    return {true, on_select_ ? std::size_t{1} : std::size_t{0}, !roots_.empty() || selected_ != nullptr || hover_ != nullptr};
+  }
 
   std::shared_ptr<TreeNode> add_node(const std::string& id, const std::string& label, TreeNode* parent = nullptr);
   void remove_node(const std::string& id);

@@ -32,6 +32,9 @@ public:
   bool handle_event(const Event& event, Element& elem) override;
   void update(float delta_ms, Element& elem) override;
   const char* type_name() const override { return "ImageWidget"; }
+  WidgetLocalBorrowSnapshot inspect_local_borrowers() const noexcept override {
+    return {true, on_load_ ? std::size_t{1} : std::size_t{0}, !src_.empty()};
+  }
 
   // Image source
   const std::string& src() const { return src_; }

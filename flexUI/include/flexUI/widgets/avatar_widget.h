@@ -57,6 +57,9 @@ public:
         return false;
     }
     const char* type_name() const override { return "AvatarWidget"; }
+  WidgetLocalBorrowSnapshot inspect_local_borrowers() const noexcept override {
+    return {true, 0, !image_url_.empty()};
+  }
     bool paints_host_box() const override { return true; }
 
     // Properties

@@ -43,6 +43,9 @@ public:
     return false;
   }
   const char* type_name() const override { return "CalendarWidget"; }
+  WidgetLocalBorrowSnapshot inspect_local_borrowers() const noexcept override {
+    return {true, on_select_ ? std::size_t{1} : std::size_t{0}, hovered_day_ != 0};
+  }
   bool paints_host_box() const override { return true; }
 
   Date selected_date() const { return selected_; }
