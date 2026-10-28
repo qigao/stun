@@ -266,3 +266,46 @@ candidate exports Ninja's actual C/C++ compile commands and requires
 Windows `/Z7` present with `/Zi` absent. This also triggers a second
 same-source-head CI run, whose Windows result must prove REAL restored
 compiler cache hits rather than treating the first save as a warm run.
+
+## UI Core C11 released-SDK native qualification
+
+`.github/workflows/ui-core-c11.yml` now uses the existing SHA-256
+verified `setup-ccache` action for **20 original native C11 tests** on
+Windows x64/MSVC (Ninja generator, genuine Visual C compiler) and macOS
+ARM64/AppleClang (Ninja). Both generated `build.ninja` graphs must
+actually contain the `ccache` compiler launcher before any build is
+considered valid. Original Salts.Native released SDK provenance,
+SHA-256 validation, and 20/20 CTests are unchanged.
+
+The `-fsyntax-only` C11 header/consumer jobs deliberately remain
+independent of ccache: they produce no cacheable object output and
+must not be reported as compiler-cache evidence. Isolated output cache
+profiles (`ui-core-c11-windows`, `ui-core-c11-macos`) avoid mixing
+native build configurations with FlexUI/Tango/GraphLayout.
+
+Changes to `setup-ccache/**` and `report-ccache.sh` trigger both the
+workflow and its `ci-affected.sh` native-scope check. The actual
+compiler invocation/hit/miss counts, 20 CTests and Ninja
+`compile_commands.json` are kept as exact-head CI evidence.
+No warm-cache benefit or speedup is claimed until independently
+measured on another exact SHA.
+
+## UI Core C11 first verified cold-run evidence (PR #307)
+
+On immutable candidate `0eaca57a1d74051cf72c8e59045f1cdc95e9be58`,
+[UI C11 Reflection Contract #40716771115](https://github.com/qigao/stun/actions/runs/40716771115)
+completed successfully, including both original released-SDK 20/20 native
+CTest suites, independent strict syntax-only header tests and the normal
+public/runtime contract workflows.
+
+| Target | Cacheable compiler calls | Hits | Misses | Other calls |
+| --- | ---: | ---: | ---: | ---: |
+| macOS ARM64 AppleClang Ninja | 28 | 0 | 28 | 0 |
+| Windows x64 MSVC Ninja | 26 | 0 | 26 | 4 |
+
+Both compiler caches were saved to immutable, separate ccache 4.14.2
+keys. Cold zero-hit statistics are expected. The next workflow-only
+comment commit intentionally preserves the production C sources and
+CMake compiler configuration, forcing real native jobs to restore
+the prior cache by exact platform/profile prefix; confirm restored
+cache hit statistics instead of relying on the presence of archives.

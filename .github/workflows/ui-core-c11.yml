@@ -1,5 +1,8 @@
 name: UI C11 Reflection Contract
 
+# C11 compiler-cache warm qualification: this comment changes ONLY the
+# workflow HEAD, not C11 sources/compiler flags. Native jobs must restore
+# the previous cold-head compiler-output archive and run all 20 CTests.
 on:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review, labeled]
@@ -7,6 +10,8 @@ on:
       - 'shared/markdown/**'
       - 'CMakeLists.txt'
       - '.github/workflows/ui-core-c11.yml'
+      - '.github/actions/setup-ccache/**'
+      - '.github/scripts/report-ccache.sh'
       - '.github/scripts/ci-affected.sh'
   push:
     branches: [master]
@@ -14,6 +19,8 @@ on:
       - 'shared/markdown/**'
       - 'CMakeLists.txt'
       - '.github/workflows/ui-core-c11.yml'
+      - '.github/actions/setup-ccache/**'
+      - '.github/scripts/report-ccache.sh'
       - '.github/scripts/ci-affected.sh'
 
 permissions:
@@ -60,6 +67,8 @@ jobs:
           bash .github/scripts/ci-affected.sh \
             'shared/markdown/*' 'CMakeLists.txt' \
             '.github/workflows/ui-core-c11.yml' \
+            '.github/actions/setup-ccache/*' \
+            '.github/scripts/report-ccache.sh' \
             '.github/scripts/ci-affected.sh'
 
   sdk-releases:
@@ -233,6 +242,26 @@ jobs:
         env:
           EXPECTED_STUN_SHA: ${{ needs.changes.outputs.source_sha }}
         run: test "$(git rev-parse HEAD)" = "$EXPECTED_STUN_SHA"
+      - name: Activate real x64 MSVC for Ninja
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Install verified Windows C11 compiler-output cache
+        uses: ./.github/actions/setup-ccache
+        with:
+          profile: ui-core-c11-windows
+          source_sha: ${{ needs.changes.outputs.source_sha }}
+
+      - name: Require MSVC and Ninja compiler-launcher prerequisites
+        shell: bash
+        run: |
+          set -euo pipefail
+          command -v cl
+          command -v ninja
+          command -v ccache
+          ninja --version
+
       - name: Restore immutable tagged Salts.Native release
         shell: bash
         env:
@@ -286,7 +315,9 @@ jobs:
           set -euo pipefail
           sdk="$PWD/build/salts-native-release/sdk/windows-x64"
           test -d "$sdk/lib/cmake/Salts"
-          cmake -S shared/markdown -B build/ui-core-windows -G "Visual Studio 17 2022" -A x64 \
+          cmake -S shared/markdown -B build/ui-core-windows -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER=cl \
+            -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
             -DBUILD_TESTING=ON \
             "-DCMAKE_PREFIX_PATH=$(cygpath -w "$sdk")" \
             "-DSalts_DIR=$(cygpath -w "$sdk/lib/cmake/Salts")" \
@@ -295,6 +326,8 @@ jobs:
           # Standalone Stun::UICore has 20 CTests. Build all genuine native
           # C11 targets, not only the seven earlier smoke tests. Tango is
           # intentionally absent: no second Markdown parser or fallback.
+          test -f build/ui-core-windows/build.ninja
+          grep -Fq ccache build/ui-core-windows/build.ninja
           cmake --build build/ui-core-windows --config Release --parallel 2
 
       - name: Execute native parser ownership and SAFE HTML tests
@@ -341,6 +374,22 @@ jobs:
           print("Windows x64 full standalone Stun C11 CTests: 20/20")
           PY
 
+      - name: Require Windows MSVC compiler-cache evidence
+        shell: bash
+        run: bash .github/scripts/report-ccache.sh ui-core-c11-windows
+
+      - name: Archive Windows C11 tests and compiler-cache statistics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ui-core-c11-windows-${{ needs.changes.outputs.source_sha }}
+          retention-days: 3
+          if-no-files-found: warn
+          path: |
+            build/windows-native-c11-results.xml
+            build/windows-native-c11.log
+            build/ui-core-windows/compile_commands.json
+            ${{ runner.temp }}/stun-ccache-stats-ui-core-c11-windows.tsv
 
   c11-macos-released-sdk-runtime:
     name: C11 native runtime / macOS ARM64 released Salts
@@ -360,6 +409,22 @@ jobs:
         env:
           EXPECTED_STUN_SHA: ${{ needs.changes.outputs.source_sha }}
         run: test "$(git rev-parse HEAD)" = "$EXPECTED_STUN_SHA"
+      - name: Install verified macOS C11 compiler-output cache
+        uses: ./.github/actions/setup-ccache
+        with:
+          profile: ui-core-c11-macos
+          source_sha: ${{ needs.changes.outputs.source_sha }}
+
+      - name: Require ARM64 Clang and Ninja compiler-launcher prerequisites
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(uname -m)" = arm64
+          command -v clang
+          command -v ninja
+          command -v ccache
+          ninja --version
+
       - name: Restore canonical tagged Salts.Native macOS ARM64 SDK
         shell: bash
         env:
@@ -410,14 +475,17 @@ jobs:
           set -euo pipefail
           sdk="$PWD/build/salts-native-release/sdk/macos-arm64"
           test -d "$sdk/lib/cmake/Salts"
-          cmake -S shared/markdown -B build/ui-core-macos -G "Unix Makefiles" \
-            -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON \
+          cmake -S shared/markdown -B build/ui-core-macos -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
+            -DBUILD_TESTING=ON \
             -DCMAKE_OSX_ARCHITECTURES=arm64 \
             "-DCMAKE_PREFIX_PATH=$sdk" "-DSalts_DIR=$sdk/lib/cmake/Salts" \
             -DCMAKE_FIND_USE_PACKAGE_REGISTRY=OFF \
             -DCMAKE_FIND_USE_SYSTEM_PACKAGE_REGISTRY=OFF
           # Build all 20 native C11 conformance tests against immutable
           # published macos-arm64 Salts SDK. No Tango dependency.
+          test -f build/ui-core-macos/build.ninja
+          grep -Fq ccache build/ui-core-macos/build.ninja
           cmake --build build/ui-core-macos --parallel 2
 
       - name: Execute real macOS parser/HTML/ownership conformance
@@ -464,3 +532,20 @@ jobs:
                          ("failure", "error", "skipped"))
           print("macOS ARM64 full standalone Stun C11 CTests: 20/20")
           PY
+
+      - name: Require macOS ARM64 compiler-cache evidence
+        shell: bash
+        run: bash .github/scripts/report-ccache.sh ui-core-c11-macos
+
+      - name: Archive macOS C11 tests and compiler-cache statistics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ui-core-c11-macos-${{ needs.changes.outputs.source_sha }}
+          retention-days: 3
+          if-no-files-found: warn
+          path: |
+            build/macos-native-c11-results.xml
+            build/macos-native-c11.log
+            build/ui-core-macos/compile_commands.json
+            ${{ runner.temp }}/stun-ccache-stats-ui-core-c11-macos.tsv
