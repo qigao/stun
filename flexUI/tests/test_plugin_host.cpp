@@ -627,6 +627,21 @@ suite("FlexUI PluginHost") {
       check_null(built.registry.get());
     }
 
+    it("wakes an actually sleeping worker when global stop races its wait") {
+      auto built = build_echo_host();
+      check_true(static_cast<bool>(built));
+      if (!built) return;
+      RecordingSink sink;
+      auto value = request(81, "wait-stop");
+      auto endpoint = resolve(built, value).endpoint;
+      check_not_null(endpoint.get());
+      if (!endpoint) return;
+      check_true(static_cast<bool>(endpoint->try_submit(value, sink)));
+      check_true(static_cast<bool>(built.host->stop(std::chrono::seconds(2))));
+      check_equal(static_cast<int>(built.host->state()),
+                  static_cast<int>(flexUI::PluginHostState::Stopped));
+    }
+
     it("keeps the DLL loaded after timeout and permits a later join") {
       auto built = build_echo_host();
       check_true(static_cast<bool>(built));

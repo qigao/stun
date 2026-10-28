@@ -237,7 +237,8 @@ submit_request(flexui_plugin_instance *opaque,
     throw 7;
   }
   if (operation != "retry" && operation != "block" &&
-      operation != "deferred-copy" && operation != "cancel-watch") {
+      operation != "deferred-copy" && operation != "cancel-watch" &&
+      operation != "wait-stop") {
     write_error(error, "operation is unsupported");
     return FLEXUI_PLUGIN_STATUS_REJECTED;
   }
@@ -278,6 +279,11 @@ submit_request(flexui_plugin_instance *opaque,
               }
               std::this_thread::sleep_for(kRetryDelay);
             }
+          } else if (operation == "wait-stop") {
+            std::unique_lock<std::mutex> lock(instance.mutex);
+            instance.idle.wait(lock, [&instance] {
+              return instance.stopping.load();
+            });
           } else if (operation == "block") {
             std::this_thread::sleep_for(kBlockDelay);
             if (!instance.stopping.load()) {
@@ -329,7 +335,12 @@ stop_instance(flexui_plugin_instance *opaque,
     return FLEXUI_PLUGIN_STATUS_REJECTED;
   }
 #endif
-  instance.stopping.store(true);
+  {
+    // Hold the SAME mutex used by both worker wait predicates, so a stop
+    // cannot slip between a false predicate read and wait admission.
+    std::lock_guard<std::mutex> lock(instance.mutex);
+    instance.stopping.store(true);
+  }
   instance.idle.notify_all();
   return FLEXUI_PLUGIN_STATUS_OK;
 }
@@ -438,6 +449,8 @@ const flexui_plugin_operation_descriptor_v2 operations[] = {
     {sizeof(flexui_plugin_operation_descriptor_v2), 0, literal_view("retry"),
      4096, {0}},
     {sizeof(flexui_plugin_operation_descriptor_v2), 0, literal_view("block"),
+     4096, {0}},
+    {sizeof(flexui_plugin_operation_descriptor_v2), 0, literal_view("wait-stop"),
      4096, {0}},
     {sizeof(flexui_plugin_operation_descriptor_v2), 0, literal_view("throw"),
      4096, {0}},

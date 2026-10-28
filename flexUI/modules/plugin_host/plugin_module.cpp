@@ -553,6 +553,14 @@ PluginHostResult PluginModule::join_scoped_workers(
   }
   {
     std::lock_guard<std::mutex> lock(slots_mutex_);
+    // A synchronous submit may POST its terminal before try_submit itself
+    // returns and releases the borrowed C request, including origin_scope.
+    // Do not attest to worker retirement while ANY submit bridge is active.
+    if (active_submit_calls_ != 0) {
+      return {host_error(PluginHostErrorCode::JoinTimedOut, "join_scope",
+                         path(), "plugin submit bridge is still active",
+                         plugin_id_, FLEXUI_PLUGIN_STATUS_BUSY)};
+    }
     for (const auto &slot : slots_) {
       if (slot.state != SlotState::Free && slot.cancellation &&
           slot.cancellation->origin_scope() == scope) {
