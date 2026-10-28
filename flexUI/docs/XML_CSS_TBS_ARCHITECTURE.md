@@ -763,3 +763,20 @@ callbacks; the default audit still refuses it, rather than interpreting zero
 listener count as proof. Built-in Button loading state must report an active
 Widget-local owner; a completed-but-not-reclaimed Transition and Animation
 must still appear as retained owners after `has_active()==false`.
+
+## 2026-10-28 P4.4 M4b6c — nine additional built-in Widget owner probes
+
+Checkbox/Radio/Switch/Slider now report native `std::function` change
+callbacks and in-progress control animations/drag state. ProgressBar exposes
+an active indeterminate animation, Select and Dropdown their overlays and
+relevant animation state. Tabs reports native callbacks, indicator animation
+AND any externally borrowed page Element pointer (regardless of animation);
+Accordion reports callbacks and unsynchronized section animation progress.
+All are allocation-free, read-only per-Widget probes. No callback is invoked
+or released and no Widget owner table has been introduced. Tests in the
+cross-platform headless `test_ui_document` cover callbacks, overlay open,
+borrowed Tabs page, accordion animation, and exact-scope Box isolation.
+
+A zero borrower count is NOT a physical unmount contract: other built-ins,
+third-party Widgets, owned Widget part lifetimes and the compiled tree/Binding
+commit remain outstanding. #302 stays Draft; #298/#275 open.

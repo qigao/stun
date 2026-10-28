@@ -1,5 +1,14 @@
 #include <flexUI.h>
 #include <flexUI/widgets/label_widget.h>
+#include <flexUI/widgets/checkbox_widget.h>
+#include <flexUI/widgets/radio_widget.h>
+#include <flexUI/widgets/switch_widget.h>
+#include <flexUI/widgets/slider_widget.h>
+#include <flexUI/widgets/progressbar_widget.h>
+#include <flexUI/widgets/select_widget.h>
+#include <flexUI/widgets/dropdown_widget.h>
+#include <flexUI/widgets/tabs_widget.h>
+#include <flexUI/widgets/accordion_widget.h>
 #include <flexUI/widget.h>
 #include <flexUI/keyed_repeater.h>
 
@@ -1999,5 +2008,127 @@ spec("Scoped XML components preserve local label and accessibility references") 
     check(merged.error.code == UiDocumentErrorCode::InvalidComponentScope);
     check_equal(app.program->definition().root.children.size(),
                 std::size_t{1});
+  }
+}
+
+spec("FlexUI M4b6c built-in Widget owner audits") {
+  it("counts actual form callbacks and hidden animation ownership without retiring") {
+    flexUI::CheckboxWidget checkbox("Chosen");
+    flexUI::RadioWidget radio;
+    flexUI::SwitchWidget toggle;
+    flexUI::SliderWidget slider;
+    flexUI::ProgressBarWidget progress;
+    check(checkbox.inspect_local_borrowers().audited);
+    check(radio.inspect_local_borrowers().audited);
+    check(toggle.inspect_local_borrowers().audited);
+    check(slider.inspect_local_borrowers().audited);
+    check(progress.inspect_local_borrowers().audited);
+    check_equal(checkbox.inspect_local_borrowers().native_callback_owners, std::size_t{0});
+    checkbox.set_change_callback([](bool) {});
+    radio.set_change_callback([](const std::string&, const std::string&) {});
+    toggle.set_change_callback([](bool) {});
+    slider.set_change_callback([](float) {});
+    for (const flexUI::Widget* owner :
+         {static_cast<flexUI::Widget*>(&checkbox), static_cast<flexUI::Widget*>(&radio),
+          static_cast<flexUI::Widget*>(&toggle), static_cast<flexUI::Widget*>(&slider)}) {
+      check_equal(owner->inspect_local_borrowers().native_callback_owners, std::size_t{1});
+    }
+    check_equal(progress.inspect_local_borrowers().native_callback_owners, std::size_t{0});
+
+    checkbox.set_checked(true);
+    radio.set_checked(true);
+    toggle.set_checked(true);
+    progress.set_indeterminate(true);
+    check(checkbox.inspect_local_borrowers().interaction_or_callback_active);
+    check(radio.inspect_local_borrowers().interaction_or_callback_active);
+    check(toggle.inspect_local_borrowers().interaction_or_callback_active);
+    check(progress.inspect_local_borrowers().interaction_or_callback_active);
+    progress.set_indeterminate(false);
+    check_false(progress.inspect_local_borrowers().interaction_or_callback_active);
+    checkbox.set_change_callback({});
+    radio.set_change_callback({});
+    toggle.set_change_callback({});
+    slider.set_change_callback({});
+    check_equal(checkbox.inspect_local_borrowers().native_callback_owners, std::size_t{0});
+    check_equal(radio.inspect_local_borrowers().native_callback_owners, std::size_t{0});
+    check_equal(toggle.inspect_local_borrowers().native_callback_owners, std::size_t{0});
+    check_equal(slider.inspect_local_borrowers().native_callback_owners, std::size_t{0});
+    // Clearing callbacks does NOT silently retire a still-active animation.
+    check(checkbox.inspect_local_borrowers().interaction_or_callback_active);
+  }
+
+  it("exposes open overlays, tab page borrows and accordion animation") {
+    flexUI::SelectWidget select({"one", "two"});
+    flexUI::DropdownWidget dropdown;
+    flexUI::TabsWidget tabs;
+    flexUI::AccordionWidget accordion;
+    check(select.inspect_local_borrowers().audited);
+    check(dropdown.inspect_local_borrowers().audited);
+    check(tabs.inspect_local_borrowers().audited);
+    check(accordion.inspect_local_borrowers().audited);
+    select.set_change_callback([](int, const std::string&) {});
+    dropdown.set_change_callback([](const std::string&) {});
+    tabs.set_change_callback([](int, const std::string&) {});
+    accordion.set_change_callback([](const std::string&, bool) {});
+    check_equal(select.inspect_local_borrowers().native_callback_owners, std::size_t{1});
+    check_equal(dropdown.inspect_local_borrowers().native_callback_owners, std::size_t{1});
+    check_equal(tabs.inspect_local_borrowers().native_callback_owners, std::size_t{1});
+    check_equal(accordion.inspect_local_borrowers().native_callback_owners, std::size_t{1});
+
+    select.set_expanded(true);
+    dropdown.open();
+    flexUI::Element foreign_page;
+    tabs.add_tab("First", "first", &foreign_page);
+    accordion.add_section("Details", "details");
+    accordion.expand("details");
+    check(select.inspect_local_borrowers().interaction_or_callback_active);
+    check(dropdown.inspect_local_borrowers().interaction_or_callback_active);
+    check(tabs.inspect_local_borrowers().interaction_or_callback_active);
+    check(accordion.inspect_local_borrowers().interaction_or_callback_active);
+    // An Element* page borrowed by Tabs must NOT be discarded as harmless.
+    tabs.clear_tabs();
+    check_false(tabs.inspect_local_borrowers().interaction_or_callback_active);
+    dropdown.close();
+    check_false(dropdown.inspect_local_borrowers().interaction_or_callback_active);
+    select.set_expanded(false);
+    // An overlay can still retain animation height after it closes.
+    check(select.inspect_local_borrowers().interaction_or_callback_active);
+  }
+
+  it("reports only live scoped native Widget ownership in the one Box") {
+    flexUI::Box box(nullptr);
+    auto* root = box.create("main", "root");
+    auto* target = box.create_widget<flexUI::CheckboxWidget>(
+        "checkbox", "scope", std::string("One"), false);
+    auto* sibling = box.create_widget<flexUI::ProgressBarWidget>(
+        "progress", "sibling", 0.0f, false);
+    root->append(target);
+    root->append(sibling);
+    box.set_root(root);
+    auto* owned = static_cast<flexUI::CheckboxWidget*>(target->widget);
+    const auto before = box.inspect_subtree_borrowers(target);
+    check(static_cast<bool>(before));
+    check_equal(before.widget_hosts, std::size_t{1});
+    check_equal(before.unverified_widget_hosts, std::size_t{0});
+    check_equal(before.native_widget_callback_owners, std::size_t{0});
+    const auto other = box.inspect_subtree_borrowers(sibling);
+    check(static_cast<bool>(other));
+    check_equal(other.active_widget_local_borrowers, std::size_t{0});
+
+    owned->set_change_callback([](bool) {});
+    const auto callbacks = box.inspect_subtree_borrowers(target);
+    check(static_cast<bool>(callbacks));
+    check_equal(callbacks.native_widget_callback_owners, std::size_t{1});
+    check_equal(box.inspect_subtree_borrowers(sibling).native_widget_callback_owners,
+                std::size_t{0});
+    owned->set_checked(true);
+    const auto active = box.inspect_subtree_borrowers(target);
+    check(static_cast<bool>(active));
+    check_equal(active.active_widget_local_borrowers, std::size_t{1});
+    check_equal(box.inspect_subtree_borrowers(sibling).active_widget_local_borrowers,
+                std::size_t{0});
+    // Existing compiled/Widget guards remain intact despite all audits.
+    check_false(box.retire_bound_structural_subtree("scope"));
+    check_not_null(box.get_by_id("scope"));
   }
 }
