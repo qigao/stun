@@ -307,11 +307,11 @@ spec("FlexUI desktop scoped service quiescence facade") {
     const auto quiesced = app.quiesce_retired_scoped_service_requests("sale");
     check(quiesced);
     check_equal(quiesced.cancelled_queued, std::size_t{1});
-    check_equal(quiesced.awaiting_host_completion, std::size_t{1});
+    check_equal(quiesced.newly_suppressed_in_flight, std::size_t{1});
     const auto repeated = app.quiesce_retired_scoped_service_requests("sale");
     check(repeated);
     check_equal(repeated.cancelled_queued, std::size_t{0});
-    check_equal(repeated.awaiting_host_completion, std::size_t{0});
+    check_equal(repeated.newly_suppressed_in_flight, std::size_t{0});
     check_equal(app.generation(), generation);
     check_not_null(app.box().get_by_id("sale::action"));
     check(app.controller()->has_active_event_binding(

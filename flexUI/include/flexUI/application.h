@@ -147,7 +147,9 @@ struct DesktopApplicationResult {
 /// or detach Elements/Bindings/Widgets/resources.
 struct DesktopApplicationScopedServiceQuiesceResult {
   std::size_t cancelled_queued = 0;
-  std::size_t awaiting_host_completion = 0;
+  /// Newly marked InFlight tokens on this call, NOT total outstanding host
+  /// work. The worker continues until its real completion is observed.
+  std::size_t newly_suppressed_in_flight = 0;
   DesktopApplicationError error;
 
   explicit operator bool() const noexcept { return !static_cast<bool>(error); }
