@@ -309,3 +309,71 @@ comment commit intentionally preserves the production C sources and
 CMake compiler configuration, forcing real native jobs to restore
 the prior cache by exact platform/profile prefix; confirm restored
 cache hit statistics instead of relying on the presence of archives.
+
+## gCanvas native GLES and Android NDK cross-compiler gates
+
+The Linux OpenGLES pixel smoke and gCanvas package contract now use
+the same SHA-256 verified pinned ccache 4.14.2 action as the other
+native jobs. Three isolated profiles cover:
+- `gcanvas-gles-runtime`: actual Linux Debug OpenGLES and pixel smoke
+- `gcanvas-installed-consumer`: Linux Release GLES producer and real
+  installed `find_package(gCanvas)` consumer built in the same job
+- `gcanvas-android-arm64`: real NDK arm64-v8a C/C++ cross compiler under
+  the pinned Android toolchain, preserving actual NDK `--target` flags
+
+Both CMake `CMAKE_C_COMPILER_LAUNCHER` and
+`CMAKE_CXX_COMPILER_LAUNCHER` are set before Ninja configuration.
+The generated `build.ninja` files must contain `ccache`.
+The compiler-output cache is version/profile/platform/HEAD-scoped and
+does NOT persist an NDK/host object or link artifact across targets.
+No target ABI, sanitized runtime test, package metadata or GPU test
+is weakened.
+
+Changes in the shared ccache action or stats script must trigger these
+workflows AND their separate `ci-affected.sh` classifier. Actual
+cacheable compilations, hit/miss metrics and existing native test
+artifacts are preserved independently. One cold run verifies real
+compiler invocation; warm-hit evidence requires a subsequent same-
+toolchain HEAD with unchanged C/C++ source and flags.
+
+## gCanvas first verified cold-run evidence (PR #308)
+
+[Exact cold HEAD `62f1fa96`](https://github.com/qigao/stun/commit/62f1fa96f1d0f4421b6fb7e8722dc518f8699d9b),
+[OpenGLES native run #40718548050](https://github.com/qigao/stun/actions/runs/40718548050)
+and [package/NDK run #40718548133](https://github.com/qigao/stun/actions/runs/40718548133)
+completed **SUCCESS**, including the actual GLSL/GLES pixel smoke,
+installed package consumer and NDK ABI target-contract gates.
+
+| Build profile | Cacheable C/C++ compilations | Hits | Misses |
+| --- | ---: | ---: | ---: |
+| `gcanvas-gles-runtime` | 17 | 0 | 17 |
+| `gcanvas-installed-consumer` | 17 | 1 | 16 |
+| `gcanvas-android-arm64` | 16 | 0 | 16 |
+
+All three compiler-output caches were saved with separate immutable
+ccache 4.14.2 keys; the one same-job native consumer hit is not
+cross-run evidence. The next SHA touches only these workflow comments
+and this documentation, so C++ sources, Android ABI/NDK toolchain and
+CMake flags remain identical. Follow-up runs must restore
+compiler-output caches via their prefix keys and report real hits on
+each of the **three** profiles; a zero-call result must fail.
+
+## Completed release qualification (2026-10-28)
+
+These are verified compiler-output hit counts from real native build jobs,
+not GitHub cache-restoration messages or measured wall-time speedups.
+
+| Accepted PR | Exact HEAD | Real cacheable calls / hits | Acceptance |
+| --- | --- | --- | --- |
+| [#307](https://github.com/qigao/stun/pull/307) Windows x64/MSVC C11 | `21a0e10f` | 26 / 26 (100%) | 20/20 native CTests |
+| [#307](https://github.com/qigao/stun/pull/307) macOS ARM64 C11 | `21a0e10f` | 28 / 28 (100%) | 20/20 native CTests |
+| [#308](https://github.com/qigao/stun/pull/308) Linux OpenGLES | `10b7f48a` | 17 / 17 (100%) | GLES pixel smoke |
+| [#308](https://github.com/qigao/stun/pull/308) Linux installed consumer | `10b7f48a` | 17 / 17 (100%) | `find_package(gCanvas)` |
+| [#308](https://github.com/qigao/stun/pull/308) Android NDK ARM64 | `10b7f48a` | 14 / 16 (87.5%) | NDK target/ABI checks |
+
+Full workflows: [UI C11 #40717285861](https://github.com/qigao/stun/actions/runs/40717285861),
+[GLES #40719262944](https://github.com/qigao/stun/actions/runs/40719262944),
+[package/NDK #40719262892](https://github.com/qigao/stun/actions/runs/40719262892).
+Cold snapshots and restored warm snapshots use unchanged production sources
+and compiler flags. The two NDK misses are legitimate, not test failures.
+No controlled wall-time benchmark has been run.

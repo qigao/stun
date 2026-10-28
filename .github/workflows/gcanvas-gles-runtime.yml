@@ -1,11 +1,16 @@
 name: gCanvas OpenGLES runtime
 
+# Warm-cache evidence: changing this comment does not modify any C/C++
+# source/flags, but forces a fresh exact-HEAD native Ninja build to restore
+# the previous commit's real compiler-output archive.
 on:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review, labeled]
     paths:
       - "shared/gcanvas/**"
       - ".github/workflows/gcanvas-gles-runtime.yml"
+      - ".github/actions/setup-ccache/**"
+      - ".github/scripts/report-ccache.sh"
       - ".github/scripts/ci-affected.sh"
   workflow_dispatch:
 
@@ -50,7 +55,7 @@ jobs:
       - name: Classify latest PR update
         id: scope
         shell: bash
-        run: bash .github/scripts/ci-affected.sh 'shared/gcanvas/*' '.github/workflows/gcanvas-gles-runtime.yml' '.github/scripts/ci-affected.sh'
+        run: bash .github/scripts/ci-affected.sh 'shared/gcanvas/*' '.github/workflows/gcanvas-gles-runtime.yml' '.github/actions/setup-ccache/*' '.github/scripts/report-ccache.sh' '.github/scripts/ci-affected.sh'
 
   gles-runtime:
     needs: changes
@@ -69,6 +74,12 @@ jobs:
         env:
           EXPECTED_STUN_SHA: ${{ needs.changes.outputs.source_sha }}
         run: test "$(git rev-parse HEAD)" = "$EXPECTED_STUN_SHA"
+      - name: Install verified OpenGLES compiler cache
+        uses: ./.github/actions/setup-ccache
+        with:
+          profile: gcanvas-gles-runtime
+          source_sha: ${{ needs.changes.outputs.source_sha }}
+
       - name: Install GLES build and runtime dependencies
         run: |
           sudo apt-get update
@@ -111,6 +122,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          test -f build/gcanvas-gles/build.ninja
+          grep -Fq ccache build/gcanvas-gles/build.ninja
           cmake --build build/gcanvas-gles --parallel 2 --verbose \
             --target gcanvas_opengles gcanvas_contract_test gcanvas_gles_smoke_test
           ! grep -q '/glad/' build/gcanvas-gles/compile_commands.json
@@ -127,3 +140,19 @@ jobs:
             ctest --test-dir build/gcanvas-gles \
               -R '^(gcanvas_contract|gcanvas_gles_smoke)$' \
               --no-tests=error --verbose --output-on-failure
+
+      - name: Require real OpenGLES compiler-cache statistics
+        shell: bash
+        run: bash .github/scripts/report-ccache.sh gcanvas-gles-runtime
+
+      - name: Archive OpenGLES pixel smoke and compiler-cache evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gcanvas-gles-runtime-${{ needs.changes.outputs.source_sha }}
+          retention-days: 3
+          if-no-files-found: warn
+          path: |
+            build/gcanvas-gles/Testing/Temporary/LastTest.log
+            build/gcanvas-gles/compile_commands.json
+            ${{ runner.temp }}/stun-ccache-stats-gcanvas-gles-runtime.tsv
