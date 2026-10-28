@@ -31,6 +31,39 @@ class Renderer;
 
 namespace flexUI {
 
+/// Read-only inspection of the live Box's OWN element/Widget/interaction
+/// borrowers for one validated mounted subtree. This is not proof of worker
+/// join, compiled-handler deregistration, or permission to destroy Elements.
+/// Call on Box's owner thread only; no observer callback is made.
+enum class BoxSubtreeBorrowErrorCode {
+  None,
+  WrongThread,
+  InvalidRoot,
+  InconsistentTree,
+  AllocationFailed,
+};
+
+struct BoxSubtreeBorrowSnapshot {
+  BoxSubtreeBorrowErrorCode error = BoxSubtreeBorrowErrorCode::None;
+  std::size_t mounted_elements = 0;
+  std::size_t widget_hosts = 0;
+  std::size_t binding_targets = 0;
+  std::size_t native_click_callbacks = 0;
+  std::size_t active_widget_hosts = 0;
+  std::size_t keyed_repeater_hosts = 0;
+  bool native_event_dispatching = false;
+  bool layout_or_widget_traversal_active = false;
+  bool focused_descendant = false;
+  bool hovered_descendant = false;
+  bool active_pointer_descendant = false;
+  bool captured_descendant = false;
+  bool local_interaction_state = false;
+
+  explicit operator bool() const noexcept {
+    return error == BoxSubtreeBorrowErrorCode::None;
+  }
+};
+
 class Renderer;
 class RenderManager;
 struct RenderFrame;
@@ -158,6 +191,14 @@ public:
   /// service completion cancellation is implied. Failure leaves the original
   /// tree, binding count and input schema untouched.
   bool retire_bound_structural_subtree(const std::string &root_id) noexcept;
+
+  /// Inspects CURRENT mounted subtree borrowers, including Widget-owned parts,
+  /// using an ephemeral bounded pointer-identity set. No resource detaches and
+  /// no compiled-program guard is bypassed. A report with zero flags still
+  /// does NOT establish safe unmount (endpoint join and Binding observer
+  /// retirement are independent owner contracts).
+  BoxSubtreeBorrowSnapshot
+  inspect_subtree_borrowers(const Element *subtree_root) const noexcept;
 
   // Diagnostics only; includes the Box-owned widget projections.
   std::size_t owned_element_count() const noexcept { return elements_.size(); }

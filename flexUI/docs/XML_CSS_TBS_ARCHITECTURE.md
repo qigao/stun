@@ -3,9 +3,33 @@
 状态：架构决策已采用，实施与验收按下列工作项推进
 日期：2026-08-31
 
-## 2026-10-28 P4.4 M4b1 编译来源对 live Box 的只读结构校验（Draft）
+## 2026-10-28 P4.4 M4b2 Box 内部真实运行时 Borrower 快照（Draft）
 
-当前 [Draft PR #300](https://github.com/qigao/stun/pull/300) 已直接基于 [PR #299](https://github.com/qigao/stun/pull/299) 合并后的 master `12d6dd48`；当前阶段需要自身精确 HEAD 的 Windows/macOS/Linux Sanitizer 和 Public dependency 验收，不能沿用 M4b0 已通过的 CI。
+新增 `Box::inspect_subtree_borrowers(root)`，明确与编译静态归属
+及真正的 `unmount(scope)` 分开：它在 Box 的 owner-thread，
+只读扫描真实 live subtree，包含 Box-owned 节点与 Widget-owned
+内部节点（不误把后者当作编译器生成节点），临时生成有界指针
+identity set，用于检查 Focus、Hover、Active、Mouse Capture、
+本地伪状态、Widget Host、实际 Binding Target、活动 Widget、
+Keyed Repeater 与 Native Click Callback；同时报告 Box 的原生
+事件 dispatch 和 layout/widget frame 正在借用整棵树的事实。
+
+检查期间不回调 Widget、Script、Plugin，不消费 service mailbox，
+不持久存储任何指针，不改动 binding 输入和代码生成状态。
+失败（跨 owner-thread、staged/unmounted root、损坏的内部
+父子链、内存不足）明确返回错误，不以缺失元素/借用计数 0
+伪装资源释放完毕。Widget 内部 part 数量有明确 hard bound，
+超过直接 fail-closed，不能无限递归。
+
+这些状态只是在当前调用瞬间观察到的借用关系；即使全部 0，
+仍然不构成 Widget/Binding 两向 observer 生命周期、
+CompiledUiProgram 路由清理、端点 worker 已 join 或
+safe-to-unmount 的证明。原来的 `compiled_program_installed_`
+和物理结构删除门禁不被绕开。后续 Owner 协作提交仍在 #298/#275。
+
+## 2026-10-28 P4.4 M4b1 编译来源对 live Box 的只读结构校验（已合并 PR #300）
+
+[PR #300](https://github.com/qigao/stun/pull/300) 已合并至 master `a80c2af2`；原精确 HEAD `899c46be` 的 Windows/macOS `#40637148790`、Linux Sanitizer/独立 LSan `#40637148796` 与 Public dependency `#40637148784` 均成功，合并树与验收树一致。M4b2 的真实 Borrower 只读检查必须重新基于这一 master 完整验收。
 
 
 `DesktopApplication::inspect_scoped_component_topology(scope)` 在当前

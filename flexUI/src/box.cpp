@@ -1130,6 +1130,98 @@ bool Box::retire_detached_elements(const std::vector<Element*>& candidates) noex
   }
 }
 
+BoxSubtreeBorrowSnapshot
+Box::inspect_subtree_borrowers(const Element *subtree_root) const noexcept {
+  BoxSubtreeBorrowSnapshot result;
+  if (std::this_thread::get_id() != owning_thread_) {
+    result.error = BoxSubtreeBorrowErrorCode::WrongThread;
+    return result;
+  }
+  if (!subtree_root || subtree_root == root_ || !owns_element(subtree_root)) {
+    result.error = BoxSubtreeBorrowErrorCode::InvalidRoot;
+    return result;
+  }
+  // Detached Box-owned staged nodes are not live subtree roots. Validate
+  // the exact ancestor chain without calling a Widget or a native callback.
+  const Element *ancestor = subtree_root;
+  std::size_t hops = 0;
+  while (ancestor != root_) {
+    if (!ancestor || ++hops > elements_.size()) {
+      result.error = BoxSubtreeBorrowErrorCode::InvalidRoot;
+      return result;
+    }
+    ancestor = ancestor->parent_elem();
+  }
+  result.native_event_dispatching = events_.is_dispatching();
+  result.layout_or_widget_traversal_active = borrowed_tree_depth_ != 0;
+
+  try {
+    // Bounded temporary set of ACTUALLY live descendants. This includes
+    // Widget-owned internal parts as well as Box-owned compiled Elements,
+    // so event focus/capture pointing into a Widget part is never missed.
+    // The set is never persisted as a second runtime ownership index.
+    constexpr std::size_t kMaximumPartsPerWidget = 1024;
+    constexpr std::size_t kExtraStructuralBudget = 256;
+    const auto max_size = std::numeric_limits<std::size_t>::max();
+    if (elements_.size() > max_size - kExtraStructuralBudget ||
+        widgets_.size() >
+            (max_size - kExtraStructuralBudget - elements_.size()) /
+                kMaximumPartsPerWidget) {
+      result.error = BoxSubtreeBorrowErrorCode::InconsistentTree;
+      return result;
+    }
+    const std::size_t budget = elements_.size() +
+        widgets_.size() * kMaximumPartsPerWidget + kExtraStructuralBudget;
+    std::vector<const Element *> pending{subtree_root};
+    std::unordered_set<const Element *> visited;
+    while (!pending.empty()) {
+      if (pending.size() > budget || visited.size() >= budget) {
+        result.error = BoxSubtreeBorrowErrorCode::InconsistentTree;
+        return result;
+      }
+      const Element *element = pending.back();
+      pending.pop_back();
+      if (!element || !visited.insert(element).second) {
+        result.error = BoxSubtreeBorrowErrorCode::InconsistentTree;
+        return result;
+      }
+      ++result.mounted_elements;
+      if (element->widget) ++result.widget_hosts;
+      if (bindings_.has_binding_target(element)) ++result.binding_targets;
+      if (element->click_callback()) ++result.native_click_callbacks;
+      if (element->is_focus() || element->is_hover() || element->is_active())
+        result.local_interaction_state = true;
+
+      for (const auto *child : element->children()) {
+        const auto *owner = dynamic_cast<const Element *>(child);
+        if (!owner || owner->parent_elem() != element) {
+          result.error = BoxSubtreeBorrowErrorCode::InconsistentTree;
+          return result;
+        }
+        pending.push_back(owner);
+      }
+    }
+    result.focused_descendant =
+        visited.count(events_.focused_element()) != 0;
+    result.hovered_descendant =
+        visited.count(events_.hovered_element()) != 0;
+    result.active_pointer_descendant =
+        visited.count(events_.active_element()) != 0;
+    result.captured_descendant =
+        visited.count(events_.capturing_element()) != 0;
+    for (const Element *host : active_widgets_) {
+      if (visited.count(host) != 0) ++result.active_widget_hosts;
+    }
+    for (const Element *host : keyed_repeater_hosts_) {
+      if (visited.count(host) != 0) ++result.keyed_repeater_hosts;
+    }
+    return result;
+  } catch (...) {
+    result.error = BoxSubtreeBorrowErrorCode::AllocationFailed;
+    return result;
+  }
+}
+
 bool Box::retire_unbound_structural_subtree(
     const std::string &root_id) noexcept {
   return retire_structural_subtree_impl(root_id, false);
