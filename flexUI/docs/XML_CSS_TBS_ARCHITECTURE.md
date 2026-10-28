@@ -813,3 +813,19 @@ Auditing a Widget's LOCAL callbacks/interaction is only necessary, not
 sufficient: backend resources, fully retired host Element parts, compiled
 program/binding target disposal, no-throw same-generation commit and exact
 sibling stability remain separate gates. `unmount(scope)` is still absent.
+
+## 2026-10-28 M4b6f — exact Box unique_ptr ownership is authoritative
+
+The Box subtree preflight now stages a temporary membership set from its
+sole `elements_` vector of unique_ptr<Element>, not from the mutable
+`owner_box_` back-pointer alone. It refuses a foreign child even if
+`Element::append` copied the Box pointer onto it, and refuses a Widget-owned
+part whose immediate parent is not a real Widget host in the same owner
+vector. Successful admission is still read-only and does not create another
+persistent owner table. A real headless test attaches/then removes an
+externally allocated Element to demonstrate the wrong-ownership rejection
+without deleting or corrupting the original tree.
+
+This is necessary proof for future physical deletion, not permission to
+bypass the compiled tree and Widget lifetime guards. #302 Draft,
+`unmount(scope)` still unavailable.

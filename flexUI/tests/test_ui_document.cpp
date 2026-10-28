@@ -2031,6 +2031,38 @@ spec("Scoped XML components preserve local label and accessibility references") 
   }
 }
 
+spec("FlexUI M4b6f exact Box Element ownership membership") {
+  it("rejects externally allocated children carrying a copied Box back-pointer") {
+    flexUI::Box box(nullptr);
+    auto *root = box.create("main", "root");
+    auto *container = box.create("section", "container");
+    root->append(container);
+    box.set_root(root);
+    auto original = box.inspect_subtree_borrowers(container);
+    check(static_cast<bool>(original));
+    check_equal(original.box_owned_elements, std::size_t{1});
+
+    // Element::append propagates the Box back-pointer to an external
+    // element, but no unique_ptr ownership is ever transferred.
+    flexUI::Element foreign;
+    check_equal(container->append(&foreign), &foreign);
+    const auto invalid = box.inspect_subtree_borrowers(container);
+    check_false(static_cast<bool>(invalid));
+    check(invalid.error == flexUI::BoxSubtreeBorrowErrorCode::InconsistentTree);
+    const auto direct = box.inspect_subtree_borrowers(&foreign);
+    check_false(static_cast<bool>(direct));
+    check(direct.error == flexUI::BoxSubtreeBorrowErrorCode::InvalidRoot);
+
+    // The failed read must not detach, free, or invalidate sibling nodes.
+    check_equal(container->child_count(), std::size_t{1});
+    check(container->remove(&foreign));
+    check_equal(container->child_count(), std::size_t{0});
+    const auto recovered = box.inspect_subtree_borrowers(container);
+    check(static_cast<bool>(recovered));
+    check_equal(recovered.box_owned_elements, std::size_t{1});
+  }
+}
+
 spec("FlexUI M4b6c built-in Widget owner audits") {
   it("counts actual form callbacks and hidden animation ownership without retiring") {
     flexUI::CheckboxWidget checkbox("Chosen");

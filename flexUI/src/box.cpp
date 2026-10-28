@@ -1174,6 +1174,23 @@ Box::inspect_subtree_borrowers(const Element *subtree_root) const noexcept {
     }
     const std::size_t budget = elements_.size() +
         widgets_.size() * kMaximumPartsPerWidget + kExtraStructuralBudget;
+    // owner_box_ is only a back-reference. Element::append() may copy it
+    // into an externally allocated child, which must NEVER become eligible
+    // for Box physical deletion. Prove every actual descendant appears in
+    // the one unique_ptr<Element> ownership vector, without persisting a
+    // second owner registry.
+    std::unordered_set<const Element *> owned_elements;
+    owned_elements.reserve(elements_.size());
+    for (const auto &owner : elements_) {
+      if (!owner || !owned_elements.insert(owner.get()).second) {
+        result.error = BoxSubtreeBorrowErrorCode::InconsistentTree;
+        return result;
+      }
+    }
+    if (owned_elements.count(subtree_root) == 0) {
+      result.error = BoxSubtreeBorrowErrorCode::InvalidRoot;
+      return result;
+    }
     std::vector<const Element *> pending{subtree_root};
     std::unordered_set<const Element *> visited;
     while (!pending.empty()) {
@@ -1191,12 +1208,22 @@ Box::inspect_subtree_borrowers(const Element *subtree_root) const noexcept {
       // This snapshot MUST account for real Widget-owned parts, not just
       // compiler-authored Elements. Every descendant must belong to the one
       // live Box; a borrowed/fabricated Widget host is never accepted.
-      if (!owns_element(element)) {
+      if (!owns_element(element) || owned_elements.count(element) == 0) {
         result.error = BoxSubtreeBorrowErrorCode::InconsistentTree;
         return result;
       }
       ++result.box_owned_elements;
-      if (element->is_widget_owned()) ++result.widget_owned_parts;
+      if (element->is_widget_owned()) {
+        // Widget parts are private direct children of an actual Widget host.
+        // Neither an arbitrary Box node nor a different Widget's subtree
+        // may claim their lifetime through an inherited owner_box_ pointer.
+        const auto *host = element->parent_elem();
+        if (!host || !host->widget || !owned_elements.count(host)) {
+          result.error = BoxSubtreeBorrowErrorCode::InconsistentTree;
+          return result;
+        }
+        ++result.widget_owned_parts;
+      }
       if (element->widget) {
         const auto owned_widget = std::find_if(
             widgets_.begin(), widgets_.end(),
