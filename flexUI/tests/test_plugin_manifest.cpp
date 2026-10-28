@@ -123,7 +123,7 @@ suite("FlexUI plugin manifest") {
       const auto loaded = builder.load_manifest(path);
       check_false(static_cast<bool>(loaded));
       check_true((static_cast<int>(loaded.error.code)) == (static_cast<int>(flexUI::PluginHostErrorCode::InvalidManifest)));
-      check_not_equal(loaded.error.message.find("SemVer"), std::string::npos);
+      check_true((loaded.error.message.find("SemVer")) != (std::string::npos));
     }
 
     it("accepts canonical semantic version prerelease and build syntax") {
@@ -148,8 +148,7 @@ suite("FlexUI plugin manifest") {
       const auto loaded = builder.load_manifest(path);
       check_false(static_cast<bool>(loaded));
       check_true((static_cast<int>(loaded.error.code)) == (static_cast<int>(flexUI::PluginHostErrorCode::InvalidManifest)));
-      check_not_equal(loaded.error.message.find("permissons"),
-                      std::string::npos);
+      check_true((loaded.error.message.find("permissons")) != (std::string::npos));
     }
 
     it("rejects embedded NUL before invoking the NUL-terminated TOML parser") {
@@ -158,15 +157,14 @@ suite("FlexUI plugin manifest") {
       auto content =
           manifest("test.echo", "1.0.0", library, "test.echo/1");
       const auto split = content.find("\n[abi]");
-      check_not_equal(split, std::string::npos);
+      check_true((split) != (std::string::npos));
       content.insert(split, std::string("\0ignored = true\n", 16));
       const auto path = package.write("plugin.toml", content);
       flexUI::PluginHostBuilder builder;
       const auto loaded = builder.load_manifest(path);
       check_false(static_cast<bool>(loaded));
       check_true((static_cast<int>(loaded.error.code)) == (static_cast<int>(flexUI::PluginHostErrorCode::InvalidManifest)));
-      check_not_equal(loaded.error.message.find("embedded NUL"),
-                      std::string::npos);
+      check_true((loaded.error.message.find("embedded NUL")) != (std::string::npos));
     }
 
     it("denies a declared permission unless host policy grants it") {
@@ -179,7 +177,7 @@ suite("FlexUI plugin manifest") {
       const auto denied = denied_builder.load_manifest(path);
       check_false(static_cast<bool>(denied));
       check_true((static_cast<int>(denied.error.code)) == (static_cast<int>(flexUI::PluginHostErrorCode::PermissionDenied)));
-      check_not_equal(denied.error.message.find("file"), std::string::npos);
+      check_true((denied.error.message.find("file")) != (std::string::npos));
 
       flexUI::PluginHostPolicy policy;
       policy.granted_permissions =
