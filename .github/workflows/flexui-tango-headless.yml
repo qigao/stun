@@ -13,6 +13,8 @@ on:
       - '.github/scripts/restore-flexui-tango-sdk.py'
       - '.github/scripts/tests/test_restore_flexui_tango_sdk.py'
       - '.github/workflows/flexui-tango-headless.yml'
+      - '.github/actions/setup-ccache/**'
+      - '.github/scripts/report-ccache.sh'
   workflow_dispatch:
 
 permissions:

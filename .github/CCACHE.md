@@ -53,3 +53,23 @@ restore-prefix, without changing any C/C++ source or compilation options.
 It must still run the identical real tests and report independently
 verified ccache hit/miss stats. Do not infer a speedup until the restored
 cache and timings are observed.
+
+## Warm-cache proof and CI change-scope gate — 2026-10-28
+
+Second HEAD `f45f2d8c815d5d9d24dfed13c163dc93d42d1338`
+([run 40675278914](https://github.com/qigao/stun/actions/runs/40675278914))
+restored the prior exact-HEAD macOS ccache cache snapshot via
+`restore-keys`: **283 cacheable compilations, 283 hits, 0 misses
+(100% hit rate)**, with the same real TUI/PTY and native tests passing.
+This is independently distinct from the XML/vcpkg cache restoration.
+
+The previous second-run Linux runtime scope was **skipped** because a
+documentation-only push does not match the deliberate
+`.github/scripts/ci-affected.sh` latest-push filters. A skipped job is
+NOT a Linux warm-cache qualification. Changes to the shared
+`setup-ccache` Action and stats reporter must now select the native XML
+runtime gate, and the Windows/macOS Headless workflow path filter includes
+them too. This workflow change triggers a fresh Linux full native build,
+allowing the first run's Linux compiler-output snapshot to prove restore
+and recompile correctness. Continue to evaluate the real exact-HEAD stats;
+do not count a skip as proof.
