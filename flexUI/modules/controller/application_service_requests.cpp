@@ -672,6 +672,21 @@ ApplicationServiceScopeQuiesceResult ApplicationServiceRequestQueue::quiesce_sco
   return result;
 }
 
+ApplicationScopedRegistryJoinResult
+ApplicationServiceRequestQueue::join_scoped_resources(
+    std::string_view scope, std::chrono::milliseconds timeout) {
+  const auto leases = inspect_scope_leases(scope);
+  if (!leases || !leases.quiesced || leases.total() != 0) {
+    return {0, {ApplicationServiceRegistryErrorCode::InvalidState, {}, {},
+                 "scope has not quiesced or still owns service tokens"}};
+  }
+  if (timeout.count() < 0) {
+    return {0, {ApplicationServiceRegistryErrorCode::InvalidState, {}, {},
+                 "scope endpoint join timeout must be nonnegative"}};
+  }
+  return impl_->registry->join_scoped_resources(scope, timeout);
+}
+
 ApplicationServiceControlResult
 ApplicationServiceRequestQueue::validate_generation_reset(std::uint64_t next_generation) const {
   if (!impl_->is_owner_thread()) {

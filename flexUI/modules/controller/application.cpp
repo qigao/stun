@@ -1274,6 +1274,56 @@ DesktopApplication::inspect_scoped_service_drain(std::string_view scope) const {
   return result;
 }
 
+DesktopApplicationScopedResourceJoinResult
+DesktopApplication::join_scoped_service_resources(
+    std::string_view scope, std::chrono::milliseconds timeout) {
+  DesktopApplicationScopedResourceJoinResult result;
+  if (!is_owner_thread()) {
+    result.error = fail(DesktopApplicationErrorCode::WrongThread,
+                        DesktopApplicationStage::ServiceRequests,
+                        "scope resource join requires the application owner thread");
+    return result;
+  }
+  if (timeout.count() < 0) {
+    result.error = fail(DesktopApplicationErrorCode::InvalidArgument,
+                        DesktopApplicationStage::ServiceRequests,
+                        "scope resource join timeout must be nonnegative");
+    return result;
+  }
+  const auto drained = inspect_scoped_service_drain(scope);
+  if (!drained) {
+    result.error = drained.error;
+    return result;
+  }
+  if (!drained.queue_drained()) {
+    result.error = fail(DesktopApplicationErrorCode::InvalidState,
+                        DesktopApplicationStage::ServiceRequests,
+                        "retire routes, quiesce admission and consume all terminals first");
+    return result;
+  }
+  const auto current_generation = generation();
+  const auto joined = impl_->service_requests->join_scoped_resources(scope, timeout);
+  if (!joined) {
+    result.error = fail(DesktopApplicationErrorCode::ServiceRegistryFailed,
+                        DesktopApplicationStage::ServiceRegistry,
+                        joined.error.message);
+    result.error.registry_error = joined.error;
+    return result;
+  }
+  // An Endpoint may reenter the application while joining: never return
+  // a stale-generation resource certificate.
+  const auto after = inspect_scoped_service_drain(scope);
+  if (generation() != current_generation || !after || !after.queue_drained()) {
+    result.error = fail(DesktopApplicationErrorCode::InvalidState,
+                        DesktopApplicationStage::ServiceRequests,
+                        "resource join invalidated by generation/admission change");
+    return result;
+  }
+  result.generation = current_generation;
+  result.joined_endpoints = joined.joined_endpoints;
+  return result;
+}
+
 DesktopApplicationBuilder::DesktopApplicationBuilder(flex::Renderer *renderer)
     : impl_(std::make_unique<Impl>(renderer)) {}
 

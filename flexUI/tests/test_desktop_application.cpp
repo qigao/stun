@@ -24,6 +24,26 @@ void count_completion_wakeup(void *context) noexcept {
       1, std::memory_order_release);
 }
 
+class JoinedStorageEndpoint final : public flexUI::IApplicationServiceEndpoint {
+public:
+  flexUI::ApplicationServiceSubmitResult try_submit(
+      const flexUI::ApplicationServiceRequest &,
+      flexUI::IApplicationServiceCompletionSink &) override { return {}; }
+
+  flexUI::ApplicationEndpointScopeJoinCode
+  join_scoped_resources(std::string_view scope,
+                        std::chrono::milliseconds) override {
+    ++join_count;
+    last_scope.assign(scope);
+    return may_join ? flexUI::ApplicationEndpointScopeJoinCode::Joined
+                    : flexUI::ApplicationEndpointScopeJoinCode::Busy;
+  }
+
+  bool may_join = false;
+  std::size_t join_count = 0;
+  std::string last_scope;
+};
+
 class TestStorageEndpoint final : public flexUI::IApplicationServiceEndpoint {
 public:
   flexUI::ApplicationServiceSubmitResult try_submit(
@@ -435,6 +455,107 @@ spec("FlexUI desktop scoped service quiescence facade") {
     if (!new_request) return;
     check_equal(new_request.request->script_request_id, std::uint64_t{74});
     check_equal(new_request.request->token.generation, generation + 1);
+  }
+}
+
+spec("FlexUI scoped Endpoint resource join admission") {
+  it("requires route retirement, queue drain and independent native join") {
+    const std::string root =
+        "<ui name=\"ScopedResource\"><main id=\"root\">"
+        "<section id=\"left\"/><section id=\"right\"/></main></ui>";
+    flexUI::ApplicationServiceRegistryBuilder services;
+    auto endpoint = std::make_shared<JoinedStorageEndpoint>();
+    check(services.register_service({"storage/1", {{"write", 1024}}}, endpoint));
+    auto registry = services.build();
+    check(static_cast<bool>(registry));
+    if (!registry) return;
+
+    flexUI::DesktopApplicationBuilder builder(nullptr);
+    builder.xml_entry(root)
+        .scoped_xml_component("sale", "left",
+            "<ui name=\"Sale\"><div><button id=\"send\">Send</button></div></ui>")
+        .scoped_xml_component("sales", "right",
+            "<ui name=\"Sales\"><div id=\"label\">Keep</div></ui>")
+        .services(std::move(registry.registry), {{"storage/1"}, {"storage/1"}});
+    auto built = builder.build();
+    check(static_cast<bool>(built));
+    if (!built) return;
+    auto &app = *built.application;
+    auto *sibling = app.box().get_by_id("sales::label");
+    check_not_null(sibling);
+    if (!sibling) return;
+    const auto sibling_handle = app.box().handle_for(*sibling);
+    const auto generation = app.generation();
+
+    auto premature = app.join_scoped_service_resources(
+        "sale", std::chrono::milliseconds{0});
+    check_false(static_cast<bool>(premature));
+    check(premature.error.code == flexUI::DesktopApplicationErrorCode::InvalidState);
+    check_equal(endpoint->join_count, std::size_t{0});
+    check(app.retire_scoped_event_handlers("sale"));
+    check(app.quiesce_retired_scoped_service_requests("sale"));
+    check(app.inspect_scoped_service_drain("sale").queue_drained());
+
+    auto busy = app.join_scoped_service_resources(
+        "sale", std::chrono::milliseconds{0});
+    check_false(static_cast<bool>(busy));
+    check(busy.error.code == flexUI::DesktopApplicationErrorCode::ServiceRegistryFailed);
+    check(busy.error.registry_error.code ==
+          flexUI::ApplicationServiceRegistryErrorCode::EndpointJoinBusy);
+    check_equal(endpoint->join_count, std::size_t{1});
+
+    endpoint->may_join = true;
+    auto joined = app.join_scoped_service_resources(
+        "sale", std::chrono::milliseconds{10});
+    check(static_cast<bool>(joined));
+    check_equal(joined.generation, generation);
+    check_equal(joined.joined_endpoints, std::size_t{1});
+    check_equal(endpoint->last_scope, std::string("sale"));
+    check_equal(app.box().resolve_handle(sibling_handle), sibling);
+    check_not_null(app.box().get_by_id("sale::send"));
+
+    flexUI::DesktopApplicationScopedResourceJoinResult foreign_thread;
+    std::thread worker([&] {
+      foreign_thread = app.join_scoped_service_resources(
+          "sale", std::chrono::milliseconds{0});
+    });
+    worker.join();
+    check(foreign_thread.error.code == flexUI::DesktopApplicationErrorCode::WrongThread);
+    auto missing = app.join_scoped_service_resources(
+        "missing", std::chrono::milliseconds{0});
+    check_false(static_cast<bool>(missing));
+    check(missing.error.code == flexUI::DesktopApplicationErrorCode::InvalidConfiguration);
+
+    check(app.reload({root, "", "", "new-generation"}));
+    auto stale = app.join_scoped_service_resources(
+        "sale", std::chrono::milliseconds{0});
+    check_false(static_cast<bool>(stale));
+    check(stale.error.code == flexUI::DesktopApplicationErrorCode::InvalidState);
+    check_not_null(app.box().get_by_id("sales::label"));
+  }
+
+  it("refuses unsupported Endpoint despite the scoped queue being drained") {
+    const std::string root =
+        "<ui name=\"Unsupported\"><main id=\"root\">"
+        "<section id=\"host\"/></main></ui>";
+    flexUI::DesktopApplicationBuilder builder(nullptr);
+    builder.xml_entry(root).scoped_xml_component(
+        "sale", "host",
+        "<ui name=\"Passive\"><div id=\"label\">NoEvents</div></ui>");
+    static_cast<void>(configure_storage_service(builder));
+    auto built = builder.build();
+    check(static_cast<bool>(built));
+    if (!built) return;
+    auto &app = *built.application;
+    check(app.retire_scoped_event_handlers("sale"));
+    check(app.quiesce_retired_scoped_service_requests("sale"));
+    check(app.inspect_scoped_service_drain("sale").queue_drained());
+    auto unsupported = app.join_scoped_service_resources(
+        "sale", std::chrono::milliseconds{0});
+    check_false(static_cast<bool>(unsupported));
+    check(unsupported.error.registry_error.code ==
+          flexUI::ApplicationServiceRegistryErrorCode::EndpointJoinUnsupported);
+    check_not_null(app.box().get_by_id("sale::label"));
   }
 }
 

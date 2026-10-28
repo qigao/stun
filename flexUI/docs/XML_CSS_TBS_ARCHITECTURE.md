@@ -669,3 +669,16 @@ quiescence or native UI detach. The future application-owned retirement
 preflight must compose these independent gates on its one owner thread
 in the correct order. No second runtime registry, no provider fallback, and
 `unmount(scope)` remains unimplemented.
+
+## 2026-10-28 P4.4 M4b5e — app-owned native Endpoint join proof (Draft #302)
+
+The same application validates current-generation compiler scope ownership,
+retired routes, a quiesced service request queue and actual consumed terminal
+count before calling `join_scoped_service_resources(scope,timeout)` on the
+one immutable registry. Missing C++ provider contracts fail closed; the Plugin
+endpoint reuses its mandatory ABI v2.1 join. After provider calls, the app
+rechecks generation and queue tombstone, rejecting reentrant reload.
+
+The returned result certifies only service worker retirement, not Widget or
+Binding observer teardown, physical deletion, DLL unload or safe unmount.
+No `unmount(scope)` implementation; #302 Draft, #298/#275 Open.

@@ -7,6 +7,7 @@
 #include "flexUI/controller.h"
 #include "flexUI/widget_registry.h"
 
+#include <chrono>
 #include <functional>
 #include <memory>
 #include <optional>
@@ -175,6 +176,16 @@ struct DesktopApplicationScopedServiceDrainSnapshot {
     return !static_cast<bool>(error) && event_routes_retired &&
            admission_quiesced && pending() == 0;
   }
+};
+
+/// Independent resource join proof for the current application generation.
+/// Does not imply Widget/Binding release or physical unmount.
+struct DesktopApplicationScopedResourceJoinResult {
+  std::uint64_t generation = 0;
+  std::size_t joined_endpoints = 0;
+  DesktopApplicationError error;
+
+  explicit operator bool() const noexcept { return !static_cast<bool>(error); }
 };
 
 /// A bounded, owner-thread-only validation of compiler-attributed nodes against
@@ -382,6 +393,12 @@ public:
   /// No endpoint callbacks or completion mailbox consumption occur here.
   DesktopApplicationScopedServiceDrainSnapshot
   inspect_scoped_service_drain(std::string_view scope) const;
+
+  /// Requires exact-scope routes retired, service admission quiesced and all
+  /// real terminals consumed. Delegates to the one immutable ServiceRegistry;
+  /// unsupported native providers fail closed. Never detaches Elements.
+  DesktopApplicationScopedResourceJoinResult join_scoped_service_resources(
+      std::string_view scope, std::chrono::milliseconds timeout);
 
 private:
   struct Impl;

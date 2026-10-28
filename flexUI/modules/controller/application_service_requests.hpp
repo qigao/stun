@@ -4,6 +4,7 @@
 #include "flexUI/application_service.h"
 #include "flexUI/service_registry.h"
 
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <memory>
@@ -81,6 +82,10 @@ public:
   /// rejection. The staged scope gate and queue edits otherwise publish
   /// without further allocation; unrelated FIFO entries retain their order.
   ApplicationServiceScopeQuiesceResult quiesce_scope_requests(std::string_view scope);
+  /// Exact-scope owner-thread gateway to the sole ServiceRegistry; requires
+  /// quiesced admission and zero reserved/published/in-flight tokens.
+  ApplicationScopedRegistryJoinResult join_scoped_resources(
+      std::string_view scope, std::chrono::milliseconds timeout);
 
   /// Validates the fallible part before the mailbox generation changes.
   ApplicationServiceControlResult validate_generation_reset(std::uint64_t next_generation) const;
