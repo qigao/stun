@@ -260,6 +260,12 @@ public:
   bool has_service_completion_handler() const noexcept;
 
 private:
+  friend class DesktopApplication;
+  // Only DesktopApplication may attest to a zero-route scope after validating
+  // the compiler-authored ownership ledger against the mounted Box. The
+  // public Controller route API continues to reject unknown/empty scopes.
+  ControllerResult retire_scoped_event_handlers_impl(
+      std::string_view scope, bool compiler_validated_eventless);
   struct Impl;
   std::unique_ptr<Impl> impl_;
 };

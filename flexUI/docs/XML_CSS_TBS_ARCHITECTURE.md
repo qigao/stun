@@ -628,3 +628,25 @@ M4b5's native scoped-worker acceptance also re-dispatches a fresh
 actual second completion, script request ID and payload. The shared module
 remains Started; this is not a plugin-wide stop and not a same-content
 fixture mock.
+
+## 2026-10-28 P4.4 M4b5c — eventless scope route retirement admission (Draft #302)
+
+The application validates its compiler-authored exact-scope topology against
+the **live** Box before retiring script routes. A component with zero event
+definitions has no routes to unregister. Only DesktopApplication may request
+the existing ScriptController's private compiler-attested zero-route marker;
+the public Controller API still refuses unknown/zero-route scope names.
+The same marker is required before quiescing service admission, and resetting
+the application generation rearms it.
+
+A scriptless XML component has no Controller or script command producer. Its
+zero-route retirement is therefore vacuous, but its scope must still match
+the compiler's mounted Element/Widget ledger before queue quiescence, and the
+read-only drain reports this independently from admission retirement. Neither
+case creates a fake event binding, a second Controller, or a new owner registry.
+
+Native tests exercise anonymous roots, real Widget, sibling active events,
+wrong/foreign scope rejection, same-generation idempotence, and reload reset.
+The low-level Box compiled_program guard remains unchanged: NO physical
+\`unmount(scope)\` has been granted. Plugin/native endpoint joins and
+Widget/Binding disposal remain independent mandatory gates.

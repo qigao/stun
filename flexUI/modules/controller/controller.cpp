@@ -439,6 +439,11 @@ bool ScriptController::is_scoped_event_route_retired(
 
 ControllerResult ScriptController::retire_scoped_event_handlers(
     std::string_view scope) {
+  return retire_scoped_event_handlers_impl(scope, false);
+}
+
+ControllerResult ScriptController::retire_scoped_event_handlers_impl(
+    std::string_view scope, bool compiler_validated_eventless) {
   if (!impl_->is_owner_thread()) {
     return fail(ControllerErrorCode::WrongThread,
                 ControllerStage::EventRetirement,
@@ -471,10 +476,15 @@ ControllerResult ScriptController::retire_scoped_event_handlers(
     }
     ++matches;
   }
-  if (matches == 0) {
+  if (matches == 0 && !compiler_validated_eventless) {
     return fail(ControllerErrorCode::InvalidArgument,
                 ControllerStage::EventRetirement,
                 "the requested scope has no compiled script event handlers");
+  }
+  if (matches != 0 && compiler_validated_eventless) {
+    return fail(ControllerErrorCode::InternalInvariant,
+                ControllerStage::EventRetirement,
+                "compiler-attested eventless scope unexpectedly owns script routes");
   }
 
   try {

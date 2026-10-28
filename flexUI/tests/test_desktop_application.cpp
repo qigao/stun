@@ -438,6 +438,122 @@ spec("FlexUI desktop scoped service quiescence facade") {
   }
 }
 
+spec("FlexUI eventless scoped retirement admission") {
+  it("retires zero routes using the compiled ledger without inventing a handler") {
+    auto probe = std::make_shared<ModuleProbe>();
+    const std::string root =
+        "<ui name=\"ScopedEventless\"><main id=\"root\">"
+        "<section id=\"left\"/><section id=\"right\"/></main></ui>";
+    const std::string passive =
+        "<ui name=\"Passive\"><div><button id=\"action\">Passive</button>"
+        "<span>Anonymous</span></div></ui>";
+    const std::string active =
+        "<ui name=\"Active\" xmlns:on=\"urn:flexui:event\">"
+        "<button id=\"action\" on:key_down=\"save_document\">Run</button></ui>";
+    flexUI::DesktopApplicationBuilder builder(nullptr);
+    builder.xml_entry(root)
+        .scoped_xml_component("sale", "left", passive)
+        .scoped_xml_component("sales", "right", active)
+        .script("eventless-scopes", fake_factory(probe));
+    auto built = builder.build();
+    check(static_cast<bool>(built));
+    if (!built) return;
+    auto &app = *built.application;
+    const auto topology = app.inspect_scoped_component_topology("sale");
+    check(static_cast<bool>(topology));
+    check(topology.compiled_event_nodes == std::size_t{0});
+    check(topology.compiled_widget_hosts == std::size_t{1});
+    check(app.inspect_scoped_component_borrowers("sale"));
+    const auto prior = app.inspect_scoped_service_drain("sale");
+    check(static_cast<bool>(prior));
+    check_false(prior.event_routes_retired);
+    check_false(prior.queue_drained());
+
+    // The Controller alone lacks the compiler ownership proof and must keep
+    // rejecting zero handlers. Only the application may attest this scope.
+    const auto raw = app.controller()->retire_scoped_event_handlers("sale");
+    check_false(static_cast<bool>(raw));
+    check(raw.error.code == flexUI::ControllerErrorCode::InvalidArgument);
+    auto foreign = app.retire_scoped_event_handlers("unknown");
+    check_false(static_cast<bool>(foreign));
+    check(foreign.error.code ==
+          flexUI::DesktopApplicationErrorCode::InvalidConfiguration);
+
+    check(app.retire_scoped_event_handlers("sale"));
+    check(app.retire_scoped_event_handlers("sale"));
+    check(app.controller()->is_scoped_event_route_retired("sale"));
+    check_false(app.controller()->is_scoped_event_route_retired("sales"));
+    auto quiesced = app.quiesce_retired_scoped_service_requests("sale");
+    check(static_cast<bool>(quiesced));
+    const auto drained = app.inspect_scoped_service_drain("sale");
+    check(drained.queue_drained());
+    check(drained.pending() == std::size_t{0});
+    check_not_null(app.box().get_by_id("sale::action"));
+    check_not_null(app.box().get_by_id("sales::action"));
+
+    auto *sibling = app.box().get_by_id("sales::action");
+    if (sibling) {
+      app.box().set_focus(sibling);
+      auto key = flexUI::Event::key_down(flexUI::KeyCode::A);
+      check(app.dispatch_event(key));
+      check_equal(probe->events.size(), std::size_t{1});
+    }
+    check(app.reload({root, "", "eventless-scopes", "generation-two"}));
+    const auto reloaded = app.inspect_scoped_service_drain("sale");
+    check(static_cast<bool>(reloaded));
+    check_false(reloaded.event_routes_retired);
+    check_false(reloaded.admission_quiesced);
+  }
+
+  it("admits a scriptless anonymous Widget subtree without a phantom controller") {
+    const std::string root =
+        "<ui name=\"Scriptless\"><main id=\"root\">"
+        "<section id=\"host\"/><section id=\"sibling\"/></main></ui>";
+    flexUI::DesktopApplicationBuilder builder(nullptr);
+    builder.xml_entry(root)
+        .scoped_xml_component(
+            "sale", "host",
+            "<ui name=\"Passive\"><div><button id=\"action\">Go</button>"
+            "<span>Untargeted</span></div></ui>")
+        .scoped_xml_component(
+            "sales", "sibling",
+            "<ui name=\"Other\"><div id=\"label\">Keep</div></ui>");
+    auto built = builder.build();
+    check(static_cast<bool>(built));
+    if (!built) return;
+    auto &app = *built.application;
+    check_null(app.controller());
+    const auto before = app.inspect_scoped_service_drain("sale");
+    check(static_cast<bool>(before));
+    check(before.event_routes_retired);
+    check_false(before.admission_quiesced);
+    check_false(before.queue_drained());
+    const auto borrowed = app.inspect_scoped_component_borrowers("sale");
+    check(static_cast<bool>(borrowed));
+    check(borrowed.borrowers.widget_hosts == std::size_t{1});
+    auto *sibling = app.box().get_by_id("sales::label");
+    check_not_null(sibling);
+    if (!sibling) return;
+    const auto handle = app.box().handle_for(*sibling);
+
+    check(app.retire_scoped_event_handlers("sale"));
+    const auto quiesced = app.quiesce_retired_scoped_service_requests("sale");
+    check(static_cast<bool>(quiesced));
+    check(app.inspect_scoped_service_drain("sale").queue_drained());
+    check_equal(app.box().resolve_handle(handle), sibling);
+    check_not_null(app.box().get_by_id("sale::action"));
+
+    // Eventless admission is NOT permission to bypass compiled Widget ownership.
+    check_false(app.box().retire_bound_structural_subtree("sale::action"));
+    check_equal(app.box().resolve_handle(handle), sibling);
+    check(app.reload({root, "", "", "new-generation"}));
+    const auto refreshed = app.inspect_scoped_service_drain("sale");
+    check(static_cast<bool>(refreshed));
+    check(refreshed.event_routes_retired);
+    check_false(refreshed.admission_quiesced);
+  }
+}
+
 spec("FlexUI scoped live Box topology preflight") {
   it("resolves eventless anonymous roots and Widget hosts without fake script events") {
     flexUI::DesktopApplicationBuilder builder(nullptr);
