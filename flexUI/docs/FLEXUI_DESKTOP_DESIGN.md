@@ -465,7 +465,7 @@ flowchart LR
 ### 9.2 ABI 规则
 
 冻结 ABI 的事实源是 `include/flexUI/plugin_abi.h`。跨 DLL 边界只使用纯 C、定宽整数、显式长度
-buffer、函数表和 opaque handle；固定入口为 `flexui_plugin_get_api_v1`，当前 ABI 为 `1.0`。
+buffer、函数表和 opaque handle；固定入口为 `flexui_plugin_get_api_v2`，当前且唯一 ABI 为 `2.0`。不加载 v1，不提供版本回退。
 可编译的完整实现与 host 测试分别见 `tests/plugin_test_echo.cpp` 和 `tests/test_plugin_host.cpp`。
 
 ABI 契约：
@@ -530,7 +530,7 @@ capabilities = ["settings.read/1"]
 permissions = ["file"]
 
 [abi]
-major = 1
+major = 2
 minor = 0
 
 [[dependencies]]

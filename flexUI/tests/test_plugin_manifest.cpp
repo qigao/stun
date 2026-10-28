@@ -83,7 +83,7 @@ std::string manifest(std::string name, std::string version,
   if (dependencies.empty()) {
     result += "dependencies = []\n";
   }
-  result += "\n[abi]\nmajor = 1\nminor = 0\n";
+  result += "\n[abi]\nmajor = 2\nminor = 0\n";
   result += dependencies;
   return result;
 }

@@ -10,7 +10,7 @@
 enum { FLEXUI_DOCUMENT_MAX_PAYLOAD_BYTES = 4096 };
 
 typedef struct document_service_instance {
-  flexui_host_api_v1 host;
+  flexui_host_api_v2 host;
   int started;
   int stopping;
 } document_service_instance;
@@ -40,11 +40,11 @@ static int bytes_equal(flexui_plugin_bytes_view value, const char *literal, size
 }
 
 static flexui_plugin_status FLEXUI_PLUGIN_CALL
-create_instance(const flexui_host_api_v1 *host, flexui_plugin_instance **out_instance,
+create_instance(const flexui_host_api_v2 *host, flexui_plugin_instance **out_instance,
                 flexui_plugin_error_buffer *error) {
   document_service_instance *instance;
-  if (host == NULL || out_instance == NULL || host->struct_size < sizeof(flexui_host_api_v1) ||
-      host->abi_major != FLEXUI_PLUGIN_ABI_MAJOR || host->post_completion == NULL) {
+  if (host == NULL || out_instance == NULL || host->struct_size < sizeof(flexui_host_api_v2) ||
+      host->abi_major != FLEXUI_PLUGIN_ABI_MAJOR || host->post_completion == NULL || host->cancel_requested == NULL) {
     write_error(error, "invalid host API");
     return FLEXUI_PLUGIN_STATUS_INVALID_ARGUMENT;
   }
@@ -74,12 +74,12 @@ static flexui_plugin_status FLEXUI_PLUGIN_CALL start_instance(flexui_plugin_inst
 }
 
 static flexui_plugin_status FLEXUI_PLUGIN_CALL
-submit_request(flexui_plugin_instance *opaque, const flexui_plugin_request_v1 *request,
+submit_request(flexui_plugin_instance *opaque, const flexui_plugin_request_v2 *request,
                flexui_plugin_error_buffer *error) {
   document_service_instance *instance = (document_service_instance *)opaque;
-  flexui_plugin_completion_v1 completion;
+  flexui_plugin_completion_v2 completion;
   if (instance == NULL || request == NULL ||
-      request->struct_size < sizeof(flexui_plugin_request_v1)) {
+      request->struct_size < sizeof(flexui_plugin_request_v2)) {
     write_error(error, "valid document request is required");
     return FLEXUI_PLUGIN_STATUS_INVALID_ARGUMENT;
   }
@@ -136,22 +136,22 @@ static flexui_plugin_status FLEXUI_PLUGIN_CALL join_instance(flexui_plugin_insta
 
 static void FLEXUI_PLUGIN_CALL destroy_instance(flexui_plugin_instance *opaque) { free(opaque); }
 
-static const flexui_plugin_operation_descriptor_v1 operations[] = {
-    {sizeof(flexui_plugin_operation_descriptor_v1),
+static const flexui_plugin_operation_descriptor_v2 operations[] = {
+    {sizeof(flexui_plugin_operation_descriptor_v2),
      0,
      FLEXUI_LITERAL_VIEW("save"),
      FLEXUI_DOCUMENT_MAX_PAYLOAD_BYTES,
      {0}}};
 
-static const flexui_plugin_service_descriptor_v1 services[] = {
-    {sizeof(flexui_plugin_service_descriptor_v1),
+static const flexui_plugin_service_descriptor_v2 services[] = {
+    {sizeof(flexui_plugin_service_descriptor_v2),
      1,
      FLEXUI_LITERAL_VIEW("document.save/1"),
      operations,
      {0}}};
 
-static const flexui_plugin_descriptor_v1 descriptor = {
-    sizeof(flexui_plugin_descriptor_v1),
+static const flexui_plugin_descriptor_v2 descriptor = {
+    sizeof(flexui_plugin_descriptor_v2),
     0,
     FLEXUI_LITERAL_VIEW("example.document-service"),
     FLEXUI_LITERAL_VIEW("1.0.0"),
@@ -160,7 +160,7 @@ static const flexui_plugin_descriptor_v1 descriptor = {
     services,
     {0}};
 
-static const flexui_plugin_api_v1 api = {sizeof(flexui_plugin_api_v1),
+static const flexui_plugin_api_v2 api = {sizeof(flexui_plugin_api_v2),
                                          FLEXUI_PLUGIN_ABI_MAJOR,
                                          FLEXUI_PLUGIN_ABI_MINOR,
                                          0,
@@ -173,6 +173,6 @@ static const flexui_plugin_api_v1 api = {sizeof(flexui_plugin_api_v1),
                                          destroy_instance,
                                          {0}};
 
-FLEXUI_PLUGIN_EXPORT const flexui_plugin_api_v1 *FLEXUI_PLUGIN_CALL flexui_plugin_get_api_v1(void) {
+FLEXUI_PLUGIN_EXPORT const flexui_plugin_api_v2 *FLEXUI_PLUGIN_CALL flexui_plugin_get_api_v2(void) {
   return &api;
 }

@@ -23,7 +23,7 @@ public:
 };
 
 flexui_plugin_status FLEXUI_PLUGIN_CALL create_instance(
-    const flexui_host_api_v1*, flexui_plugin_instance** out_instance,
+    const flexui_host_api_v2*, flexui_plugin_instance** out_instance,
     flexui_plugin_error_buffer*) {
   *out_instance = reinterpret_cast<flexui_plugin_instance*>(new TestInstance);
   ++counts.created;
@@ -47,7 +47,7 @@ flexui_plugin_status FLEXUI_PLUGIN_CALL start_instance(
 }
 
 flexui_plugin_status FLEXUI_PLUGIN_CALL submit_request(
-    flexui_plugin_instance*, const flexui_plugin_request_v1*,
+    flexui_plugin_instance*, const flexui_plugin_request_v2*,
     flexui_plugin_error_buffer*) {
   ++counts.lifecycle_calls;
   return FLEXUI_PLUGIN_STATUS_INVALID_STATE;
@@ -71,14 +71,14 @@ flexui_plugin_bytes_view literal_view(const char (&text)[N]) {
 }
 
 constexpr std::uint64_t kPayloadLimit = 1;
-const flexui_plugin_operation_descriptor_v1 operation = {
+const flexui_plugin_operation_descriptor_v2 operation = {
     sizeof(operation), 0, literal_view("echo"), kPayloadLimit, {0}};
-const flexui_plugin_service_descriptor_v1 service = {
+const flexui_plugin_service_descriptor_v2 service = {
     sizeof(service), 1, literal_view("test.create-unwind/1"), &operation, {0}};
-const flexui_plugin_descriptor_v1 descriptor = {
+const flexui_plugin_descriptor_v2 descriptor = {
     sizeof(descriptor), 0, literal_view("test.create-unwind"),
     literal_view("1.0.0"), 1, 0, &service, {0}};
-const flexui_plugin_api_v1 plugin_api = {
+const flexui_plugin_api_v2 plugin_api = {
     sizeof(plugin_api), FLEXUI_PLUGIN_ABI_MAJOR, FLEXUI_PLUGIN_ABI_MINOR, 0,
     &descriptor, create_instance, start_instance, submit_request, start_instance,
     join_instance, destroy_instance, {0}};
@@ -93,8 +93,8 @@ const CreateUnwindFixtureApi fixture_api = {reset, statistics};
 
 } // namespace
 
-extern "C" FLEXUI_PLUGIN_EXPORT const flexui_plugin_api_v1* FLEXUI_PLUGIN_CALL
-flexui_plugin_get_api_v1() { return &plugin_api; }
+extern "C" FLEXUI_PLUGIN_EXPORT const flexui_plugin_api_v2* FLEXUI_PLUGIN_CALL
+flexui_plugin_get_api_v2() { return &plugin_api; }
 
 extern "C" FLEXUI_PLUGIN_EXPORT const CreateUnwindFixtureApi* FLEXUI_PLUGIN_CALL
 flexui_test_create_unwind_query() { return &fixture_api; }

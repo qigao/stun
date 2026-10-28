@@ -3,6 +3,22 @@
 状态：架构决策已采用，实施与验收按下列工作项推进
 日期：2026-08-31
 
+## 2026-10-28 P4.4 M3d M2a 单一插件 ABI v2 的 exact-token 取消查询（Draft）
+
+`plugin_abi.h` 与 PluginHost 使用唯一 C11 ABI 2.0、入口
+`flexui_plugin_get_api_v2`。宿主函数表在 `post_completion` 之后
+公布 `cancel_requested(context, token_id, token_generation, out, error)`；
+对活跃精确 Token 只读查询原有的 `ApplicationServiceCancellationLease`。
+正常返回 0/1、失效或未知 Token 返回 STALE、缺少原生取消租约返回
+REJECTED，正在发布终态返回 BUSY，不会伪造 Cancelled 或创建第二个
+状态机；插件结束由它自己报告终态，host 仍依据真实 join 才卸载库。
+ABI v1 不受理也不尝试旧入口，仓库内 C 示例与测试插件同步机械迁移。
+
+本阶段的生产 `plugin_module.cpp` 和独立 C11 PluginSDK ABI 测试、
+真实插件样本源码必须在 Linux Sanitizer 与 Windows/macOS Headless
+中编译；运行时 DLL 加载、跨 DLL worker 取消与 stop/join 竞态将在 M2b
+单独正式验收。**仅源码编译不能宣称插件协作取消已完成**。
+
 ## 2026-10-28 P4.4 M3d M1 原生服务请求只读协作取消租约（Draft）
 
 在生产 `ApplicationServiceRequest` 中增加由唯一

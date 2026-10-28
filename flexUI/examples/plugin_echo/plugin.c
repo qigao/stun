@@ -11,7 +11,7 @@
 enum { FLEXUI_ECHO_MAX_PAYLOAD_BYTES = 4096 };
 
 typedef struct echo_instance {
-  flexui_host_api_v1 host;
+  flexui_host_api_v2 host;
   int started;
   int stopping;
 } echo_instance;
@@ -35,14 +35,14 @@ static void write_error(flexui_plugin_error_buffer *error,
 }
 
 static flexui_plugin_status FLEXUI_PLUGIN_CALL
-create_instance(const flexui_host_api_v1 *host,
+create_instance(const flexui_host_api_v2 *host,
                 flexui_plugin_instance **out_instance,
                 flexui_plugin_error_buffer *error) {
   echo_instance *instance;
   if (host == NULL || out_instance == NULL ||
-      host->struct_size < sizeof(flexui_host_api_v1) ||
+      host->struct_size < sizeof(flexui_host_api_v2) ||
       host->abi_major != FLEXUI_PLUGIN_ABI_MAJOR ||
-      host->post_completion == NULL) {
+      host->post_completion == NULL || host->cancel_requested == NULL) {
     write_error(error, "invalid host API");
     return FLEXUI_PLUGIN_STATUS_INVALID_ARGUMENT;
   }
@@ -74,12 +74,12 @@ start_instance(flexui_plugin_instance *opaque,
 
 static flexui_plugin_status FLEXUI_PLUGIN_CALL
 submit_request(flexui_plugin_instance *opaque,
-               const flexui_plugin_request_v1 *request,
+               const flexui_plugin_request_v2 *request,
                flexui_plugin_error_buffer *error) {
   echo_instance *instance = (echo_instance *)opaque;
-  flexui_plugin_completion_v1 completion;
+  flexui_plugin_completion_v2 completion;
   if (instance == NULL || request == NULL ||
-      request->struct_size < sizeof(flexui_plugin_request_v1)) {
+      request->struct_size < sizeof(flexui_plugin_request_v2)) {
     write_error(error, "valid request is required");
     return FLEXUI_PLUGIN_STATUS_INVALID_ARGUMENT;
   }
@@ -130,16 +130,16 @@ destroy_instance(flexui_plugin_instance *opaque) {
   free(opaque);
 }
 
-static const flexui_plugin_operation_descriptor_v1 operations[] = {
-    {sizeof(flexui_plugin_operation_descriptor_v1), 0,
+static const flexui_plugin_operation_descriptor_v2 operations[] = {
+    {sizeof(flexui_plugin_operation_descriptor_v2), 0,
      FLEXUI_LITERAL_VIEW("echo"), FLEXUI_ECHO_MAX_PAYLOAD_BYTES, {0}}};
 
-static const flexui_plugin_service_descriptor_v1 services[] = {
-    {sizeof(flexui_plugin_service_descriptor_v1), 1,
+static const flexui_plugin_service_descriptor_v2 services[] = {
+    {sizeof(flexui_plugin_service_descriptor_v2), 1,
      FLEXUI_LITERAL_VIEW("example.echo/1"), operations, {0}}};
 
-static const flexui_plugin_descriptor_v1 descriptor = {
-    sizeof(flexui_plugin_descriptor_v1),
+static const flexui_plugin_descriptor_v2 descriptor = {
+    sizeof(flexui_plugin_descriptor_v2),
     0,
     FLEXUI_LITERAL_VIEW("example.echo"),
     FLEXUI_LITERAL_VIEW("1.0.0"),
@@ -148,8 +148,8 @@ static const flexui_plugin_descriptor_v1 descriptor = {
     services,
     {0}};
 
-static const flexui_plugin_api_v1 api = {
-    sizeof(flexui_plugin_api_v1),
+static const flexui_plugin_api_v2 api = {
+    sizeof(flexui_plugin_api_v2),
     FLEXUI_PLUGIN_ABI_MAJOR,
     FLEXUI_PLUGIN_ABI_MINOR,
     0,
@@ -162,7 +162,7 @@ static const flexui_plugin_api_v1 api = {
     destroy_instance,
     {0}};
 
-FLEXUI_PLUGIN_EXPORT const flexui_plugin_api_v1 *FLEXUI_PLUGIN_CALL
-flexui_plugin_get_api_v1(void) {
+FLEXUI_PLUGIN_EXPORT const flexui_plugin_api_v2 *FLEXUI_PLUGIN_CALL
+flexui_plugin_get_api_v2(void) {
   return &api;
 }

@@ -62,7 +62,7 @@ void write_error(flexui_plugin_error_buffer *error, const char *message) {
 }
 
 struct TestInstance {
-  flexui_host_api_v1 host{};
+  flexui_host_api_v2 host{};
   std::atomic<bool> started{false};
   std::atomic<bool> stopping{false};
   std::atomic<std::uint32_t> stop_attempts{0};
@@ -76,7 +76,7 @@ flexui_plugin_status post_completion(TestInstance &instance,
                                      std::uint64_t token_id,
                                      std::uint64_t generation,
                                      const std::string &payload) {
-  flexui_plugin_completion_v1 completion{};
+  flexui_plugin_completion_v2 completion{};
   completion.struct_size = sizeof(completion);
   completion.status = FLEXUI_PLUGIN_COMPLETION_SUCCEEDED;
   completion.token_id = token_id;
@@ -98,13 +98,13 @@ void finish_worker(TestInstance &instance) {
 }
 
 flexui_plugin_status FLEXUI_PLUGIN_CALL
-create_instance(const flexui_host_api_v1 *host,
+create_instance(const flexui_host_api_v2 *host,
                 flexui_plugin_instance **out_instance,
                 flexui_plugin_error_buffer *error) {
   if (host == nullptr || out_instance == nullptr ||
-      host->struct_size < sizeof(flexui_host_api_v1) ||
+      host->struct_size < sizeof(flexui_host_api_v2) ||
       host->abi_major != FLEXUI_PLUGIN_ABI_MAJOR ||
-      host->post_completion == nullptr) {
+      host->post_completion == nullptr || host->cancel_requested == nullptr) {
     write_error(error, "invalid host API");
     return FLEXUI_PLUGIN_STATUS_INVALID_ARGUMENT;
   }
@@ -145,7 +145,7 @@ start_instance(flexui_plugin_instance *opaque,
 
 flexui_plugin_status FLEXUI_PLUGIN_CALL
 submit_request(flexui_plugin_instance *opaque,
-               const flexui_plugin_request_v1 *request,
+               const flexui_plugin_request_v2 *request,
                flexui_plugin_error_buffer *error) {
   if (opaque == nullptr || request == nullptr) {
     write_error(error, "request is required");
@@ -272,35 +272,35 @@ void FLEXUI_PLUGIN_CALL destroy_instance(flexui_plugin_instance *opaque) {
   delete reinterpret_cast<TestInstance *>(opaque);
 }
 
-const flexui_plugin_operation_descriptor_v1 operations[] = {
-    {sizeof(flexui_plugin_operation_descriptor_v1), 0, literal_view("echo"),
+const flexui_plugin_operation_descriptor_v2 operations[] = {
+    {sizeof(flexui_plugin_operation_descriptor_v2), 0, literal_view("echo"),
      4096, {0}},
-    {sizeof(flexui_plugin_operation_descriptor_v1), 0, literal_view("reject"),
+    {sizeof(flexui_plugin_operation_descriptor_v2), 0, literal_view("reject"),
      4096, {0}},
-    {sizeof(flexui_plugin_operation_descriptor_v1), 0, literal_view("hold"),
+    {sizeof(flexui_plugin_operation_descriptor_v2), 0, literal_view("hold"),
      4096, {0}},
-    {sizeof(flexui_plugin_operation_descriptor_v1), 0, literal_view("retry"),
+    {sizeof(flexui_plugin_operation_descriptor_v2), 0, literal_view("retry"),
      4096, {0}},
-    {sizeof(flexui_plugin_operation_descriptor_v1), 0, literal_view("block"),
+    {sizeof(flexui_plugin_operation_descriptor_v2), 0, literal_view("block"),
      4096, {0}},
-    {sizeof(flexui_plugin_operation_descriptor_v1), 0, literal_view("throw"),
+    {sizeof(flexui_plugin_operation_descriptor_v2), 0, literal_view("throw"),
      4096, {0}},
-    {sizeof(flexui_plugin_operation_descriptor_v1), 0,
+    {sizeof(flexui_plugin_operation_descriptor_v2), 0,
      literal_view("deferred-copy"), 4096, {0}},
 };
 
-const flexui_plugin_service_descriptor_v1 services[] = {
-    {sizeof(flexui_plugin_service_descriptor_v1),
+const flexui_plugin_service_descriptor_v2 services[] = {
+    {sizeof(flexui_plugin_service_descriptor_v2),
      static_cast<std::uint32_t>(sizeof(operations) / sizeof(operations[0])),
      literal_view(FLEXUI_TEST_PLUGIN_SERVICE), operations, {0}}};
 
-const flexui_plugin_descriptor_v1 descriptor = {
-    sizeof(flexui_plugin_descriptor_v1), 0,
+const flexui_plugin_descriptor_v2 descriptor = {
+    sizeof(flexui_plugin_descriptor_v2), 0,
     literal_view(FLEXUI_TEST_PLUGIN_ID),
     literal_view("1.0.0"), 1, 0, services, {0}};
 
-const flexui_plugin_api_v1 api = {
-    sizeof(flexui_plugin_api_v1), FLEXUI_PLUGIN_ABI_MAJOR,
+const flexui_plugin_api_v2 api = {
+    sizeof(flexui_plugin_api_v2), FLEXUI_PLUGIN_ABI_MAJOR,
     FLEXUI_PLUGIN_ABI_MINOR,      0,
     &descriptor,                  &create_instance,
     &start_instance,             &submit_request,
@@ -309,7 +309,7 @@ const flexui_plugin_api_v1 api = {
 
 } // namespace
 
-extern "C" FLEXUI_PLUGIN_EXPORT const flexui_plugin_api_v1 *FLEXUI_PLUGIN_CALL
-flexui_plugin_get_api_v1(void) {
+extern "C" FLEXUI_PLUGIN_EXPORT const flexui_plugin_api_v2 *FLEXUI_PLUGIN_CALL
+flexui_plugin_get_api_v2(void) {
   return &api;
 }
