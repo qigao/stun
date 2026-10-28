@@ -110,6 +110,63 @@ private:
   bool commands_emitted_ = false;
 };
 
+/// Real compiler-scoped callback source; the host must never be asked to
+/// submit commands already cancelled by application-owned scope retirement.
+class ScopedDispatcherModule final : public flexUI::IScriptModule {
+public:
+  explicit ScopedDispatcherModule(std::shared_ptr<DispatcherProbe> probe)
+      : probe_(std::move(probe)) {}
+
+  flexUI::ScriptResolveResult resolve_export(
+      std::string_view name, flexUI::ScriptCallbackKind callback) override {
+    if (name == "write_document" && callback == flexUI::ScriptCallbackKind::Event) {
+      return {flexUI::ScriptExportHandle{1}, {}};
+    }
+    if (name == "on_service_completion" &&
+        callback == flexUI::ScriptCallbackKind::ServiceCompletion) {
+      return {flexUI::ScriptExportHandle{2}, {}};
+    }
+    return {};
+  }
+
+  flexUI::ScriptCallResult call(
+      flexUI::ScriptExportHandle handle,
+      const flexUI::ScriptCallContext &context) override {
+    flexUI::ScriptCallResult result;
+    if (handle.value == 1 && context.callback == flexUI::ScriptCallbackKind::Event &&
+        context.event != nullptr) {
+      const auto &id = context.event->current_target.id;
+      std::uint64_t request_id = 0;
+      if (id == "sale::action") {
+        request_id = 201;
+      } else if (id == "sales::action") {
+        request_id = 202;
+      } else {
+        return {{flexUI::ScriptModuleErrorCode::RuntimeFailure,
+                 "unexpected compiled scope event target"}};
+      }
+      const auto appended = result.commands.append(
+          {request_id, "storage/1", "write", "document"});
+      if (!appended) {
+        return {{flexUI::ScriptModuleErrorCode::ResourceLimitExceeded,
+                 appended.error.message}};
+      }
+      return result;
+    }
+    if (handle.value == 2 &&
+        context.callback == flexUI::ScriptCallbackKind::ServiceCompletion &&
+        context.service_completion != nullptr) {
+      probe_->completions.push_back(*context.service_completion);
+      return result;
+    }
+    return {{flexUI::ScriptModuleErrorCode::RuntimeFailure,
+             "unexpected scoped dispatcher callback"}};
+  }
+
+private:
+  std::shared_ptr<DispatcherProbe> probe_;
+};
+
 struct DispatcherFixture {
   std::shared_ptr<DispatcherProbe> probe;
   std::shared_ptr<DispatcherEndpoint> endpoint;
@@ -249,6 +306,82 @@ spec("FlexUI application service dispatcher") {
     check(fixture.built.application->try_dispatch_service_completion());
     check_equal(fixture.probe->completions.front().error_code,
                 std::string("service.submit.exception"));
+  }
+
+  it("never submits a retired scope's queued command to the real endpoint") {
+    auto probe = std::make_shared<DispatcherProbe>();
+    auto endpoint = std::make_shared<DispatcherEndpoint>(
+        probe, EndpointBehavior::CompleteSynchronously);
+    flexUI::ApplicationServiceRegistryBuilder registry_builder;
+    check(registry_builder.register_service(
+        {"storage/1", {{"write", 1024}}}, endpoint));
+    auto registry = registry_builder.build();
+    check(registry);
+    if (!registry) return;
+
+    const std::string root =
+        "<ui name=\"ScopedDispatcher\"><main id=\"root\">"
+        "<section id=\"left\"/><section id=\"right\"/></main></ui>";
+    const std::string panel =
+        "<ui name=\"Panel\" xmlns:on=\"urn:flexui:event\">"
+        "<button id=\"action\" on:key_down=\"write_document\">Run</button></ui>";
+    flexUI::DesktopApplicationBuilder builder(nullptr);
+    builder.xml_entry(root)
+        .scoped_xml_component("sale", "left", panel)
+        .scoped_xml_component("sales", "right", panel)
+        .services(std::move(registry.registry),
+                  {{"storage/1"}, {"storage/1"}})
+        .script("scoped-dispatcher", [probe](std::string_view, std::string_view) {
+          return flexUI::ScriptModuleFactoryResult{
+              std::make_unique<ScopedDispatcherModule>(probe), {}};
+        });
+    auto built = builder.build();
+    check(built);
+    if (!built) return;
+    auto &app = *built.application;
+    auto *sale = app.box().get_by_id("sale::action");
+    auto *sales = app.box().get_by_id("sales::action");
+    check_not_null(sale);
+    check_not_null(sales);
+    if (!sale || !sales) return;
+
+    app.box().set_focus(sale);
+    auto key = flexUI::Event::key_down(flexUI::KeyCode::A);
+    check(app.dispatch_event(key));
+    app.box().set_focus(sales);
+    key = flexUI::Event::key_down(flexUI::KeyCode::A);
+    check(app.dispatch_event(key));
+    check_equal(app.service_statistics().current_pending, std::size_t{2});
+
+    // The application must retire all script routes before calling the
+    // queue quiescence facade. No service endpoint has been contacted yet.
+    check(app.retire_scoped_event_handlers("sale"));
+    const auto quiesced = app.quiesce_retired_scoped_service_requests("sale");
+    check(quiesced);
+    check_equal(quiesced.cancelled_queued, std::size_t{1});
+    check_equal(quiesced.newly_suppressed_in_flight, std::size_t{0});
+    check(probe->submitted_ids.empty());
+
+    auto dispatcher = flexUI::ApplicationServiceDispatcher::create(app);
+    check(dispatcher);
+    if (!dispatcher) return;
+    const auto pumped = dispatcher.dispatcher->pump();
+    check(pumped);
+    check_equal(pumped.submitted, std::size_t{1});
+    check_equal(probe->submitted_ids.size(), std::size_t{1});
+    check_equal(probe->submitted_ids.front(), std::uint64_t{202});
+    check(app.try_receive_service_request().status ==
+          flexUI::ApplicationServicePollStatus::Empty);
+
+    auto completion = app.try_dispatch_service_completion();
+    check(completion);
+    check(completion.dispatched);
+    check_equal(probe->completions.size(), std::size_t{1});
+    check_equal(probe->completions.front().script_request_id, std::uint64_t{202});
+    check_equal(app.service_statistics().cancelled, std::uint64_t{1});
+    check_equal(app.service_statistics().completed, std::uint64_t{1});
+    check_equal(app.service_statistics().current_pending, std::size_t{0});
+    check(app.controller()->state() == flexUI::ControllerState::Mounted);
   }
 
   it("rejects a foreign owner-thread pump") {

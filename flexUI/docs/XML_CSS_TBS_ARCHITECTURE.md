@@ -3,6 +3,22 @@
 状态：架构决策已采用，实施与验收按下列工作项推进
 日期：2026-08-31
 
+## 2026-10-28 P4.4 M3d M0 服务端取消前置 Native 门禁（Draft，Issue #292）
+
+将已有真实生产 `ApplicationServiceRegistry`、
+`ApplicationCompletionMailbox` 与 `ApplicationServiceDispatcher` 的
+原生 CTest 统一纳入 Linux ASan/UBSan、独立 LSan 以及 Windows/macOS
+Headless 必跑矩阵，不使用模拟的 ServiceDispatcher/第二个完成队列。
+增加真实 scoped XML 事件 → ScriptController → 应用队列 → Dispatcher →
+Endpoint → completion 回归：精确退出 `sale` 后，尚未交付到宿主的命令
+必须被取消，`sales` 的命令仍按 FIFO 交付并接收真实完成消息。
+
+**本阶段仅加强端到端验证，不能宣称已实现 endpoint cancel。**
+InFlight 请求仍需真实端点的精确 token 协作取消与终态证明；
+插件 C ABI v1 无此接口，不能以全局 stop/join、丢弃完成消息或
+队列 `Suppressed` 作为 worker 已停止的证据。契约单独记录在 #292，
+`unmount(scope)` 继续由 #275 跟踪。
+
 ## 2026-10-28 P4.4 M3c 应用层安全准入门禁（Draft PR #291，基于已合并 #290）
 
 单个 DesktopApplication 可调用
