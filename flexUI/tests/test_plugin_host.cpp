@@ -582,6 +582,29 @@ suite("FlexUI PluginHost") {
       check_equal(static_cast<int>(host.host->state()),
                   static_cast<int>(flexUI::PluginHostState::Started));
       check_not_null(app.box().get_by_id("sales::action"));
+      // Explicit regression: the sibling must be able to publish and
+      // consume ANOTHER real native request after sale's worker has joined.
+      app.box().set_focus(sales);
+      auto sibling_event = flexUI::Event::key_down(flexUI::KeyCode::A);
+      check_true(static_cast<bool>(app.dispatch_event(sibling_event)));
+      check_equal(app.service_statistics().current_pending, std::size_t{1});
+      auto next_sibling = dispatcher.dispatcher->pump();
+      check_true(static_cast<bool>(next_sibling));
+      check_equal(next_sibling.submitted, std::size_t{1});
+      for (int n = 0; n < 300 && completions->size() < 2; ++n) {
+        auto polled = app.try_dispatch_service_completion();
+        check_false(static_cast<bool>(polled.error));
+        if (polled.status == flexUI::ApplicationServicePollStatus::Ready)
+          break;
+        if (polled.status == flexUI::ApplicationServicePollStatus::Empty)
+          std::this_thread::sleep_for(std::chrono::milliseconds(1));
+      }
+      check_equal(completions->size(), std::size_t{2});
+      if (completions->size() == 2) {
+        check_equal(completions->back().script_request_id, std::uint64_t{502});
+        check_equal(completions->back().payload, std::string("native-payload"));
+      }
+      check_true(app.inspect_scoped_service_drain("sale").queue_drained());
       // Scope join cannot unload a DLL or close unrelated sibling routes.
       check_true(static_cast<bool>(host.host->stop(std::chrono::seconds(2))));
       check_true(static_cast<bool>(app.request_close()));

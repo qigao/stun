@@ -621,3 +621,10 @@ quiescence + queue terminal consumption, native non-plugin endpoint lifetime
 proof, ALL Widget/Binding leases and an atomic compiled-subtree disposal
 transaction are still mandatory. No `unmount(scope)` on #302; keep #298/#275
 OPEN and Draft unmerged.
+
+
+M4b5's native scoped-worker acceptance also re-dispatches a fresh
+`sales::action` after `sale` has independently joined and asserts the
+actual second completion, script request ID and payload. The shared module
+remains Started; this is not a plugin-wide stop and not a same-content
+fixture mock.
