@@ -31,3 +31,25 @@ Current rollout: Stun runtime conformance Linux (including separately
 instrumented LSan) and FlexUI/Tango native headless Windows/macOS.
 These tests still run their existing cross-platform and sanitizer gates.
 Other workflows will require separately scoped follow-up activation.
+
+## First verified cold-run evidence — 2026-10-28
+
+PR #303 initial exact HEAD: `73bc64ced220fb2ec7c3aec5bf63931cba708db0`.
+
+| Native job | Cacheable calls | Hits | Misses | Hit rate | CI |
+| --- | ---: | ---: | ---: | ---: | --- |
+| Linux / installed SDK + ASan/UBSan/LSan | 611 | 27 | 584 | 4.42% | [40673715901](https://github.com/qigao/stun/actions/runs/40673715901) |
+| macOS / FlexUI Tango Headless | 825 | 36 | 789 | 4.36% | [40673715890](https://github.com/qigao/stun/actions/runs/40673715890) |
+| Windows / real MSVC + ConPTY | 327 | 0 | 327 | 0.00% | [40673715890](https://github.com/qigao/stun/actions/runs/40673715890) |
+
+All three native cacheable-invocation gates passed, their archived
+compiler-output caches were saved with immutable `stun-ccache-v1-4.14.2`
+keys, and all original native/sanitizer tests passed. A zero-hit cold
+Windows cache is legitimate; no warm-cache saving has been claimed.
+
+A second exact-head run created from this documentation change should
+restore the first commit's cache snapshot via the platform/profile
+restore-prefix, without changing any C/C++ source or compilation options.
+It must still run the identical real tests and report independently
+verified ccache hit/miss stats. Do not infer a speedup until the restored
+cache and timings are observed.
