@@ -3,6 +3,29 @@
 状态：架构决策已采用，实施与验收按下列工作项推进
 日期：2026-08-31
 
+## 2026-10-28 P4.4 M4b1 编译来源对 live Box 的只读结构校验（Draft）
+
+`DesktopApplication::inspect_scoped_component_topology(scope)` 在当前
+Box 的 owner-thread 上，按 M4b0 的编译器生成 root-child ordinal、
+preorder parent/child index、匿名/非匿名 ID、tag、Widget 来源逐一查询
+真实挂载节点，验证节点父级/ID 索引及结构子节点数量没有发生外部漂移。
+每次查询只暂借一个有界的本地指针向量，函数退出立即释放，不形成
+第二套可变 runtime owner registry，也不回调 Script/Plugin/Widget。
+
+错误线程、非 Ready/活跃脚本 callback、未声明 scope、丢失节点、
+Widget 身份不匹配、匿名节点位置改变、额外结构子节点均拒绝，
+但其他 scope 的 Box、Widget/Bindings、服务队列不受影响。
+特别是没有脚本事件的匿名 root/Widget 也可校验，不要求制造
+`on:click` handler。reload 将账本与 Box 在一个现有 generation
+事务中共同换代，新候选重新接受校验。
+
+**本检查不是 unmount 许可证**：Widget 内部节点、Binding observers、
+Focus/Capture、动画/布局借用，以及 plugin worker stop/join 都还需要
+各自独立的有界生命周期门禁；对 Widget 内部动态 part 不伪造
+静态编译节点，未来物理卸载必须在这些 owner 证明后执行。
+详见 Issue #298，不能用这个只读检查绕开
+`Box::compiled_program_installed_` 的原有严格拒绝。
+
 ## 2026-10-28 P4.4 M4b0 编译器来源确定的组件结构所有权账本（Draft）
 
 `compile_scoped_ui_components` 在静态合并阶段、`UiDocumentInstantiator`

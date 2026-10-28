@@ -560,6 +560,122 @@ DesktopApplication::scoped_component_ownership() const noexcept {
   return impl_->active->scoped_ownership;
 }
 
+DesktopScopedComponentTopologySnapshot
+DesktopApplication::inspect_scoped_component_topology(std::string_view scope) const {
+  const auto refused = [](DesktopApplicationErrorCode code,
+                          std::string message) {
+    DesktopScopedComponentTopologySnapshot result;
+    result.error = fail(code, DesktopApplicationStage::CandidateBuild,
+                        std::move(message));
+    return result;
+  };
+  if (!is_owner_thread()) {
+    return refused(DesktopApplicationErrorCode::WrongThread,
+                   "scoped topology inspection requires the UI owner thread");
+  }
+  if (impl_->state != DesktopApplicationState::Ready ||
+      !impl_->active || !impl_->active->box || !impl_->active->program) {
+    return refused(DesktopApplicationErrorCode::InvalidState,
+                   "scoped topology inspection requires a published ready Box");
+  }
+  if ((impl_->active->controller &&
+       impl_->active->controller->state() != ControllerState::Mounted) ||
+      (impl_->active->event_bridge &&
+       impl_->active->event_bridge->is_dispatching())) {
+    return refused(DesktopApplicationErrorCode::InvalidState,
+                   "scoped topology inspection rejects active script/native callbacks");
+  }
+  const auto found = std::find_if(
+      impl_->active->scoped_ownership.begin(),
+      impl_->active->scoped_ownership.end(),
+      [scope](const UiScopedComponentOwnership &owner) {
+        return std::string_view(owner.scope) == scope;
+      });
+  if (found == impl_->active->scoped_ownership.end()) {
+    return refused(DesktopApplicationErrorCode::InvalidConfiguration,
+                   "scoped topology inspection requires a compiler-registered scope");
+  }
+  if (found->nodes.empty()) {
+    return refused(DesktopApplicationErrorCode::InvalidState,
+                   "scoped topology ledger has no compiled root node");
+  }
+  auto &live_box = *impl_->active->box;
+  const Element *host = live_box.get_by_id(found->host_id);
+  if (host == nullptr) {
+    return refused(DesktopApplicationErrorCode::InvalidState,
+                   "scoped topology host is absent from the live Box");
+  }
+
+  try {
+    // Ephemeral local pointers only: NO second runtime ownership registry.
+    // Every ID, anonymous Widget and relative child ordinal is checked
+    // against the currently mounted Box. Allocation has no live side effects.
+    std::vector<const Element *> resolved;
+    resolved.reserve(found->nodes.size());
+    std::vector<std::size_t> expected_children(found->nodes.size(), 0);
+    for (std::size_t i = 0; i < found->nodes.size(); ++i) {
+      const auto &node = found->nodes[i];
+      if (node.parent_index == UiScopedOwnedNode::kNoParent) {
+        if (i != 0 || node.child_index != found->root_child_index) {
+          return refused(DesktopApplicationErrorCode::InvalidState,
+                         "scoped topology contains a foreign root position");
+        }
+      } else {
+        if (node.parent_index >= i) {
+          return refused(DesktopApplicationErrorCode::InvalidState,
+                         "scoped topology parent precedes no compiled child");
+        }
+        ++expected_children[node.parent_index];
+      }
+    }
+
+    DesktopScopedComponentTopologySnapshot snapshot;
+    for (std::size_t i = 0; i < found->nodes.size(); ++i) {
+      const auto &node = found->nodes[i];
+      const Element *parent =
+          node.parent_index == UiScopedOwnedNode::kNoParent
+              ? host
+              : resolved[node.parent_index];
+      if (node.child_index >= parent->children().size()) {
+        return refused(DesktopApplicationErrorCode::InvalidState,
+                       "scoped topology compiled child ordinal is no longer live");
+      }
+      const auto *element =
+          dynamic_cast<const Element *>(parent->children()[node.child_index]);
+      if (element == nullptr || element->parent_elem() != parent ||
+          element->is_widget_owned() || element->id() != node.qualified_id ||
+          element->tag() != node.tag ||
+          (element->widget != nullptr) != node.widget ||
+          (!node.qualified_id.empty() &&
+           live_box.get_by_id(node.qualified_id) != element)) {
+        return refused(DesktopApplicationErrorCode::InvalidState,
+                       "scoped topology no longer matches the mounted Box owner");
+      }
+      // Structural Elements must contain exactly the compiler-authored
+      // children. Widget-owned internal parts are deliberately NOT falsely
+      // counted as scoped compiler nodes; their independent owner lifecycle
+      // will require a separate teardown preflight.
+      if (!node.widget &&
+          element->children().size() != expected_children[i]) {
+        return refused(DesktopApplicationErrorCode::InvalidState,
+                       "scoped structural Element gained unowned descendants");
+      }
+      resolved.push_back(element);
+      ++snapshot.resolved_compiled_nodes;
+      if (node.widget) ++snapshot.compiled_widget_hosts;
+      if (node.has_compiled_events) ++snapshot.compiled_event_nodes;
+      if (node.has_compiled_bindings) ++snapshot.compiled_binding_nodes;
+    }
+    return snapshot;
+  } catch (const std::exception &) {
+    return refused(DesktopApplicationErrorCode::CandidateBuildFailed,
+                   "scoped live topology preflight could not stage its bounded snapshot");
+  } catch (...) {
+    return refused(DesktopApplicationErrorCode::CandidateBuildFailed,
+                   "scoped live topology preflight raised an unknown exception");
+  }
+}
+
 ScriptController *DesktopApplication::controller() noexcept {
   return impl_->active->controller.get();
 }

@@ -177,6 +177,20 @@ struct DesktopApplicationScopedServiceDrainSnapshot {
   }
 };
 
+/// A bounded, owner-thread-only validation of compiler-attributed nodes against
+/// the CURRENT live Box. No Element* is retained or returned. This proves only
+/// topology/ID/Widget factory presence; it does NOT prove focus/capture,
+/// Widget/Binding observer quiescence, worker join, or safe-to-unmount.
+struct DesktopScopedComponentTopologySnapshot {
+  std::size_t resolved_compiled_nodes = 0;
+  std::size_t compiled_widget_hosts = 0;
+  std::size_t compiled_event_nodes = 0;
+  std::size_t compiled_binding_nodes = 0;
+  DesktopApplicationError error;
+
+  explicit operator bool() const noexcept { return !static_cast<bool>(error); }
+};
+
 struct DesktopApplicationBuildResult {
   std::unique_ptr<DesktopApplication> application;
   DesktopApplicationError error;
@@ -232,6 +246,13 @@ public:
   /// Call on the owner thread, like program().
   const std::vector<UiScopedComponentOwnership> &
   scoped_component_ownership() const noexcept;
+  /// Verify that each compiled per-scope node resolves by its parent ordinal
+  /// and ID/tag/Widget kind in this application's live Box. Reject on owner
+  /// mismatch, missing anonymous nodes, or structural drift WITHOUT mutating
+  /// the Box or publishing a new runtime owner table. This is only a necessary
+  /// stage of the future unmount preflight, NOT resource release evidence.
+  DesktopScopedComponentTopologySnapshot
+  inspect_scoped_component_topology(std::string_view scope) const;
   ScriptController *controller() noexcept;
   const ScriptController *controller() const noexcept;
   const DesktopApplicationSources &sources() const noexcept;
