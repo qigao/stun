@@ -366,7 +366,7 @@ spec("FlexUI desktop scoped service quiescence facade") {
     check_equal(new_request.request->script_request_id, std::uint64_t{74});
     check_equal(new_request.request->token.generation, generation + 1);
   }
-});
+}
 
 spec("FlexUI desktop application publishes complete XML candidates") {
   it("builds typed XML strict CSS and a mounted script controller") {
