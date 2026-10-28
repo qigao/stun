@@ -26,6 +26,13 @@ nlohmann::json utility_fixture() {
                             {"decls", {{"display", "none"}}}}}}}};
 }
 
+class UnverifiedWidget final : public flexUI::Widget {
+public:
+  void emit_render_commands(const flexUI::Element&,
+                            flexUI::RenderCommandList&) override {}
+  const char* type_name() const override { return "UnverifiedWidget"; }
+};
+
 struct PreboundRehashResult {
   std::string initial_value;
   std::string updated_value;
@@ -544,6 +551,24 @@ spec("UiBindingRuntime projects typed C++ inputs through MIR") {
     check(runtime.targets().unbind(binding.id));
     check(runtime.inputs().erase("enabled"));
     check_false(runtime.inputs().contains("enabled"));
+  }
+}
+
+spec("FlexUI Widget-local owner audit defaults to deny") {
+  it("flags a third-party Widget until its owner/callback contract is explicit") {
+    flexUI::Box box(nullptr);
+    auto *root = box.create("div", "root");
+    auto *external = box.create_widget<UnverifiedWidget>("div", "external");
+    root->append(external);
+    box.set_root(root);
+    const auto snapshot = box.inspect_subtree_borrowers(external);
+    check(static_cast<bool>(snapshot));
+    check_equal(snapshot.widget_hosts, std::size_t{1});
+    check_equal(snapshot.unverified_widget_hosts, std::size_t{1});
+    check_equal(snapshot.native_widget_callback_owners, std::size_t{0});
+    // Even an empty listener count cannot authorize compiled/Widget retirement.
+    check_false(box.retire_bound_structural_subtree("external"));
+    check_not_null(box.get_by_id("external"));
   }
 }
 

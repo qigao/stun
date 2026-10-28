@@ -757,3 +757,9 @@ component. The future commit must still prove ALL live owner types,
 preallocate full resource disposal, retire callbacks/observers and detach
 Widget parts before destroying their host Element. `unmount(scope)` is absent
 and #302 remains Draft.
+
+M4b6b regression adds an explicit third-party `UnverifiedWidget` with no
+callbacks; the default audit still refuses it, rather than interpreting zero
+listener count as proof. Built-in Button loading state must report an active
+Widget-local owner; a completed-but-not-reclaimed Transition and Animation
+must still appear as retained owners after `has_active()==false`.

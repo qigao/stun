@@ -783,6 +783,40 @@ spec("FlexUI scoped live Box topology preflight") {
                 std::size_t{0});
     check_equal(cleared_effects.borrowers.retained_animation_elements,
                 std::size_t{0});
+
+    // Completed records still retain the Element identity until an explicit
+    // manager collection. Read-only lifecycle checks cannot ignore them.
+    check(app.box().transitions().start_float(
+        action_identity, *opacity, 0.0f, 1.0f, transition, -200.0f));
+    check(app.box().animations().start_float(
+        action_identity, *opacity, {{0.0f, 0.0f}, {1.0f, 1.0f}},
+        animation, -200.0f));
+    check_false(app.box().transitions().has_active(action_identity, 0.0f));
+    check_false(app.box().animations().has_active(action_identity, 0.0f));
+    const auto expired_but_owned =
+        app.inspect_scoped_component_borrowers("eventless");
+    check(static_cast<bool>(expired_but_owned));
+    check_equal(expired_but_owned.borrowers.retained_transition_elements,
+                std::size_t{1});
+    check_equal(expired_but_owned.borrowers.retained_animation_elements,
+                std::size_t{1});
+    app.box().transitions().clear_element(action_identity);
+    app.box().animations().clear_element(action_identity);
+
+    auto *button = dynamic_cast<flexUI::ButtonWidget *>(action->widget);
+    check_not_null(button);
+    if (!button) return;
+    button->set_loading(true);
+    const auto spinning = app.inspect_scoped_component_borrowers("eventless");
+    check(static_cast<bool>(spinning));
+    check_equal(spinning.borrowers.active_widget_local_borrowers,
+                std::size_t{1});
+    button->set_loading(false);
+    const auto idle = app.inspect_scoped_component_borrowers("eventless");
+    check(static_cast<bool>(idle));
+    check_equal(idle.borrowers.active_widget_local_borrowers,
+                std::size_t{0});
+
     check_false(baseline.focused_descendant);
     check_false(baseline.captured_descendant);
     check_false(baseline.native_event_dispatching);
