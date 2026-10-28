@@ -5,7 +5,7 @@ name: gCanvas OpenGLES runtime
 # the previous commit's real compiler-output archive.
 on:
   pull_request:
-    types: [opened, synchronize, reopened, ready_for_review, labeled]
+    types: [opened, synchronize, reopened, labeled]
     paths:
       - "shared/gcanvas/**"
       - ".github/workflows/gcanvas-gles-runtime.yml"
