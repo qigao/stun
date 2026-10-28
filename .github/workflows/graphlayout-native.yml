@@ -11,6 +11,8 @@ on:
       - 'vendor/CMakeLists.txt'
       - 'vendor/cola/**'
       - '.github/workflows/graphlayout-native.yml'
+      - '.github/actions/setup-ccache/**'
+      - '.github/scripts/report-ccache.sh'
       - '.github/scripts/ci-affected.sh'
   push:
     branches: [master]
@@ -23,6 +25,8 @@ on:
       - 'vendor/CMakeLists.txt'
       - 'vendor/cola/**'
       - '.github/workflows/graphlayout-native.yml'
+      - '.github/actions/setup-ccache/**'
+      - '.github/scripts/report-ccache.sh'
       - '.github/scripts/ci-affected.sh'
   workflow_dispatch:
 
@@ -70,7 +74,8 @@ jobs:
           bash .github/scripts/ci-affected.sh \
             'shared/layout/*' 'charts/dotgraph/*' 'charts/mermaid/flowchart/src/flowchart_layout.cpp' 'charts/mermaid/flowchart/include/*' 'charts/mermaid/flowchart/CMakeLists.txt' \
             'charts/mermaid/mindmap/*' 'charts/infographic/*' 'vendor/CMakeLists.txt' 'vendor/cola/*' \
-            '.github/workflows/graphlayout-native.yml' '.github/scripts/ci-affected.sh'
+            '.github/workflows/graphlayout-native.yml' '.github/scripts/ci-affected.sh' \
+            '.github/actions/setup-ccache/*' '.github/scripts/report-ccache.sh'
 
   graphlayout:
     needs: changes
@@ -99,35 +104,69 @@ jobs:
         env:
           EXPECTED_STUN_SHA: ${{ needs.changes.outputs.source_sha }}
         run: test "$(git rev-parse HEAD)" = "$EXPECTED_STUN_SHA"
-      - name: Setup ccache
-        if: runner.os != 'Windows'
-        shell: bash
-        run: |
-          if [[ "$RUNNER_OS" == "Linux" ]]; then
-            sudo apt-get update -qq
-            sudo apt-get install -y ccache ninja-build
-          else
-            brew install ccache ninja
-          fi
-      - name: Restore compiler cache
-        if: runner.os != 'Windows'
-        uses: actions/cache@v4
+      - name: Activate real MSVC compiler toolchain
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@v1
         with:
-          path: ~/.cache/ccache
-          key: graphlayout-${{ matrix.os }}-${{ matrix.toolchain }}-${{ hashFiles('shared/layout/**') }}
-          restore-keys: |
-            graphlayout-${{ matrix.os }}-${{ matrix.toolchain }}-
-      - name: Configure
+          arch: x64
+      - name: Install pinned ccache C/C++ compiler launcher
+        uses: ./.github/actions/setup-ccache
+        with:
+          profile: graphlayout-${{ matrix.toolchain }}
+          source_sha: ${{ needs.changes.outputs.source_sha }}
+      - name: Require Ninja generator on all four native matrix entries
         shell: bash
         run: |
-          if [[ "$RUNNER_OS" == "Windows" ]]; then
-            cmake -S shared/layout -B build/graphlayout -G 'Visual Studio 17 2022' -A x64 -DBUILD_TESTING=ON
-          else
-            extra=()
-            if [[ '${{ matrix.toolchain }}' == 'clang' ]]; then extra+=(-DCMAKE_CXX_COMPILER=clang++); fi
-            cmake -S shared/layout -B build/graphlayout -G Ninja -DBUILD_TESTING=ON -DCMAKE_CXX_COMPILER_LAUNCHER=ccache "${extra[@]}"
+          set -euo pipefail
+          if ! command -v ninja >/dev/null 2>&1; then
+            if [[ "$RUNNER_OS" == Linux ]]; then
+              sudo apt-get update -qq
+              sudo apt-get install -y --no-install-recommends ninja-build
+            elif [[ "$RUNNER_OS" == macOS ]]; then
+              brew install ninja
+            else
+              echo "::error::Ninja is required for the Windows MSVC ccache compiler launcher"
+              exit 1
+            fi
           fi
-      - name: Build
+          ninja --version
+          if [[ "$RUNNER_OS" == Windows ]]; then
+            command -v cl
+          fi
+      - name: Configure production GraphLayout algorithms under ccache
+        shell: bash
+        run: |
+          set -euo pipefail
+          # macOS ships Bash 3.2: with 'set -u', expanding an EMPTY
+          # array via "${compiler_args[@]}" fails before CMake executes.
+          # Stage the full command in a nonempty array on every matrix row.
+          cmake_args=(-S shared/layout -B build/graphlayout -G Ninja
+                      -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON)
+          if [[ '${{ matrix.toolchain }}' == clang ]]; then
+            cmake_args+=(-DCMAKE_CXX_COMPILER=clang++)
+          elif [[ '${{ matrix.toolchain }}' == msvc ]]; then
+            cmake_args+=(-DCMAKE_CXX_COMPILER=cl)
+          fi
+          cmake "${cmake_args[@]}"
+      - name: Build real independent GraphLayout libraries and tests
+        shell: bash
         run: cmake --build build/graphlayout --config Release --parallel 2
-      - name: Test
-        run: ctest --test-dir build/graphlayout -C Release --output-on-failure
+      - name: Run GraphLayout algorithm qualification
+        shell: bash
+        run: ctest --test-dir build/graphlayout -C Release --no-tests=error --output-on-failure
+      # The first accepted AppleClang run populates a cold cache. Repeat on
+      # a new exact HEAD with unchanged C++ sources to verify real RESTORED
+      # compiler hits, independently from a successful dependency download.
+      - name: Require ccache compilation evidence for exact toolchain
+        shell: bash
+        run: bash .github/scripts/report-ccache.sh graphlayout-${{ matrix.toolchain }}
+      - name: Archive exact-head GraphLayout test and compiler-cache evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: graphlayout-${{ matrix.toolchain }}-${{ needs.changes.outputs.source_sha }}
+          retention-days: 3
+          if-no-files-found: warn
+          path: |
+            build/graphlayout/Testing/Temporary/LastTest.log
+            ${{ runner.temp }}/stun-ccache-stats-graphlayout-${{ matrix.toolchain }}.tsv

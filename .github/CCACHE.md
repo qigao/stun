@@ -73,3 +73,53 @@ them too. This workflow change triggers a fresh Linux full native build,
 allowing the first run's Linux compiler-output snapshot to prove restore
 and recompile correctness. Continue to evaluate the real exact-HEAD stats;
 do not count a skip as proof.
+
+## GraphLayout 4-way compiler-cache rollout (Draft follow-up)
+
+GraphLayout's former GCC/Clang build used independently installed, mutable
+ccache packages plus a source-path hash; Windows Visual Studio compilation
+had no compiler cache. The dedicated GraphLayout CI follow-up reuses the
+same SHA-256-pinned ccache 4.14.2 Action and machine-readable stats gate
+on four isolated profiles: Linux GCC, Linux Clang, macOS AppleClang,
+and Windows MSVC. Windows switches the build **generator** to Ninja under
+the real x64 MSVC environment; this is required to honor CMake compiler
+launchers and must pass the actual GraphLayout regression suite. There is
+no fallback generator or compiler on a failed cache installation.
+
+All four entries compile the real independent GraphLayout libraries in
+Release, require nonzero ccache invocations, run CTest and archive exact
+source-HEAD stats. The full 4-way exact-head CI is mandatory before
+claiming the follow-up accepted or merging it.
+
+## GraphLayout CI first-run macOS Bash 3.2 failure and fix
+
+Initial draft HEAD `54d1622b` compiled and tested Linux GCC/Clang and
+entered Windows real MSVC/Ninja, but macOS failed *before configuring*
+CMake: Bash 3.2 with `set -u` reports an unbound variable when the
+optional empty `compiler_args[@]` is expanded. This is a script-level
+portability error, not a failed GraphLayout algorithm or a ccache miss.
+The fixed command uses a mandatory nonempty `cmake_args` array with
+optional toolchain overrides appended; strict shell error handling is
+unchanged and the exact four-platform CI must pass at the new HEAD.
+
+## GraphLayout first all-four-way green and cache evidence (2026-10-28)
+
+PR #304 exact accepted first full HEAD `d5ebd3f6977aa956a2a03c75722ce46085d685bf`
+([run 40698224003](https://github.com/qigao/stun/actions/runs/40698224003))
+passed all real GraphLayout CTest suites in four toolchains, including
+Windows Ninja + MSVC and pinned SHA-256 checked ccache:
+
+| Compiler | Cacheable calls | Hits | Misses | Classification |
+| --- | ---: | ---: | ---: | --- |
+| Linux GCC | 45 | 45 | 0 | Restored previous commit's GCC cache |
+| Linux Clang | 45 | 45 | 0 | Restored previous commit's Clang cache |
+| Windows MSVC | 44 | 44 | 0 | Restored previous commit's MSVC cache |
+| macOS AppleClang | 45 | 0 | 45 | First successful build: cold cache saved |
+
+The immediately previous HEAD `54d1622b` had already passed Linux
+GCC/Clang and Windows MSVC but failed before macOS CMake configuration
+because Bash 3.2 `set -u` rejected an empty optional array.
+A later no-C++-source-change CI invocation must restore the AppleClang
+snapshot, report real warm compiler hits and rerun native tests before
+we regard AppleClang cache reuse as qualified. This is a separate
+acceptance criterion, not a claim inferred from the first save.
