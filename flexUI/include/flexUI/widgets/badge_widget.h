@@ -40,6 +40,9 @@ public:
     return false;
   }
   const char* type_name() const override { return "BadgeWidget"; }
+  WidgetLocalBorrowSnapshot inspect_local_borrowers() const noexcept override {
+    return {true, 0, false};
+  }
   bool paints_host_box() const override { return true; }
 
   // Badge content

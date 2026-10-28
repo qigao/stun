@@ -26,6 +26,9 @@ public:
   bool handle_event(const Event& event, Element& elem) override;
   void update(float delta_ms, Element& elem) override;
   const char* type_name() const override { return "ModalWidget"; }
+  WidgetLocalBorrowSnapshot inspect_local_borrowers() const noexcept override {
+    return {true, on_close_ ? std::size_t{1} : std::size_t{0}, open_ || opacity_ != 0.0f};
+  }
 
   const std::string& title() const { return title_; }
   void set_title(const std::string& t) {

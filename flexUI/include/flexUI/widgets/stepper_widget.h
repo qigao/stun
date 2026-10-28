@@ -33,6 +33,9 @@ public:
     bool handle_event(const Event& event, Element& elem) override;
     void update(float delta_ms, Element& elem) override;
     const char* type_name() const override { return "StepperWidget"; }
+  WidgetLocalBorrowSnapshot inspect_local_borrowers() const noexcept override {
+    return {true, callback_ ? std::size_t{1} : std::size_t{0}, pressed_ || hovered_button_ >= 0};
+  }
 
     // Value access
     int value() const { return value_; }
