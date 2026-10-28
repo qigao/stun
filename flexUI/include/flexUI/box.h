@@ -46,7 +46,17 @@ enum class BoxSubtreeBorrowErrorCode {
 struct BoxSubtreeBorrowSnapshot {
   BoxSubtreeBorrowErrorCode error = BoxSubtreeBorrowErrorCode::None;
   std::size_t mounted_elements = 0;
+  /// All Box-owned nodes, including children with Widget-managed semantics.
+  std::size_t box_owned_elements = 0;
+  /// Real dynamically created Widget-owned internal Element parts.
+  std::size_t widget_owned_parts = 0;
   std::size_t widget_hosts = 0;
+  /// These live/stale cache owners must be cleaned in a future physical
+  /// detach; neither a current_time check nor a zero-frame snapshot clears.
+  std::size_t retained_transition_elements = 0;
+  std::size_t retained_animation_elements = 0;
+  std::size_t styled_element_cache_entries = 0;
+  std::size_t container_width_cache_entries = 0;
   std::size_t binding_targets = 0;
   std::size_t value_observers = 0;
   std::size_t blocked_value_observers = 0;

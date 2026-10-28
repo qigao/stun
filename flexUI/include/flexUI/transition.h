@@ -282,6 +282,10 @@ public:
      * Check if element has active transitions
      */
     bool has_active(std::uintptr_t element_id, float current_time_ms);
+    /// Read-only lifetime ownership query: even an expired record that has
+    /// not yet been reclaimed must be retired before an Element is destroyed.
+    /// Unlike update(), this method never evicts or samples any value.
+    bool retains_element(std::uintptr_t element_id) const noexcept;
 
     /**
      * Union StylePropertyImpact metadata for active typed transitions on one
@@ -394,6 +398,9 @@ public:
                     float current_time_ms) const;
 
     bool has_active(std::uintptr_t element_id, float current_time_ms) const;
+    /// Detect every retained animation owner, including paused and fill-mode
+    /// records and complete but not-yet-reclaimed tracks.
+    bool retains_element(std::uintptr_t element_id) const noexcept;
     std::uint32_t active_impact(std::uintptr_t element_id,
                                 float current_time_ms) const noexcept;
     bool has_effect(std::uintptr_t element_id, float current_time_ms) const;

@@ -718,3 +718,23 @@ before the read-only topology check whenever the controller is not Mounted.
 This does not retire routes, synthesize an eventless handler or change the
 Box owner graph. Native regression asserts the exact nested code/stage,
 unchanged live Element handle and absence of a retired marker.
+
+## 2026-10-28 P4.4 M4b6a — read-only transition/animation/cache owner scan (Draft #302)
+
+The Box borrower snapshot now enumerates the actual mounted subtree's
+Box-owned nodes and its real Widget-internal child Elements, rejecting
+foreign host ownership and Widget pointers not owned by this Box.
+It reports per-subtree retained Transition and Animation owner records,
+including completed-but-uncollected or retained-fill records, and direct
+style/geometry cache entries. `TransitionManager::retains_element` and
+`AnimationManager::retains_element` are const and do not call update(),
+expire tracks or mutate the Box. Two adjacent compiled scopes are exercised
+with real effect records on only one; read-only inspection must report only
+the selected scope and leave both effect stores unchanged until explicit
+cleanup.
+
+These counters are **necessary evidence**, never an unmount grant.
+The eventual physical transaction must stage/commit disposal of all owner
+stores without a callback, avoid allocating during commit, and prove Widget,
+Binding, Controller, external endpoint and script resource retirement
+independently. No `unmount(scope)` has been implemented. #302 remains Draft.

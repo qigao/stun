@@ -1,4 +1,5 @@
 #include <flexUI/application.h>
+#include <flexUI/detail/style_property_registry.h>
 #include <flexUI/application_host_bridge.h>
 #include <flexUI/render_command.h>
 #include <flexUI/widgets/button_widget.h>
@@ -735,6 +736,50 @@ spec("FlexUI scoped live Box topology preflight") {
     check(static_cast<bool>(baseline));
     check(baseline.mounted_elements >= std::size_t{3});
     check(baseline.widget_hosts >= std::size_t{1});
+    check(baseline.widget_owned_parts >= std::size_t{1});
+    check_equal(baseline.box_owned_elements, baseline.mounted_elements);
+    check_equal(baseline.retained_transition_elements, std::size_t{0});
+    check_equal(baseline.retained_animation_elements, std::size_t{0});
+    // Exercise real runtime stores without running a frame that would
+    // opportunistically collect expired records. The inspection itself must
+    // not mutate either owner store or the sibling subtree.
+    const auto *opacity = flexUI::detail::style_property_find("opacity");
+    check_not_null(opacity);
+    if (!opacity) return;
+    const auto action_identity = reinterpret_cast<std::uintptr_t>(action);
+    flexUI::TransitionDef transition;
+    transition.duration_ms = 100.0f;
+    transition.easing = flexUI::EasingType::Linear;
+    check(app.box().transitions().start_float(
+        action_identity, *opacity, 0.0f, 1.0f, transition, 0.0f));
+    flexUI::AnimationDef animation;
+    animation.duration_ms = 100.0f;
+    check(app.box().animations().start_float(
+        action_identity, *opacity, {{0.0f, 0.0f}, {1.0f, 1.0f}},
+        animation, 0.0f));
+    const auto with_effects = app.inspect_scoped_component_borrowers("eventless");
+    check(static_cast<bool>(with_effects));
+    check_equal(with_effects.borrowers.retained_transition_elements,
+                std::size_t{1});
+    check_equal(with_effects.borrowers.retained_animation_elements,
+                std::size_t{1});
+    const auto sibling_effects = app.inspect_scoped_component_borrowers("other");
+    check(static_cast<bool>(sibling_effects));
+    check_equal(sibling_effects.borrowers.retained_transition_elements,
+                std::size_t{0});
+    check_equal(sibling_effects.borrowers.retained_animation_elements,
+                std::size_t{0});
+    // No cleanup was allowed inside a nominally read-only preflight.
+    check(app.box().transitions().retains_element(action_identity));
+    check(app.box().animations().retains_element(action_identity));
+    app.box().transitions().clear_element(action_identity);
+    app.box().animations().clear_element(action_identity);
+    const auto cleared_effects = app.inspect_scoped_component_borrowers("eventless");
+    check(static_cast<bool>(cleared_effects));
+    check_equal(cleared_effects.borrowers.retained_transition_elements,
+                std::size_t{0});
+    check_equal(cleared_effects.borrowers.retained_animation_elements,
+                std::size_t{0});
     check_false(baseline.focused_descendant);
     check_false(baseline.captured_descendant);
     check_false(baseline.native_event_dispatching);

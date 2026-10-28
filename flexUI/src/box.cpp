@@ -1188,7 +1188,37 @@ Box::inspect_subtree_borrowers(const Element *subtree_root) const noexcept {
         return result;
       }
       ++result.mounted_elements;
-      if (element->widget) ++result.widget_hosts;
+      // This snapshot MUST account for real Widget-owned parts, not just
+      // compiler-authored Elements. Every descendant must belong to the one
+      // live Box; a borrowed/fabricated Widget host is never accepted.
+      if (!owns_element(element)) {
+        result.error = BoxSubtreeBorrowErrorCode::InconsistentTree;
+        return result;
+      }
+      ++result.box_owned_elements;
+      if (element->is_widget_owned()) ++result.widget_owned_parts;
+      if (element->widget) {
+        const auto owned_widget = std::find_if(
+            widgets_.begin(), widgets_.end(),
+            [element](const std::unique_ptr<Widget> &candidate) {
+              return candidate.get() == element->widget;
+            });
+        if (owned_widget == widgets_.end() ||
+            (*owned_widget)->host_element() != element) {
+          result.error = BoxSubtreeBorrowErrorCode::InconsistentTree;
+          return result;
+        }
+        ++result.widget_hosts;
+      }
+      const auto identity = reinterpret_cast<std::uintptr_t>(element);
+      if (transitions_.retains_element(identity))
+        ++result.retained_transition_elements;
+      if (animations_.retains_element(identity))
+        ++result.retained_animation_elements;
+      if (styled_elements_.count(identity) != 0)
+        ++result.styled_element_cache_entries;
+      if (container_widths_.count(element) != 0)
+        ++result.container_width_cache_entries;
       const auto observer = bindings_.inspect_target_observers(element);
       if (observer.binding_count != 0) ++result.binding_targets;
       result.value_observers += observer.value_observers;

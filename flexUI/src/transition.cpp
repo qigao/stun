@@ -544,6 +544,13 @@ bool TransitionManager::has_active(std::uintptr_t element_id,
     return false;
 }
 
+bool TransitionManager::retains_element(std::uintptr_t element_id) const noexcept {
+    for (const auto& item : transitions_) {
+        if (item.first.first == element_id) return true;
+    }
+    return false;
+}
+
 std::uint32_t TransitionManager::active_impact(
     std::uintptr_t element_id, float current_time_ms) const noexcept {
     std::uint32_t impact = detail::STYLE_IMPACT_NONE;
@@ -782,6 +789,13 @@ bool AnimationManager::has_active(std::uintptr_t element_id,
         if (key.first == element_id && animation.is_active(current_time_ms)) {
             return true;
         }
+    }
+    return false;
+}
+
+bool AnimationManager::retains_element(std::uintptr_t element_id) const noexcept {
+    for (const auto& item : typed_animations_) {
+        if (item.first.first == element_id) return true;
     }
     return false;
 }
