@@ -1,12 +1,8 @@
 #!/usr/bin/env bash
-# Evaluate only the relevant pull-request diff: the latest update for
-# synchronize events, or the cumulative base-to-head diff when a PR is first
-# opened, reopened, or marked ready.  PR-level paths filters alone cannot make
-# that distinction and can re-run unrelated expensive suites.
-#
-# Fail OPEN (run the check) when GitHub event metadata, history or diff is
-# unavailable. workflow_dispatch, push, and an opt-in ci/full label always run
-# the complete applicable gate.
+# Scope PR synchronize to the latest update, initial PRs to base-to-head,
+# and master pushes to the exact event before/after source delta.
+# Fail OPEN for missing or invalid metadata, git history, checkout identity,
+# or file comparison. workflow_dispatch and ci/full force full qualification.
 set -euo pipefail
 
 emit() {
@@ -14,49 +10,64 @@ emit() {
     printf 'CI affected: %s (%s)\n' "$1" "$2"
 }
 
-if [[ "${GITHUB_EVENT_NAME:-}" != "pull_request" ]]; then
-    emit true "not a pull_request update"
-    exit 0
-fi
+event_name="${GITHUB_EVENT_NAME:-}"
+case "$event_name" in
+    workflow_dispatch)
+        emit true "explicit complete workflow dispatch"
+        exit 0
+        ;;
+    pull_request|push) ;;
+    *)
+        emit true "unsupported workflow event: ${event_name:-unknown}"
+        exit 0
+        ;;
+esac
 
 if [[ ! -r "${GITHUB_EVENT_PATH:-}" ]] || ! command -v jq >/dev/null; then
     emit true "missing event payload or jq"
     exit 0
 fi
 
-action="$(jq -r '.action // empty' "$GITHUB_EVENT_PATH")"
-if [[ "$action" == "labeled" ]] && \
-    [[ "$(jq -r '.label.name // empty' "$GITHUB_EVENT_PATH")" != "ci/full" ]]; then
-    emit false "unrelated pull request label"
-    exit 0
-fi
-if jq -e '[.pull_request.labels[]?.name] | index("ci/full") != null' \
-    "$GITHUB_EVENT_PATH" >/dev/null 2>&1; then
-    emit true "ci/full label requires exact-HEAD requalification"
-    exit 0
-fi
-
-case "$action" in
-    synchronize)
-        before="$(jq -r '.before // empty' "$GITHUB_EVENT_PATH")"
-        after="$(jq -r '.after // .pull_request.head.sha // empty' "$GITHUB_EVENT_PATH")"
-        diff_kind="latest push"
-        ;;
-    opened|reopened|ready_for_review)
-        before="$(jq -r '.pull_request.base.sha // empty' "$GITHUB_EVENT_PATH")"
-        after="$(jq -r '.pull_request.head.sha // empty' "$GITHUB_EVENT_PATH")"
-        diff_kind="pull request"
-        ;;
-    labeled)
+if [[ "$event_name" == "push" ]]; then
+    # Master pushes use their actual committed delta rather than running
+    # every native suite on every unrelated change.
+    before="$(jq -r '.before // empty' "$GITHUB_EVENT_PATH")"
+    after="$(jq -r '.after // empty' "$GITHUB_EVENT_PATH")"
+    diff_kind="master push"
+else
+    action="$(jq -r '.action // empty' "$GITHUB_EVENT_PATH")"
+    if [[ "$action" == "labeled" ]] && \
+        [[ "$(jq -r '.label.name // empty' "$GITHUB_EVENT_PATH")" != "ci/full" ]]; then
+        emit false "unrelated pull request label"
+        exit 0
+    fi
+    if jq -e '[.pull_request.labels[]?.name] | index("ci/full") != null' \
+        "$GITHUB_EVENT_PATH" >/dev/null 2>&1; then
         emit true "ci/full label requires exact-HEAD requalification"
         exit 0
-        ;;
-    *)
-        emit true "unsupported pull request action: ${action:-unknown}"
-        exit 0
-        ;;
-esac
+    fi
 
+    case "$action" in
+        synchronize)
+            before="$(jq -r '.before // empty' "$GITHUB_EVENT_PATH")"
+            after="$(jq -r '.after // .pull_request.head.sha // empty' "$GITHUB_EVENT_PATH")"
+            diff_kind="latest PR push"
+            ;;
+        opened|reopened|ready_for_review)
+            before="$(jq -r '.pull_request.base.sha // empty' "$GITHUB_EVENT_PATH")"
+            after="$(jq -r '.pull_request.head.sha // empty' "$GITHUB_EVENT_PATH")"
+            diff_kind="pull request"
+            ;;
+        labeled)
+            emit true "ci/full label requires exact-HEAD requalification"
+            exit 0
+            ;;
+        *)
+            emit true "unsupported pull request action: ${action:-unknown}"
+            exit 0
+            ;;
+    esac
+fi
 sha='^[0-9a-fA-F]{40}$'
 if [[ ! "$before" =~ $sha || ! "$after" =~ $sha ]] || \
     [[ "$before" =~ ^0+$ || "$after" =~ ^0+$ ]]; then
@@ -64,7 +75,7 @@ if [[ ! "$before" =~ $sha || ! "$after" =~ $sha ]] || \
     exit 0
 fi
 
-# The checkout must be the exact PR head, not GitHub's synthetic merge ref.
+# The checkout must be the exact event after/head SHA, not a synthetic merge ref.
 if [[ "$(git rev-parse HEAD 2>/dev/null || :)" != "$after" ]]; then
     emit true "checked-out HEAD differs from pull request head"
     exit 0

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Deterministic tests for CI's fail-open PR-update scope classifier.
+"""Deterministic tests for CI's fail-open PR/master-push scope classifier.
 
 Runs with the standard library and a temporary Git repository: no network,
 privileged token, runner cache, native SDK or third-party test dependency.
@@ -127,7 +127,28 @@ def main():
         assert check(directory, {"action": "opened"}, ["shared/gcanvas/*"])
         assert check(directory, {"action": "edited"}, ["shared/gcanvas/*"])
         assert check(directory, {"action": "synchronize"}, ["shared/gcanvas/*"])
-        assert check(directory, event, ["shared/gcanvas/*"], event_name="push")
+        # Master pushes use the actual before/after delta. Unrelated tests
+        # are skipped, while missing SHA or checkout mismatch fails open.
+        master_push = {"ref": "refs/heads/master", "before": before, "after": after}
+        assert check(directory, master_push, [
+            "charts/mermaid/flowchart/*",
+        ], event_name="push")
+        assert not check(directory, master_push, [
+            "shared/gcanvas/*",
+        ], event_name="push")
+        assert check(directory, dict(master_push, before="0" * 40), [
+            "shared/gcanvas/*",
+        ], event_name="push")
+        assert check(directory, dict(master_push, after="f" * 40), [
+            "shared/gcanvas/*",
+        ], event_name="push")
+        # Dispatch remains a full, explicit qualification.
+        assert check(directory, master_push, [
+            "shared/gcanvas/*",
+        ], event_name="workflow_dispatch")
+        assert check(directory, master_push, [
+            "shared/gcanvas/*",
+        ], event_name="unknown_event")
 
         (graphics / "renderer.cpp").write_text("two\n", encoding="utf-8")
         git(directory, "commit", "-qam", "graphics-only update")
@@ -135,6 +156,12 @@ def main():
         event = synchronize(after, newer)
         assert check(directory, event, ["shared/gcanvas/*"])
         assert not check(directory, event, ["charts/mermaid/flowchart/*"])
+
+        # Push with two commits must select both changed scopes but not tango.
+        cumulative_push = {"ref": "refs/heads/master", "before": before, "after": newer}
+        assert check(directory, cumulative_push, ["shared/gcanvas/*"], event_name="push")
+        assert check(directory, cumulative_push, ["charts/mermaid/flowchart/*"], event_name="push")
+        assert not check(directory, cumulative_push, ["tango/*"], event_name="push")
 
         # A newly opened PR uses the full branch delta, so scopes changed by
         # separate commits are both retained in the initial qualification.
@@ -150,7 +177,7 @@ def main():
         newest = git(directory, "rev-parse", "HEAD")
         assert check(directory, synchronize(newer, newest), ["shared/gcanvas/*"])
 
-    print("CI PR-update scope: all targeted and fail-open cases passed")
+    print("CI PR/master-push scope: all targeted and fail-open cases passed")
 
 
 if __name__ == "__main__":
