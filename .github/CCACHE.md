@@ -289,3 +289,23 @@ compiler invocation/hit/miss counts, 20 CTests and Ninja
 `compile_commands.json` are kept as exact-head CI evidence.
 No warm-cache benefit or speedup is claimed until independently
 measured on another exact SHA.
+
+## UI Core C11 first verified cold-run evidence (PR #307)
+
+On immutable candidate `0eaca57a1d74051cf72c8e59045f1cdc95e9be58`,
+[UI C11 Reflection Contract #40716771115](https://github.com/qigao/stun/actions/runs/40716771115)
+completed successfully, including both original released-SDK 20/20 native
+CTest suites, independent strict syntax-only header tests and the normal
+public/runtime contract workflows.
+
+| Target | Cacheable compiler calls | Hits | Misses | Other calls |
+| --- | ---: | ---: | ---: | ---: |
+| macOS ARM64 AppleClang Ninja | 28 | 0 | 28 | 0 |
+| Windows x64 MSVC Ninja | 26 | 0 | 26 | 4 |
+
+Both compiler caches were saved to immutable, separate ccache 4.14.2
+keys. Cold zero-hit statistics are expected. The next workflow-only
+comment commit intentionally preserves the production C sources and
+CMake compiler configuration, forcing real native jobs to restore
+the prior cache by exact platform/profile prefix; confirm restored
+cache hit statistics instead of relying on the presence of archives.

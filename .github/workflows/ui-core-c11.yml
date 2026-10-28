@@ -1,5 +1,8 @@
 name: UI C11 Reflection Contract
 
+# C11 compiler-cache warm qualification: this comment changes ONLY the
+# workflow HEAD, not C11 sources/compiler flags. Native jobs must restore
+# the previous cold-head compiler-output archive and run all 20 CTests.
 on:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review, labeled]
