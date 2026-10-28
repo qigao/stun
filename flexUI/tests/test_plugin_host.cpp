@@ -22,6 +22,9 @@
 #ifndef FLEXUI_TEST_BAD_ABI_PLUGIN
 #error FLEXUI_TEST_BAD_ABI_PLUGIN must name the bad ABI test library
 #endif
+#ifndef FLEXUI_TEST_OLD_MINOR_PLUGIN
+#error FLEXUI_TEST_OLD_MINOR_PLUGIN must name the rejected v2.0 test library
+#endif
 #ifndef FLEXUI_TEST_MISSING_ENTRY_PLUGIN
 #error FLEXUI_TEST_MISSING_ENTRY_PLUGIN must name the missing-entry test library
 #endif
@@ -223,6 +226,15 @@ suite("FlexUI PluginHost") {
       flexUI::PluginHostBuilder builder;
       const auto result = builder.load_plugin(
           std::filesystem::path(FLEXUI_TEST_BAD_ABI_PLUGIN));
+      check_false(static_cast<bool>(result));
+      check_equal(static_cast<int>(result.error.code),
+                  static_cast<int>(flexUI::PluginHostErrorCode::UnsupportedAbi));
+    }
+
+    it("rejects ABI v2.0 even with the current major and nonnull entry point") {
+      flexUI::PluginHostBuilder builder;
+      const auto result = builder.load_plugin(
+          std::filesystem::path(FLEXUI_TEST_OLD_MINOR_PLUGIN));
       check_false(static_cast<bool>(result));
       check_equal(static_cast<int>(result.error.code),
                   static_cast<int>(flexUI::PluginHostErrorCode::UnsupportedAbi));

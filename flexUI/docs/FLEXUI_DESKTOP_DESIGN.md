@@ -531,7 +531,7 @@ permissions = ["file"]
 
 [abi]
 major = 2
-minor = 0
+minor = 1
 
 [[dependencies]]
 name = "settings.core"
