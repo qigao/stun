@@ -91,6 +91,26 @@ flexui_plugin_status post_completion(TestInstance &instance,
                                        &error);
 }
 
+// A real plugin worker alone publishes this terminal status after observing
+// the existing host token's cooperative stop signal.
+flexui_plugin_status post_cancelled(TestInstance &instance,
+                                    std::uint64_t token_id,
+                                    std::uint64_t generation) {
+  flexui_plugin_completion_v2 completion{};
+  completion.struct_size = sizeof(completion);
+  completion.status = FLEXUI_PLUGIN_COMPLETION_CANCELLED;
+  completion.token_id = token_id;
+  completion.token_generation = generation;
+  completion.error_message = literal_view("cooperative plugin worker stopped");
+  std::uint8_t error_storage[128]{};
+  flexui_plugin_error_buffer error{};
+  error.struct_size = sizeof(error);
+  error.message_data = error_storage;
+  error.message_capacity = sizeof(error_storage);
+  return instance.host.post_completion(instance.host.host_context, &completion,
+                                       &error);
+}
+
 void finish_worker(TestInstance &instance) {
   std::lock_guard<std::mutex> lock(instance.mutex);
   --instance.active_workers;
@@ -169,11 +189,21 @@ submit_request(flexui_plugin_instance *opaque,
   if (operation == "hold") {
     return FLEXUI_PLUGIN_STATUS_OK;
   }
+  if (operation == "cancel-watch") {
+    std::uint32_t requested = 0;
+    const auto status = instance.host.cancel_requested(
+        instance.host.host_context, request->token_id,
+        request->token_generation, &requested, error);
+    if (status != FLEXUI_PLUGIN_STATUS_OK) {
+      write_error(error, "cancel-watch requires an exact live native lease");
+      return status;
+    }
+  }
   if (operation == "throw") {
     throw 7;
   }
   if (operation != "retry" && operation != "block" &&
-      operation != "deferred-copy") {
+      operation != "deferred-copy" && operation != "cancel-watch") {
     write_error(error, "operation is unsupported");
     return FLEXUI_PLUGIN_STATUS_REJECTED;
   }
@@ -186,7 +216,22 @@ submit_request(flexui_plugin_instance *opaque,
     instance.workers.emplace_back(
         [&instance, operation, payload, token_id = request->token_id,
          generation = request->token_generation] {
-          if (operation == "block") {
+          if (operation == "cancel-watch") {
+            // The plugin must observe the exact host token before publishing
+            // its own terminal completion; no script context is retained.
+            while (!instance.stopping.load()) {
+              std::uint32_t requested = 0;
+              const auto status = instance.host.cancel_requested(
+                  instance.host.host_context, token_id, generation,
+                  &requested, nullptr);
+              if (status != FLEXUI_PLUGIN_STATUS_OK) break;
+              if (requested != 0) {
+                (void)post_cancelled(instance, token_id, generation);
+                break;
+              }
+              std::this_thread::sleep_for(kRetryDelay);
+            }
+          } else if (operation == "block") {
             std::this_thread::sleep_for(kBlockDelay);
             if (!instance.stopping.load()) {
               (void)post_completion(instance, token_id, generation, payload);
@@ -279,6 +324,8 @@ const flexui_plugin_operation_descriptor_v2 operations[] = {
      4096, {0}},
     {sizeof(flexui_plugin_operation_descriptor_v2), 0, literal_view("hold"),
      4096, {0}},
+    {sizeof(flexui_plugin_operation_descriptor_v2), 0,
+     literal_view("cancel-watch"), 4096, {0}},
     {sizeof(flexui_plugin_operation_descriptor_v2), 0, literal_view("retry"),
      4096, {0}},
     {sizeof(flexui_plugin_operation_descriptor_v2), 0, literal_view("block"),

@@ -3,6 +3,24 @@
 状态：架构决策已采用，实施与验收按下列工作项推进
 日期：2026-08-31
 
+## 2026-10-28 P4.4 M3d M2b 真实动态插件取消/完成/Join 门禁（Draft）
+
+严格 v2 的测试插件 `cancel-watch` 在真正的 DSO/DLL worker 中查询
+`host.cancel_requested(token_id, generation)`，只有观察到 exact-token
+停止信号才从**插件自身**发布真实 `Cancelled`。真实
+`DesktopApplication` 的两份 scoped XML 产生 `sale` / `sales`：
+Controller 退休并静默队列后，`sale` 接收 Suppressed，
+`sales` 继续通过原有 mailbox 接收 `Succeeded`，再执行真实
+PluginHost stop/join 验证 DLL 生命周期；调用回调时不持有队列锁。
+缺失租约的 `cancel-watch` 明确拒绝，不启动伪完成 Worker。
+
+共享 `flexUI/tests/plugin-native-targets.cmake` 是仓库正常插件测试与
+独立 installed-SDK Headless 测试的**唯一插件目标图**，不再复制两份
+宏定义/路径/测试 fixture。Linux ASan/UBSan、独立 LSan 和 Windows/macOS
+同时编译并运行真实 PluginHost / manifest / create unwind / C11 ABI，
+保留 PTY/ConPTY；没有动态插件运行时证据不可合并或宣称取消已完成。
+**即使本测试成功，仍不代表所有插件按请求取消能力已经验证。**
+
 ## 2026-10-28 P4.4 M3d M2a 单一插件 ABI v2 的 exact-token 取消查询（Draft）
 
 `plugin_abi.h` 与 PluginHost 使用唯一 C11 ABI 2.0、入口
