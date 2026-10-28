@@ -82,6 +82,12 @@ target_link_libraries(stun_plugin_module_v2_compile PRIVATE
     FlexUI::Services FlexUI::PluginSDK Salts::Core)
 target_include_directories(stun_plugin_module_v2_compile PRIVATE
     "${STUN_ROOT}/flexUI/modules/plugin_host")
+# Match the real PluginHost's Windows definition set; unlike the actual
+# production target, this source-only object gate has no inherited defines.
+if(WIN32)
+  target_compile_definitions(stun_plugin_module_v2_compile PRIVATE
+      NOMINMAX WIN32_LEAN_AND_MEAN)
+endif()
 add_dependencies(stun_xml_runtime_qualification stun_plugin_module_v2_compile)
 
 add_library(stun_plugin_v2_fixture_compile OBJECT
