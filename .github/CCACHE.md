@@ -240,3 +240,29 @@ This candidate rebases onto the actual merged `master` commit
 `be2a9f22` to retain Tango's verified cache rollout and appends
 this standalone loader content AFTER that master document. Windows
 must report nonzero actual cacheable compiler calls before passing.
+
+## Markdown highlighter first Windows cacheable MSVC build (2026-10-28)
+
+PR #306 exact corrected head `afe2e302`
+([run 40708681421](https://github.com/qigao/stun/actions/runs/40708681421))
+passed ALL 4 native jobs including C11 DLL + C++17 DSO loader
+conformance and the independent Linux ThreadSanitizer test:
+
+| Job | Cacheable compilations | Hits | Misses | Result |
+| --- | ---: | ---: | ---: | --- |
+| Linux loader | 8 | 8 | 0 | PASS, prior cache restored |
+| Linux independent TSan | 8 | 8 | 0 | PASS, prior cache restored |
+| macOS AppleClang | 8 | 8 | 0 | PASS, prior cache restored |
+| Windows x64 MSVC Debug /Z7 | 9 | 0 | 9 | PASS, cold cache saved |
+
+Before that fix, Windows DSO tests passed but the cache gate rejected
+**zero cacheable compilations / 10 calls**, proving that a normal
+CTest pass cannot replace compiler cache evidence. The new
+Windows `/Z7` debug setting yields actual cacheable MSVC C11/C++17
+commands, not a substituted compiler.
+
+To guard against a future accidental `/Zi` regression, the subsequent
+candidate exports Ninja's actual C/C++ compile commands and requires
+Windows `/Z7` present with `/Zi` absent. This also triggers a second
+same-source-head CI run, whose Windows result must prove REAL restored
+compiler cache hits rather than treating the first save as a warm run.

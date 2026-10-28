@@ -85,7 +85,8 @@ jobs:
           # compiler-launcher contract; Ninja drives real MSVC under ccache.
           cmake_args=(-S flexUI/tests/highlighter_loader_contract
                       -B build/highlighter-loader-contract -G Ninja
-                      -DCMAKE_BUILD_TYPE=Debug)
+                      -DCMAKE_BUILD_TYPE=Debug
+                      -DCMAKE_EXPORT_COMPILE_COMMANDS=ON)
           if [[ "$RUNNER_OS" == Windows ]]; then
             # Ninja/Debug MSVC defaults to /Zi compiler PDB output, which
             # ccache 4.14.2 rejects as an unsupported compiler option.
@@ -99,6 +100,21 @@ jobs:
             MSYS_NO_PATHCONV=1 cmake "${cmake_args[@]}"
           else
             cmake "${cmake_args[@]}"
+          fi
+      - name: Require real cacheable MSVC /Z7 C and C++ command lines
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+          commands=build/highlighter-loader-contract/compile_commands.json
+          test -s "$commands"
+          # Exported Ninja commands are the ACTUAL C11 and C++17 invocations.
+          # Reject a return to the /Zi compiler-PDB flags which ccache
+          # correctly classified as uncacheable on the first PR head.
+          grep -Fq '/Z7' "$commands"
+          if grep -Fq '/Zi' "$commands"; then
+            echo "::error::MSVC /Zi is not accepted for native ccache CI"
+            exit 1
           fi
       - name: Build C11 provider and C++17 loader
         shell: bash
@@ -121,6 +137,7 @@ jobs:
           if-no-files-found: warn
           path: |
             build/highlighter-loader-contract/Testing/Temporary/LastTest.log
+            build/highlighter-loader-contract/compile_commands.json
             ${{ runner.temp }}/stun-ccache-stats-markdown-loader.tsv
 
   highlighter-tsan:
