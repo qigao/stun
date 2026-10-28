@@ -8,6 +8,8 @@ on:
       - '.github/scripts/tests/test_restore_tango_salts_sdk.py'
       - '.github/workflows/salts-sdk-releases.yml'
       - '.github/workflows/tango-core.yml'
+      - '.github/actions/setup-ccache/**'
+      - '.github/scripts/report-ccache.sh'
   push:
     branches: [master]
     paths:
@@ -16,11 +18,19 @@ on:
       - '.github/scripts/tests/test_restore_tango_salts_sdk.py'
       - '.github/workflows/salts-sdk-releases.yml'
       - '.github/workflows/tango-core.yml'
+      - '.github/actions/setup-ccache/**'
+      - '.github/scripts/report-ccache.sh'
 
 permissions:
   actions: read
   contents: read
   packages: read
+
+# Multiple PR updates must not independently write stale compiler-output
+# snapshots while a newer exact-HEAD validation is underway.
+concurrency:
+  group: tango-native-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
   sdk-releases:
@@ -55,6 +65,26 @@ jobs:
         env:
           EXPECTED_STUN_SHA: ${{ steps.run_head.outputs.sha }}
         run: test "$(git rev-parse HEAD)" = "$EXPECTED_STUN_SHA"
+
+      - name: Activate real MSVC before Ninja config
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Install and restore verified ccache compiler outputs
+        uses: ./.github/actions/setup-ccache
+        with:
+          profile: tango-core
+          source_sha: ${{ steps.run_head.outputs.sha }}
+
+      - name: Require native Ninja compiler launcher support
+        shell: bash
+        run: |
+          set -euo pipefail
+          command -v ninja
+          ninja --version
+          if [[ "$RUNNER_OS" == Windows ]]; then command -v cl; fi
 
       - name: Define immutable Salts SDK paths
         shell: bash
@@ -120,11 +150,30 @@ jobs:
           set -euo pipefail
           prefix="$SALTS_ROOT"
           if [[ "$RUNNER_OS" == Windows ]]; then prefix="$(cygpath -w "$prefix")"; fi
-          cmake -S tango -B build/tango -DCMAKE_BUILD_TYPE=Debug -DBUILD_TESTING=ON \
-            -DTANGO_BUILD_CPP_INTEROP_TESTS=ON \
-            "-DCMAKE_PREFIX_PATH=$prefix" \
-            -DCMAKE_FIND_USE_PACKAGE_REGISTRY=OFF \
-            -DCMAKE_FIND_USE_SYSTEM_PACKAGE_REGISTRY=OFF
+          # MSVC's default Debug /Zi emits a compiler PDB; ccache rejects it
+          # as unsupported_compiler_option. /Z7 preserves debug symbols in
+          # each .obj without creating shared compiler PDB state. Keep /MDd,
+          # /RTC1 and Debug tests unchanged; only the CI compiler flag differs.
+          cmake_args=(-S tango -B build/tango -G Ninja
+                      -DCMAKE_BUILD_TYPE=Debug -DBUILD_TESTING=ON
+                      -DTANGO_BUILD_CPP_INTEROP_TESTS=ON
+                      "-DCMAKE_PREFIX_PATH=$prefix"
+                      -DCMAKE_FIND_USE_PACKAGE_REGISTRY=OFF
+                      -DCMAKE_FIND_USE_SYSTEM_PACKAGE_REGISTRY=OFF)
+          if [[ "$RUNNER_OS" == Windows ]]; then
+            cmake_args+=("-DCMAKE_C_FLAGS_DEBUG=/MDd /Z7 /Ob0 /Od /RTC1"
+                         "-DCMAKE_CXX_FLAGS_DEBUG=/MDd /Z7 /Ob0 /Od /RTC1")
+          fi
+          if [[ "$RUNNER_OS" == Windows ]]; then
+            # Git Bash rewrites bare MSVC flags like /MDd into
+            # "C:/Program Files/Git/MDd" before invoking cmake.exe.
+            # All source/build paths are relative and the imported SDK
+            # prefix above is already native Windows syntax. Disable ONLY
+            # this subprocess's MSYS path conversion, not shell safety.
+            MSYS_NO_PATHCONV=1 cmake "${cmake_args[@]}"
+          else
+            cmake "${cmake_args[@]}"
+          fi
       - name: Build Tango and real static-link test
         shell: bash
         run: cmake --build build/tango --config Debug --parallel 2
@@ -161,7 +210,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          cmake -S tango -B build/tango-sanitizers \
+          cmake -S tango -B build/tango-sanitizers -G Ninja \
             -DCMAKE_BUILD_TYPE=Debug -DBUILD_TESTING=ON \
             "-DCMAKE_PREFIX_PATH=$SALTS_ROOT" \
             "-DCMAKE_C_FLAGS=-fsanitize=address,undefined -fno-omit-frame-pointer" \
@@ -190,7 +239,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          cmake -S tango -B build/tango-tsan -DCMAKE_BUILD_TYPE=Debug -DBUILD_TESTING=ON \
+          cmake -S tango -B build/tango-tsan -G Ninja \
+            -DCMAKE_BUILD_TYPE=Debug -DBUILD_TESTING=ON \
             "-DCMAKE_PREFIX_PATH=$SALTS_ROOT" \
             "-DCMAKE_C_FLAGS=-fsanitize=thread -fno-omit-frame-pointer -g" \
             "-DCMAKE_EXE_LINKER_FLAGS=-fsanitize=thread" \
@@ -212,3 +262,22 @@ jobs:
           export LD_LIBRARY_PATH="$SALTS_ROOT/lib:${LD_LIBRARY_PATH:-}"
           ctest --test-dir build/tango-tsan -C Debug \
             -R '^tango_async_queue_test' --output-on-failure
+      # Compiler-cache proof is distinct from successful SDK restore and
+      # from TSan/ASan/UBSan completion. A cold cache may have zero hits;
+      # zero cacheable C/C++ compilations fails the CI job.
+      - name: Require actual C11 and C++ compiler cache statistics
+        shell: bash
+        run: bash .github/scripts/report-ccache.sh tango-core
+
+      - name: Preserve exact-head Tango and compiler-cache evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: tango-native-${{ runner.os }}-${{ runner.arch }}-${{ steps.run_head.outputs.sha }}
+          retention-days: 3
+          if-no-files-found: warn
+          path: |
+            ${{ runner.temp }}/stun-ccache-stats-tango-core.tsv
+            build/tango/Testing/Temporary/LastTest.log
+            build/tango-sanitizers/Testing/Temporary/LastTest.log
+            build/tango-tsan/Testing/Temporary/LastTest.log

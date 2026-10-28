@@ -123,3 +123,85 @@ A later no-C++-source-change CI invocation must restore the AppleClang
 snapshot, report real warm compiler hits and rerun native tests before
 we regard AppleClang cache reuse as qualified. This is a separate
 acceptance criterion, not a claim inferred from the first save.
+
+## Tango Native C Core follow-up — independent rollout
+
+The independent Tango C11 CI builds against the real checksum-qualified
+published Salts SDK on Linux, macOS and Windows and separately runs
+Linux ASan/UBSan + TSan acceptance. Its dedicated CI follow-up shares
+the already merged, verified ccache 4.14.2 Action and the real
+compiler-invocation stats gate, using a new isolated `tango-core`
+cache profile.
+
+All three OSes use Ninja to honor both C and C++ CMake compiler
+launchers. Windows retains the real MSVC toolchain (activated via
+`ilammy/msvc-dev-cmd`) and links the existing C11 and C++17 tests; it
+is **not** a fallback/compiler substitution. Linux ASan/UBSan and
+TSan flags remain unchanged and ccache keys include sanitizer flags.
+The original CTest gates are not skipped or relaxed.
+
+Accept only after the independent Tango workflow passes on an exact
+source HEAD for all three platforms and reports nonzero cacheable
+compilation calls; cold and warm-run hit rates must be distinguished.
+
+## Tango Windows/MSVC Debug compiler-cache rejection (2026-10-28)
+
+First Tango CI head `da5ad9a1` completed its real C11/C++17 Windows
+native tests, but the ccache gate correctly rejected **0 cacheable
+compiles out of 22 invocations**. We examined the unmodified
+`tango-native-Windows-X64` workflow TSV: the only rejection reason was
+`unsupported_compiler_option=22`, not a failure to install ccache or
+run the actual compiler. MSVC's default Ninja Debug flags use `/Zi`,
+which writes compiler PDB files and is not ccache-cacheable.
+
+The follow-up explicitly configures **Windows only** with
+`CMAKE_C_FLAGS_DEBUG` and `CMAKE_CXX_FLAGS_DEBUG` set to
+`/MDd /Z7 /Ob0 /Od /RTC1`. This retains MSVC's Debug CRT, runtime
+checks, unoptimized compilation and debug symbols; `/Z7` embeds
+symbols in each object instead of an independently mutable compiler
+PDB. Linux/macOS compiler flags and independent ASan/UBSan/TSan builds
+are untouched. The actual Windows cacheable compiler calls must become
+nonzero under the unchanged strict stats gate, followed by warm-cache
+acceptance. No CI failure is waived.
+
+## Tango Windows Git Bash path conversion in /Z7 CI override
+
+On the first `/Z7` candidate, CMake's Windows compiler ABI test
+failed BEFORE testing Tango: Git Bash's MSYS argument translation
+rewrote `/MDd` into `C:/Program Files/Git/MDd`, which MSVC interpreted
+as source-file arguments. The command-line debug configuration itself
+was correct, but the shell modified it.
+
+Windows standalone `cmake` now runs with `MSYS_NO_PATHCONV=1` only
+for that configure subprocess. The project source/build arguments are
+relative and the installed SDK prefix was explicitly converted with
+`cygpath -w` already; native `/MDd /Z7 /Ob0 /Od /RTC1` flags thus
+reach CMake unchanged. Linux/macOS config and sanitizers are untouched.
+The existing mandatory ccache stats gate will prove whether the Debug
+MSVC object compilation became truly cacheable.
+
+## Tango exact-HEAD native compiler-cache qualification (2026-10-28)
+
+PR #305 first ALL-green exact HEAD
+`410a43e934c9984111f1e770d7239439bdce24fd`:
+[Tango native CI #40700973600](https://github.com/qigao/stun/actions/runs/40700973600)
+is SUCCESS on Linux, macOS, Windows, including Linux's real
+ASan/UBSan and TSan work.
+
+| Platform | Cacheable calls | Hits | Misses | Classification |
+| --- | ---: | ---: | ---: | --- |
+| Linux / real ASan+UBSan+TSan | 53 | 51 | 2 | Restored a previous head; 96.23% |
+| macOS / native C11+C++ | 19 | 19 | 0 | Restored a previous head; 100% |
+| Windows / real MSVC /Z7 Debug | 21 | 0 | 21 | First cacheable Windows build: cold output saved |
+
+On Windows the independent MSVC executable/CTest gates really passed,
+and the previous `unsupported_compiler_option=22` disappeared. Still,
+a saved cache is not a *restored* cache: Windows warm reuse must be
+verified separately before final acceptance.
+
+The follow-up adds a PR-scoped concurrency group to prevent overlapping
+native builds from publishing stale evidence when new exact-HEAD
+updates arrive. Because this commit does not modify C/C++ source or
+compiler flags, it also provides a legitimate three-platform warm-run
+validation. The Windows cache must show nonzero real hits and all
+original OS/sanitizer checks must pass; success/skipped are distinct.
