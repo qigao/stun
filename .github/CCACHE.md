@@ -90,3 +90,14 @@ All four entries compile the real independent GraphLayout libraries in
 Release, require nonzero ccache invocations, run CTest and archive exact
 source-HEAD stats. The full 4-way exact-head CI is mandatory before
 claiming the follow-up accepted or merging it.
+
+## GraphLayout CI first-run macOS Bash 3.2 failure and fix
+
+Initial draft HEAD `54d1622b` compiled and tested Linux GCC/Clang and
+entered Windows real MSVC/Ninja, but macOS failed *before configuring*
+CMake: Bash 3.2 with `set -u` reports an unbound variable when the
+optional empty `compiler_args[@]` is expanded. This is a script-level
+portability error, not a failed GraphLayout algorithm or a ccache miss.
+The fixed command uses a mandatory nonempty `cmake_args` array with
+optional toolchain overrides appended; strict shell error handling is
+unchanged and the exact four-platform CI must pass at the new HEAD.

@@ -137,14 +137,17 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          compiler_args=()
+          # macOS ships Bash 3.2: with 'set -u', expanding an EMPTY
+          # array via "${compiler_args[@]}" fails before CMake executes.
+          # Stage the full command in a nonempty array on every matrix row.
+          cmake_args=(-S shared/layout -B build/graphlayout -G Ninja
+                      -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON)
           if [[ '${{ matrix.toolchain }}' == clang ]]; then
-            compiler_args+=(-DCMAKE_CXX_COMPILER=clang++)
+            cmake_args+=(-DCMAKE_CXX_COMPILER=clang++)
           elif [[ '${{ matrix.toolchain }}' == msvc ]]; then
-            compiler_args+=(-DCMAKE_CXX_COMPILER=cl)
+            cmake_args+=(-DCMAKE_CXX_COMPILER=cl)
           fi
-          cmake -S shared/layout -B build/graphlayout -G Ninja \
-            -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON "${compiler_args[@]}"
+          cmake "${cmake_args[@]}"
       - name: Build real independent GraphLayout libraries and tests
         shell: bash
         run: cmake --build build/graphlayout --config Release --parallel 2
