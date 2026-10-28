@@ -221,6 +221,153 @@ flexUI::DesktopApplicationResult dispatch_click(flexUI::DesktopApplication &appl
 
 } // namespace
 
+spec("FlexUI desktop scoped service quiescence facade") {
+  it("requires retired event routes and suppresses only the retired scope completion") {
+    auto probe = std::make_shared<ModuleProbe>();
+    probe->emit_service_command = true;
+    const std::string root =
+        "<ui name=\"Dashboard\"><main id=\"root\">"
+        "<section id=\"left\"/><section id=\"right\"/></main></ui>";
+    const std::string panel =
+        "<ui name=\"Panel\" xmlns:on=\"urn:flexui:event\">"
+        "<button id=\"action\" on:key_down=\"save_document\">Save</button></ui>";
+    flexUI::DesktopApplicationBuilder builder(nullptr);
+    builder.xml_entry(root)
+        .scoped_xml_component("sale", "left", panel)
+        .scoped_xml_component("sales", "right", panel)
+        .script("service-completion-controller", fake_factory(probe));
+    static_cast<void>(configure_storage_service(builder));
+    auto built = builder.build();
+    check(static_cast<bool>(built));
+    if (!built) return;
+    auto &app = *built.application;
+    auto *left = app.box().get_by_id("sale::action");
+    auto *right = app.box().get_by_id("sales::action");
+    check_not_null(left);
+    check_not_null(right);
+    if (!left || !right) return;
+    auto run_key = [&](flexUI::Element *button, std::uint64_t id) {
+      probe->service_request_id = id;
+      app.box().set_focus(button);
+      auto native = flexUI::Event::key_down(flexUI::KeyCode::A);
+      return app.dispatch_event(native);
+    };
+
+    check(run_key(left, 71));
+    auto first = app.try_receive_service_request();
+    check(first);
+    if (!first) return;
+    check_equal(first.request->script_request_id, std::uint64_t{71});
+    check(run_key(right, 72));
+    check(run_key(left, 73));
+    check_equal(app.service_statistics().current_pending, std::size_t{3});
+
+    // Closing service admission before the Controller event routes would
+    // fault the ONE shared controller when a later scope event emits commands.
+    auto premature = app.quiesce_retired_scoped_service_requests("sale");
+    check_false(static_cast<bool>(premature));
+    check(premature.error.code == flexUI::DesktopApplicationErrorCode::InvalidState);
+    check_equal(app.service_statistics().current_pending, std::size_t{3});
+
+    flexUI::DesktopApplicationErrorCode wrong_thread =
+        flexUI::DesktopApplicationErrorCode::None;
+    std::thread foreign([&] {
+      wrong_thread = app.quiesce_retired_scoped_service_requests("sale").error.code;
+    });
+    foreign.join();
+    check(wrong_thread == flexUI::DesktopApplicationErrorCode::WrongThread);
+    auto unknown = app.quiesce_retired_scoped_service_requests("other");
+    check_false(static_cast<bool>(unknown));
+    check(unknown.error.code ==
+          flexUI::DesktopApplicationErrorCode::InvalidConfiguration);
+
+    check(app.retire_scoped_event_handlers("sale"));
+    // Even after route retirement, do not allow the queue gate to change in
+    // the middle of a different scope's native bubbling dispatch.
+    bool native_reentry_refused = false;
+    app.box().set_event_callback(
+        [&](flexUI::Element &node, const flexUI::Event &native) {
+          if (&node == right && native.type == flexUI::EventType::KeyDown) {
+            const auto refused = app.quiesce_retired_scoped_service_requests("sale");
+            native_reentry_refused = !static_cast<bool>(refused) &&
+                refused.error.code == flexUI::DesktopApplicationErrorCode::InvalidState;
+          }
+        });
+    probe->emit_service_command = false;
+    app.box().set_focus(right);
+    auto nested = flexUI::Event::key_down(flexUI::KeyCode::A);
+    check(app.dispatch_event(nested));
+    probe->emit_service_command = true;
+    app.box().set_event_callback({});
+    check(native_reentry_refused);
+    check_equal(app.service_statistics().current_pending, std::size_t{3});
+    check(app.controller()->is_scoped_event_route_retired("sale"));
+    check_false(app.controller()->is_scoped_event_route_retired("sales"));
+    const auto generation = app.generation();
+    const auto quiesced = app.quiesce_retired_scoped_service_requests("sale");
+    check(quiesced);
+    check_equal(quiesced.cancelled_queued, std::size_t{1});
+    check_equal(quiesced.awaiting_host_completion, std::size_t{1});
+    const auto repeated = app.quiesce_retired_scoped_service_requests("sale");
+    check(repeated);
+    check_equal(repeated.cancelled_queued, std::size_t{0});
+    check_equal(repeated.awaiting_host_completion, std::size_t{0});
+    check_equal(app.generation(), generation);
+    check_not_null(app.box().get_by_id("sale::action"));
+    check(app.controller()->has_active_event_binding(
+        "sales::action", flexUI::UiEventKind::KeyDown));
+    check_false(app.controller()->has_active_event_binding(
+        "sale::action", flexUI::UiEventKind::KeyDown));
+    check_equal(app.service_statistics().current_pending, std::size_t{2});
+
+    auto sibling = app.try_receive_service_request();
+    check(sibling);
+    if (!sibling) return;
+    check_equal(sibling.request->script_request_id, std::uint64_t{72});
+    check(app.try_receive_service_request().status ==
+          flexUI::ApplicationServicePollStatus::Empty);
+    flexUI::ApplicationCompletion gone;
+    gone.token = first.request->token;
+    gone.payload = "stale-scope";
+    flexUI::ApplicationCompletion live;
+    live.token = sibling.request->token;
+    live.payload = "active-scope";
+    check(app.completion_mailbox().try_post(gone));
+    check(app.completion_mailbox().try_post(live));
+
+    auto suppressed = app.try_dispatch_service_completion();
+    check_false(static_cast<bool>(suppressed.error));
+    check(suppressed.status == flexUI::ApplicationServicePollStatus::Suppressed);
+    check_false(suppressed.dispatched);
+    check_false(suppressed.completion.has_value());
+    check(probe->service_completions.empty());
+    auto dispatched = app.try_dispatch_service_completion();
+    check(static_cast<bool>(dispatched));
+    check_true(dispatched.dispatched);
+    check_equal(probe->service_completions.size(), std::size_t{1});
+    check_equal(probe->service_completions.front().script_request_id,
+                std::uint64_t{72});
+    check_equal(probe->service_completions.front().payload,
+                std::string("active-scope"));
+    check_equal(app.service_statistics().suppressed_completions, std::uint64_t{1});
+    check_equal(app.service_statistics().current_pending, std::size_t{0});
+    check(app.controller()->state() == flexUI::ControllerState::Mounted);
+
+    check(app.reload({root, "", "service-completion-controller", "fresh-scope"}));
+    check_equal(app.generation(), generation + 1);
+    check_false(app.controller()->is_scoped_event_route_retired("sale"));
+    auto *fresh = app.box().get_by_id("sale::action");
+    check_not_null(fresh);
+    if (!fresh) return;
+    check(run_key(fresh, 74));
+    auto new_request = app.try_receive_service_request();
+    check(new_request);
+    if (!new_request) return;
+    check_equal(new_request.request->script_request_id, std::uint64_t{74});
+    check_equal(new_request.request->token.generation, generation + 1);
+  }
+});
+
 spec("FlexUI desktop application publishes complete XML candidates") {
   it("builds typed XML strict CSS and a mounted script controller") {
     auto probe = std::make_shared<ModuleProbe>();

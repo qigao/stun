@@ -949,6 +949,59 @@ DesktopApplicationResult DesktopApplication::retire_scoped_event_handlers(
   return {};
 }
 
+DesktopApplicationScopedServiceQuiesceResult
+DesktopApplication::quiesce_retired_scoped_service_requests(std::string_view scope) {
+  const auto fail_result = [](DesktopApplicationErrorCode code,
+                              std::string message) {
+    return DesktopApplicationScopedServiceQuiesceResult{
+        0, 0, fail(code, DesktopApplicationStage::ServiceRequests,
+                   std::move(message))};
+  };
+  if (!is_owner_thread()) {
+    return fail_result(DesktopApplicationErrorCode::WrongThread,
+                       "scoped service quiescence requires the application owner thread");
+  }
+  if (impl_->state != DesktopApplicationState::Ready) {
+    return fail_result(DesktopApplicationErrorCode::InvalidState,
+                       "scoped service quiescence requires a ready application");
+  }
+  if (!impl_->active->controller || !impl_->active->event_bridge) {
+    return fail_result(DesktopApplicationErrorCode::InvalidConfiguration,
+                       "scoped service quiescence requires a mounted script controller");
+  }
+  if (impl_->active->event_bridge->is_dispatching() ||
+      impl_->active->controller->state() != ControllerState::Mounted) {
+    return fail_result(DesktopApplicationErrorCode::InvalidState,
+                       "scoped service quiescence rejects active native/script callbacks");
+  }
+  const auto defined = std::find_if(
+      impl_->config.scoped_components.begin(),
+      impl_->config.scoped_components.end(),
+      [scope](const DesktopScopedXmlComponent &component) {
+        return std::string_view(component.scope) == scope;
+      });
+  if (defined == impl_->config.scoped_components.end()) {
+    return fail_result(DesktopApplicationErrorCode::InvalidConfiguration,
+                       "scoped service quiescence requires a declared XML component scope");
+  }
+  // A still-routable script event could emit a rejected command after the
+  // queue gate closes and fault the WHOLE shared ScriptController. Refuse to
+  // quiesce until the sole active controller records full route retirement.
+  if (!impl_->active->controller->is_scoped_event_route_retired(scope)) {
+    return fail_result(DesktopApplicationErrorCode::InvalidState,
+                       "retire scoped script event routes before service quiescence");
+  }
+  auto quiesced = impl_->service_requests->quiesce_scope_requests(scope);
+  if (!quiesced) {
+    auto error = fail(DesktopApplicationErrorCode::ServiceRequestFailed,
+                      DesktopApplicationStage::ServiceRequests,
+                      quiesced.error.message);
+    error.service_error = std::move(quiesced.error);
+    return {0, 0, std::move(error)};
+  }
+  return {quiesced.cancelled_published, quiesced.suppressed_in_flight, {}};
+}
+
 DesktopApplicationBuilder::DesktopApplicationBuilder(flex::Renderer *renderer)
     : impl_(std::make_unique<Impl>(renderer)) {}
 

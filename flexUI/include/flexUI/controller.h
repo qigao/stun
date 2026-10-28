@@ -236,6 +236,10 @@ public:
   bool has_active_event_binding(std::string_view element_id,
                                 UiEventKind event) const noexcept;
 
+  /// Owner-thread query against the SAME active controller retirement markers.
+  /// Does not re-resolve the immutable program or retain new per-scope owners.
+  bool is_scoped_event_route_retired(std::string_view scope) const noexcept;
+
   /// Dispatches one resolved application-service completion to the optional
   /// pre-resolved `on_service_completion` export.
   /// @return Success without a module call when the export is absent.
