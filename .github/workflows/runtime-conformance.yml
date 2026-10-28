@@ -6,7 +6,7 @@ on:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review, labeled]
   push:
-    branches: [master, refactor/flexui-salts-unicode]
+    branches: [master]
   workflow_dispatch:
 
 permissions:
