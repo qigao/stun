@@ -450,16 +450,21 @@ spec("FlexUI scoped live Box topology preflight") {
             "eventless", "host",
             "<ui name=\"Panel\"><div>"
             "<button id=\"action\">Send</button><span>Plain</span>"
-            "</div></ui>");
+            "</div></ui>")
+        .scoped_xml_component(
+            "other", "sibling",
+            "<ui name=\"Other\"><div id=\"frame\"/></ui>");
     auto built = builder.build();
     check(static_cast<bool>(built));
     if (!built) return;
     auto &app = *built.application;
     check_null(app.controller());
     const auto &owners = app.scoped_component_ownership();
-    check(owners.size() == std::size_t{1});
-    if (owners.size() != 1) return;
+    check(owners.size() == std::size_t{2});
+    if (owners.size() != 2) return;
     check(owners[0].nodes[0].qualified_id.empty());
+    check(owners[1].scope == "other");
+    check(owners[1].nodes[0].qualified_id == "other::frame");
     const auto checked = app.inspect_scoped_component_topology("eventless");
     check(static_cast<bool>(checked));
     check(checked.resolved_compiled_nodes == std::size_t{3});
@@ -475,7 +480,60 @@ spec("FlexUI scoped live Box topology preflight") {
     check_not_null(root_element);
     if (!root_element) return;
     check(root_element->id().empty());
-    check_not_null(app.box().get_by_id("eventless::action"));
+    auto *action = app.box().get_by_id("eventless::action");
+    check_not_null(action);
+    if (!action) return;
+
+    // Runtime borrower inspection includes Box-owned structural nodes and
+    // actual Widget-owned parts; it NEVER authorizes a compiled subtree
+    // retirement or claims the native plugin worker has joined.
+    const auto baseline = app.box().inspect_subtree_borrowers(root_element);
+    check(static_cast<bool>(baseline));
+    check(baseline.mounted_elements >= std::size_t{3});
+    check(baseline.widget_hosts >= std::size_t{1});
+    check_false(baseline.focused_descendant);
+    check_false(baseline.captured_descendant);
+    check_false(baseline.native_event_dispatching);
+    check_false(baseline.layout_or_widget_traversal_active);
+    const auto invalid_root =
+        app.box().inspect_subtree_borrowers(app.box().root());
+    check(invalid_root.error == flexUI::BoxSubtreeBorrowErrorCode::InvalidRoot);
+    flexUI::BoxSubtreeBorrowErrorCode foreign_error =
+        flexUI::BoxSubtreeBorrowErrorCode::None;
+    std::thread foreign([&] {
+      foreign_error =
+          app.box().inspect_subtree_borrowers(root_element).error;
+    });
+    foreign.join();
+    check(foreign_error == flexUI::BoxSubtreeBorrowErrorCode::WrongThread);
+
+    app.box().set_focus(action);
+    auto focused = app.box().inspect_subtree_borrowers(root_element);
+    check(static_cast<bool>(focused));
+    check(focused.focused_descendant);
+    check_false(focused.captured_descendant);
+    app.box().set_mouse_capture(action);
+    auto captured = app.box().inspect_subtree_borrowers(root_element);
+    check(captured.focused_descendant);
+    check(captured.captured_descendant);
+    // A sibling component in the SAME Box must not inherit the focus or
+    // capture lease from its adjacent scoped instance.
+    auto *sibling_root = app.box().get_by_id("other::frame");
+    check_not_null(sibling_root);
+    if (!sibling_root) return;
+    const auto sibling_borrows =
+        app.box().inspect_subtree_borrowers(sibling_root);
+    check(static_cast<bool>(sibling_borrows));
+    check(sibling_borrows.mounted_elements == std::size_t{1});
+    check_false(sibling_borrows.focused_descendant);
+    check_false(sibling_borrows.captured_descendant);
+    app.box().release_mouse_capture(action);
+    app.box().set_focus(nullptr);
+    const auto cleared = app.box().inspect_subtree_borrowers(root_element);
+    check(static_cast<bool>(cleared));
+    check_false(cleared.focused_descendant);
+    check_false(cleared.captured_descendant);
+
     check(app.reload({root, "", "", "refreshed-eventless"}));
     const auto refreshed = app.inspect_scoped_component_topology("eventless");
     check(static_cast<bool>(refreshed));
