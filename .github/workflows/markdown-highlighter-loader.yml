@@ -10,6 +10,8 @@ on:
       - "flexUI/include/flexUI/syntax_highlighter.h"
       - "flexUI/tests/highlighter_loader_contract/**"
       - ".github/workflows/markdown-highlighter-loader.yml"
+      - ".github/actions/setup-ccache/**"
+      - ".github/scripts/report-ccache.sh"
   pull_request:
     paths:
       - "flexUI/src/highlighters/**"
@@ -17,11 +19,17 @@ on:
       - "flexUI/include/flexUI/syntax_highlighter.h"
       - "flexUI/tests/highlighter_loader_contract/**"
       - ".github/workflows/markdown-highlighter-loader.yml"
+      - ".github/actions/setup-ccache/**"
+      - ".github/scripts/report-ccache.sh"
   workflow_dispatch:
 
 permissions:
   actions: read
   contents: read
+
+concurrency:
+  group: highlighter-native-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
   highlighter-loader:
@@ -52,12 +60,62 @@ jobs:
         env:
           EXPECTED_STUN_SHA: ${{ steps.run_head.outputs.sha }}
         run: test "$(git rev-parse HEAD)" = "$EXPECTED_STUN_SHA"
+      - name: Activate real Windows x64 MSVC environment
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+      - name: Install verified native C11/C++ compiler cache
+        uses: ./.github/actions/setup-ccache
+        with:
+          profile: markdown-loader
+          source_sha: ${{ steps.run_head.outputs.sha }}
+      - name: Require real Ninja C/C++ compiler launcher
+        shell: bash
+        run: |
+          set -euo pipefail
+          command -v ninja
+          ninja --version
+          if [[ "$RUNNER_OS" == Windows ]]; then command -v cl; fi
       - name: Configure standalone C11 plugin loader conformance
         shell: bash
         run: |
-          cmake -S flexUI/tests/highlighter_loader_contract \
-            -B build/highlighter-loader-contract \
-            -DCMAKE_BUILD_TYPE=Debug
+          set -euo pipefail
+          # CMake's Visual Studio generator does not provide the same
+          # compiler-launcher contract; Ninja drives real MSVC under ccache.
+          cmake_args=(-S flexUI/tests/highlighter_loader_contract
+                      -B build/highlighter-loader-contract -G Ninja
+                      -DCMAKE_BUILD_TYPE=Debug
+                      -DCMAKE_EXPORT_COMPILE_COMMANDS=ON)
+          if [[ "$RUNNER_OS" == Windows ]]; then
+            # Ninja/Debug MSVC defaults to /Zi compiler PDB output, which
+            # ccache 4.14.2 rejects as an unsupported compiler option.
+            # /Z7 embeds the SAME Debug symbols in each object, retaining
+            # /MDd, /RTC1, unoptimized builds and the original CTest gates.
+            cmake_args+=(-DCMAKE_C_COMPILER=cl -DCMAKE_CXX_COMPILER=cl
+                         "-DCMAKE_C_FLAGS_DEBUG=/MDd /Z7 /Ob0 /Od /RTC1"
+                         "-DCMAKE_CXX_FLAGS_DEBUG=/MDd /Z7 /Ob0 /Od /RTC1")
+            # Git Bash rewrites bare MSVC /Z7 and /MDd into paths unless
+            # conversion is disabled for this CMake subprocess alone.
+            MSYS_NO_PATHCONV=1 cmake "${cmake_args[@]}"
+          else
+            cmake "${cmake_args[@]}"
+          fi
+      - name: Require real cacheable MSVC /Z7 C and C++ command lines
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+          commands=build/highlighter-loader-contract/compile_commands.json
+          test -s "$commands"
+          # Exported Ninja commands are the ACTUAL C11 and C++17 invocations.
+          # Reject a return to the /Zi compiler-PDB flags which ccache
+          # correctly classified as uncacheable on the first PR head.
+          grep -Fq '/Z7' "$commands"
+          if grep -Fq '/Zi' "$commands"; then
+            echo "::error::MSVC /Zi is not accepted for native ccache CI"
+            exit 1
+          fi
       - name: Build C11 provider and C++17 loader
         shell: bash
         run: |
@@ -67,6 +125,20 @@ jobs:
         run: |
           ctest --test-dir build/highlighter-loader-contract -C Debug \
             --no-tests=error --output-on-failure --timeout 120 --verbose
+      - name: Require real native compiler cache statistics
+        shell: bash
+        run: bash .github/scripts/report-ccache.sh markdown-loader
+      - name: Preserve exact-head DSO and compiler cache evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: markdown-loader-${{ matrix.os }}-${{ steps.run_head.outputs.sha }}
+          retention-days: 3
+          if-no-files-found: warn
+          path: |
+            build/highlighter-loader-contract/Testing/Temporary/LastTest.log
+            build/highlighter-loader-contract/compile_commands.json
+            ${{ runner.temp }}/stun-ccache-stats-markdown-loader.tsv
 
   highlighter-tsan:
     name: Highlighter ownership / Linux TSan
@@ -92,6 +164,11 @@ jobs:
         env:
           EXPECTED_STUN_SHA: ${{ steps.run_head.outputs.sha }}
         run: test "$(git rev-parse HEAD)" = "$EXPECTED_STUN_SHA"
+      - name: Install verified TSan C11/C++ compiler cache
+        uses: ./.github/actions/setup-ccache
+        with:
+          profile: markdown-loader-tsan
+          source_sha: ${{ steps.run_head.outputs.sha }}
       - name: Configure C11 provider and C++17 loader with TSan
         shell: bash
         run: |
@@ -114,3 +191,16 @@ jobs:
         run: |
           ctest --test-dir build/highlighter-loader-tsan \
             --no-tests=error --output-on-failure --timeout 120 --verbose
+      - name: Require independent TSan compiler cache evidence
+        shell: bash
+        run: bash .github/scripts/report-ccache.sh markdown-loader-tsan
+      - name: Preserve exact-head TSan and compiler cache evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: markdown-loader-tsan-${{ steps.run_head.outputs.sha }}
+          retention-days: 3
+          if-no-files-found: warn
+          path: |
+            build/highlighter-loader-tsan/Testing/Temporary/LastTest.log
+            ${{ runner.temp }}/stun-ccache-stats-markdown-loader-tsan.tsv
