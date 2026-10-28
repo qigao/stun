@@ -2,7 +2,7 @@ name: Public dependency compile contract
 
 on:
   pull_request:
-    types: [opened, synchronize, reopened, ready_for_review, labeled]
+    types: [opened, synchronize, reopened, labeled]
   push:
     branches: [master]
 

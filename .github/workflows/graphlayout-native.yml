@@ -1,7 +1,7 @@
 name: GraphLayout native algorithm qualification
 on:
   pull_request:
-    types: [opened, synchronize, reopened, ready_for_review, labeled]
+    types: [opened, synchronize, reopened, labeled]
     paths:
       - 'shared/layout/**'
       - 'charts/dotgraph/**'
