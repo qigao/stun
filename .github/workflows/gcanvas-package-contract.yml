@@ -4,7 +4,7 @@ name: gCanvas package contract
 # exact HEAD's compiler results; do not reuse host objects for Android.
 on:
   pull_request:
-    types: [opened, synchronize, reopened, ready_for_review, labeled]
+    types: [opened, synchronize, reopened, labeled]
     paths:
       - "shared/gcanvas/**"
       - ".github/workflows/gcanvas-package-contract.yml"
