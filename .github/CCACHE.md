@@ -123,3 +123,23 @@ A later no-C++-source-change CI invocation must restore the AppleClang
 snapshot, report real warm compiler hits and rerun native tests before
 we regard AppleClang cache reuse as qualified. This is a separate
 acceptance criterion, not a claim inferred from the first save.
+
+## Tango Native C Core follow-up — independent rollout
+
+The independent Tango C11 CI builds against the real checksum-qualified
+published Salts SDK on Linux, macOS and Windows and separately runs
+Linux ASan/UBSan + TSan acceptance. Its dedicated CI follow-up shares
+the already merged, verified ccache 4.14.2 Action and the real
+compiler-invocation stats gate, using a new isolated `tango-core`
+cache profile.
+
+All three OSes use Ninja to honor both C and C++ CMake compiler
+launchers. Windows retains the real MSVC toolchain (activated via
+`ilammy/msvc-dev-cmd`) and links the existing C11 and C++17 tests; it
+is **not** a fallback/compiler substitution. Linux ASan/UBSan and
+TSan flags remain unchanged and ccache keys include sanitizer flags.
+The original CTest gates are not skipped or relaxed.
+
+Accept only after the independent Tango workflow passes on an exact
+source HEAD for all three platforms and reports nonzero cacheable
+compilation calls; cold and warm-run hit rates must be distinguished.
