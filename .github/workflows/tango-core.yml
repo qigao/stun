@@ -26,6 +26,12 @@ permissions:
   contents: read
   packages: read
 
+# Multiple PR updates must not independently write stale compiler-output
+# snapshots while a newer exact-HEAD validation is underway.
+concurrency:
+  group: tango-native-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   sdk-releases:
     uses: ./.github/workflows/salts-sdk-releases.yml

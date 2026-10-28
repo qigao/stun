@@ -179,3 +179,29 @@ relative and the installed SDK prefix was explicitly converted with
 reach CMake unchanged. Linux/macOS config and sanitizers are untouched.
 The existing mandatory ccache stats gate will prove whether the Debug
 MSVC object compilation became truly cacheable.
+
+## Tango exact-HEAD native compiler-cache qualification (2026-10-28)
+
+PR #305 first ALL-green exact HEAD
+`410a43e934c9984111f1e770d7239439bdce24fd`:
+[Tango native CI #40700973600](https://github.com/qigao/stun/actions/runs/40700973600)
+is SUCCESS on Linux, macOS, Windows, including Linux's real
+ASan/UBSan and TSan work.
+
+| Platform | Cacheable calls | Hits | Misses | Classification |
+| --- | ---: | ---: | ---: | --- |
+| Linux / real ASan+UBSan+TSan | 53 | 51 | 2 | Restored a previous head; 96.23% |
+| macOS / native C11+C++ | 19 | 19 | 0 | Restored a previous head; 100% |
+| Windows / real MSVC /Z7 Debug | 21 | 0 | 21 | First cacheable Windows build: cold output saved |
+
+On Windows the independent MSVC executable/CTest gates really passed,
+and the previous `unsupported_compiler_option=22` disappeared. Still,
+a saved cache is not a *restored* cache: Windows warm reuse must be
+verified separately before final acceptance.
+
+The follow-up adds a PR-scoped concurrency group to prevent overlapping
+native builds from publishing stale evidence when new exact-HEAD
+updates arrive. Because this commit does not modify C/C++ source or
+compiler flags, it also provides a legitimate three-platform warm-run
+validation. The Windows cache must show nonzero real hits and all
+original OS/sanitizer checks must pass; success/skipped are distinct.
