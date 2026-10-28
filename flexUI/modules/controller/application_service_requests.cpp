@@ -26,6 +26,7 @@ struct RequestSlot {
   ApplicationRequestToken token;
   std::uint64_t script_request_id = 0;
   std::string origin_scope;
+  std::shared_ptr<ApplicationServiceCancellationLease> cancellation;
   bool suppress_completion = false;
   std::string capability;
   std::string operation;
@@ -49,6 +50,7 @@ void release_string(std::string &value) noexcept {
 }
 
 void clear_slot(RequestSlot &slot) noexcept {
+  slot.cancellation.reset();
   release_string(slot.origin_scope);
   release_string(slot.capability);
   release_string(slot.operation);
@@ -298,6 +300,9 @@ ApplicationServiceRequestQueue::reserve(const ApplicationCommandBatch &batch) {
     // Stage every provenance allocation before publishing ANY live slot.
     std::vector<std::string> scoped_owners;
     scoped_owners.reserve(count);
+    // Every fallible lease allocation occurs before any slot is published.
+    std::vector<std::shared_ptr<ApplicationServiceCancellationLease>> cancel_leases;
+    cancel_leases.reserve(count);
     std::vector<ReservationKey> reservation;
     reservation.reserve(count);
     for (std::size_t index = 0; index < count; ++index) {
@@ -309,6 +314,8 @@ ApplicationServiceRequestQueue::reserve(const ApplicationCommandBatch &batch) {
                           command.operation,
                           command.payload});
       scoped_owners.emplace_back(batch.origin_scope());
+      cancel_leases.emplace_back(new ApplicationServiceCancellationLease(
+          {token_id, impl_->generation}));
       reservation.emplace_back(free_indices[index], token_id);
     }
 
@@ -320,6 +327,7 @@ ApplicationServiceRequestQueue::reserve(const ApplicationCommandBatch &batch) {
       slot.token = request.token;
       slot.script_request_id = request.script_request_id;
       slot.origin_scope = std::move(scoped_owners[index]);
+      slot.cancellation = std::move(cancel_leases[index]);
       slot.capability = std::move(request.capability);
       slot.operation = std::move(request.operation);
       slot.payload = std::move(request.payload);
@@ -432,6 +440,9 @@ ApplicationServiceRequestResult ApplicationServiceRequestQueue::try_receive_requ
   ApplicationServiceRequest request;
   request.token = slot.token;
   request.script_request_id = slot.script_request_id;
+  // Nonallocating shared owner handoff. The queue retains its lease until a
+  // REAL terminal completion; the worker may retain a copy independently.
+  request.cancellation = slot.cancellation;
   request.capability = std::move(slot.capability);
   request.operation = std::move(slot.operation);
   request.payload = std::move(slot.payload);
@@ -579,6 +590,19 @@ ApplicationServiceScopeQuiesceResult ApplicationServiceRequestQueue::quiesce_sco
       return result;
     }
   }
+  // Every in-flight slot must retain its generation-exact cancellation lease.
+  // Fail before any staged scope publication on a corrupted lease invariant.
+  for (const auto &slot : impl_->slots) {
+    if (slot.state == RequestSlotState::InFlight &&
+        std::string_view(slot.origin_scope) == scope &&
+        (!slot.cancellation ||
+         slot.cancellation->token().id != slot.token.id ||
+         slot.cancellation->token().generation != slot.token.generation)) {
+      result.error = service_fail(ApplicationServiceErrorCode::InternalInvariant,
+                                  "in-flight scoped request lost its cancellation lease");
+      return result;
+    }
+  }
   // Validate the ENTIRE published FIFO before making any change; the commit
   // below only performs noexcept slot clear, flag writes and ring compaction.
   for (std::size_t n = 0; n < impl_->published_count; ++n) {
@@ -617,6 +641,9 @@ ApplicationServiceScopeQuiesceResult ApplicationServiceRequestQueue::quiesce_sco
     if (slot.state == RequestSlotState::InFlight &&
         std::string_view(slot.origin_scope) == scope) {
       slot.suppress_completion = true;
+      // This sets a cooperative stop signal only. Do NOT claim worker
+      // termination, release the queue token, or synthesize a completion.
+      slot.cancellation->request_cancel();
       ++result.suppressed_in_flight;
     }
   }
@@ -666,6 +693,9 @@ void ApplicationServiceRequestQueue::reset_generation(std::uint64_t next_generat
   if (!validate_generation_reset(next_generation)) {
     std::terminate();
   }
+  for (auto &slot : impl_->slots) {
+    if (slot.cancellation) slot.cancellation->request_cancel();
+  }
   static_cast<void>(impl_->cancel_all());
   impl_->quiesced_scopes.clear();
   impl_->generation = next_generation;
@@ -678,6 +708,9 @@ ApplicationServiceControlResult ApplicationServiceRequestQueue::close() {
   }
   if (impl_->state == ApplicationServiceRequestState::Closed) {
     return {};
+  }
+  for (auto &slot : impl_->slots) {
+    if (slot.cancellation) slot.cancellation->request_cancel();
   }
   impl_->state = ApplicationServiceRequestState::Closed;
   return {impl_->cancel_all(), {}};

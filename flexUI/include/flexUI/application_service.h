@@ -2,12 +2,41 @@
 
 #include "flexUI/application_completion.h"
 
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
+#include <memory>
 #include <optional>
 #include <string>
 
 namespace flexUI {
+
+/// Exact-token cancellation signal for a native C++ service request.
+/// The owner queue creates/signals the lease; endpoints receive only const
+/// shared ownership and MAY stop cooperatively after checking requested().
+/// This is a request, NEVER a terminal completion or worker-join proof.
+/// A worker must still post its actual terminal status and release resources.
+class ApplicationServiceCancellationLease final {
+public:
+  ~ApplicationServiceCancellationLease() = default;
+  ApplicationServiceCancellationLease(const ApplicationServiceCancellationLease &) = delete;
+  ApplicationServiceCancellationLease &operator=(const ApplicationServiceCancellationLease &) = delete;
+
+  ApplicationRequestToken token() const noexcept { return token_; }
+  bool requested() const noexcept {
+    return requested_.load(std::memory_order_acquire);
+  }
+
+private:
+  explicit ApplicationServiceCancellationLease(ApplicationRequestToken token) noexcept
+      : token_(token) {}
+  void request_cancel() noexcept {
+    requested_.store(true, std::memory_order_release);
+  }
+  ApplicationRequestToken token_;
+  std::atomic<bool> requested_{false};
+  friend class ApplicationServiceRequestQueue;
+};
 
 /// Owning service command transferred from the application owner to the host.
 struct ApplicationServiceRequest {
@@ -16,6 +45,10 @@ struct ApplicationServiceRequest {
   std::string capability;
   std::string operation;
   std::string payload;
+  /// Per-request, generation-bound cooperative stop request. Native endpoints
+  /// may retain this const lease only while their own work is live. Plugin ABI
+  /// v1 does not transport this signal and must NOT claim cancellation support.
+  std::shared_ptr<const ApplicationServiceCancellationLease> cancellation{};
 };
 
 /// Owning completion restored to the script request identity on the UI thread.

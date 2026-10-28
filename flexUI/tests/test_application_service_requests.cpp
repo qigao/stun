@@ -256,11 +256,22 @@ spec("FlexUI application service requests") {
     auto old = engine.reserve(batch_with({command(51), command(52)}));
     check(old);
     old.prepared->publish();
-    check(created.queue->try_receive_request());
+    auto old_request = created.queue->try_receive_request();
+    check(old_request);
+    if (!old_request) return;
+    const auto old_lease = old_request.request->cancellation;
+    check_not_null(old_lease.get());
+    if (!old_lease) return;
+    check_equal(old_lease->token().id, old_request.request->token.id);
+    check_equal(old_lease->token().generation, std::uint64_t{7});
+    check_false(old_lease->requested());
 
     auto validated = created.queue->validate_generation_reset(8);
     check(validated);
     created.queue->reset_generation(8);
+    // Generation replacement signals cooperative stop to live native owners.
+    // No terminal completion is synthesized; the old token remains stale.
+    check(old_lease->requested());
     check_equal(created.queue->generation(), std::uint64_t{8});
     check_equal(created.queue->statistics().cancelled, std::uint64_t{2});
     auto repeated_generation = created.queue->validate_generation_reset(8);
@@ -272,10 +283,16 @@ spec("FlexUI application service requests") {
     current.prepared->publish();
     auto request = created.queue->try_receive_request();
     check(request);
+    if (!request) return;
     check_equal(request.request->token.generation, std::uint64_t{8});
+    const auto current_lease = request.request->cancellation;
+    check_not_null(current_lease.get());
+    if (!current_lease) return;
+    check_false(current_lease->requested());
 
     auto closed = created.queue->close();
     check(closed);
+    check(current_lease->requested());
     check_equal(closed.cancelled, std::size_t{1});
     check(created.queue->try_receive_request().status ==
           flexUI::ApplicationServicePollStatus::Closed);
@@ -422,7 +439,17 @@ spec("FlexUI application service requests") {
     if (!first || !second) return;
     check_equal(first.request->token.id, std::uint64_t{1});
     check_equal(second.request->token.id, std::uint64_t{2});
+    const auto sale_lease = first.request->cancellation;
+    const auto other_lease = second.request->cancellation;
+    check_not_null(sale_lease.get());
+    check_not_null(other_lease.get());
+    if (!sale_lease || !other_lease) return;
+    check_equal(sale_lease->token().id, first.request->token.id);
+    check_equal(sale_lease->token().generation, first.request->token.generation);
+    check_false(sale_lease->requested());
+    check_false(other_lease->requested());
     check(created.queue->resolve_completion(completion(second.request->token)));
+    check_false(other_lease->requested()); // Normal success is not cancellation.
     check(dispatch_scope("sale")); // token 5, published after ring wrap
     const auto before = created.queue->inspect_scope_leases("sale");
     check_equal(before.published, std::size_t{2});
@@ -444,6 +471,14 @@ spec("FlexUI application service requests") {
     check(quiesced);
     check_equal(quiesced.cancelled_published, std::size_t{2});
     check_equal(quiesced.suppressed_in_flight, std::size_t{1});
+    check(sale_lease->requested());
+    check_false(other_lease->requested());
+    // The signal is cross-thread observable but the worker decides when its
+    // own operation actually ends and whether to post Cancelled or Succeeded.
+    bool worker_observed = false;
+    std::thread worker_probe([&] { worker_observed = sale_lease->requested(); });
+    worker_probe.join();
+    check(worker_observed);
     const auto repeated = created.queue->quiesce_scope_requests("sale");
     check(repeated);
     check_equal(repeated.cancelled_published, std::size_t{0});
@@ -462,6 +497,9 @@ spec("FlexUI application service requests") {
     check(sibling);
     if (!sibling) return;
     check_equal(sibling.request->token.id, std::uint64_t{4});
+    check_not_null(sibling.request->cancellation.get());
+    if (!sibling.request->cancellation) return;
+    check_false(sibling.request->cancellation->requested());
     check(created.queue->try_receive_request().status ==
           flexUI::ApplicationServicePollStatus::Empty);
     auto suppressed = created.queue->resolve_completion(completion(first.request->token));
