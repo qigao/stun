@@ -98,7 +98,9 @@ jobs:
             '.github/workflows/tango-core.yml' \
             'vendor/mir/*' 'vendor/miniblas/*' 'vendor/tinyfsm/*' \
             'tools/lemon/*' 'cmake/Sanitizers.cmake' \
-            '.github/scripts/restore-flowchart-sdk.py' '.github/scripts/ci-affected.sh' '.github/workflows/salts-sdk-releases.yml' '.github/workflows/runtime-conformance.yml'
+            '.github/scripts/restore-flowchart-sdk.py' '.github/scripts/ci-affected.sh' \
+            '.github/actions/setup-ccache/*' '.github/scripts/report-ccache.sh' \
+            '.github/workflows/salts-sdk-releases.yml' '.github/workflows/runtime-conformance.yml'
 
       - name: Detect Unicode text policy changes
         id: unicode_scope
@@ -212,6 +214,12 @@ jobs:
         env:
           EXPECTED_STUN_SHA: ${{ needs.changes.outputs.source_sha }}
         run: test "$(git rev-parse HEAD)" = "$EXPECTED_STUN_SHA"
+      - name: Install per-profile native C/C++ compiler cache
+        uses: ./.github/actions/setup-ccache
+        with:
+          profile: runtime-linux
+          source_sha: ${{ needs.changes.outputs.source_sha }}
+
       - name: Verify exact source and resolved releases
         shell: bash
         env:
@@ -780,6 +788,10 @@ jobs:
             --output-junit build/mermaid-parsers/results.xml
           git diff --exit-code
 
+      - name: Require real ccache compiler invocations and report hit rate
+        shell: bash
+        run: bash .github/scripts/report-ccache.sh runtime-linux
+
       - name: Preserve exact-head SDK and test evidence
         if: always()
         uses: actions/upload-artifact@v4
@@ -805,3 +817,4 @@ jobs:
             build/mermaid-parsers/Testing/Temporary/LastTest.log
             build/mermaid-parsers/results.xml
             build/flowchart-json-golden/flowchart-linkstyle.svg*
+            ${{ runner.temp }}/stun-ccache-stats-runtime-linux.tsv
