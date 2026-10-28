@@ -244,9 +244,39 @@ private:
                                                       const UiDocumentLimits &limits);
 };
 
+/// Compiler-produced identity of one node within an assembled scoped
+/// component. parent_index refers to an earlier node in the SAME pre-order
+/// ledger; the root uses kNoParent and its child_index is in the base host.
+/// Every node is represented, INCLUDING anonymous and Widget nodes without
+/// public Element IDs; no raw pointer or mutable runtime state is persisted.
+struct UiScopedOwnedNode {
+  static constexpr std::size_t kNoParent = static_cast<std::size_t>(-1);
+  std::size_t parent_index = kNoParent;
+  std::size_t child_index = 0;
+  std::string qualified_id; // May be empty for an anonymous Element/Widget.
+  std::string tag;
+  bool widget = false;
+  bool has_compiled_events = false;
+  bool has_compiled_bindings = false;
+};
+
+/// One immutable compile-candidate provenance ledger. This is not an
+/// Element/Widget resource lease or approval to physically unmount a scope.
+/// The application may MOVE it into the one published generation owner.
+struct UiScopedComponentOwnership {
+  std::string scope;
+  std::string host_id;
+  std::size_t root_child_index = 0;
+  std::vector<UiScopedOwnedNode> nodes;
+};
+
 struct UiDocumentCompileResult {
   std::shared_ptr<const CompiledUiProgram> program;
   UiDocumentError error;
+  /// Populated ONLY by compile_scoped_ui_components after the merged program
+  /// has passed complete registry/semantic acceptance. Non-scoped callers and
+  /// all failed compositions return an empty ledger. Not a second UI runtime.
+  std::vector<UiScopedComponentOwnership> scoped_ownership;
 
   explicit operator bool() const { return program != nullptr && !static_cast<bool>(error); }
 };
