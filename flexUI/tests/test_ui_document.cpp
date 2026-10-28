@@ -2408,10 +2408,21 @@ spec("FlexUI M4b6i cross-scope native Widget Element pointer borrows") {
     const auto other = box.inspect_subtree_borrowers(sales_tabs);
     check(static_cast<bool>(other));
     check_equal(other.foreign_widget_element_borrows, std::size_t{0});
-    tabs->clear_tabs();  // Explicitly retire the ONLY borrowed page pointer.
+    tabs->clear_tabs();  // Explicitly retire the ONLY known page pointer.
+    // Even without Tab::page, a native callback may capture the same raw
+    // Element pointer. Reject "audited" status until that closure is gone.
+    tabs->set_change_callback([page](int, const std::string&) {
+      (void)page;
+    });
+    const auto closure_borrow = box.inspect_subtree_borrowers(sale);
+    check(static_cast<bool>(closure_borrow));
+    check_equal(closure_borrow.foreign_widget_element_borrows, std::size_t{0});
+    check_equal(closure_borrow.unverified_external_widget_hosts, std::size_t{1});
+    tabs->set_change_callback({});
     const auto released = box.inspect_subtree_borrowers(sale);
     check(static_cast<bool>(released));
     check_equal(released.foreign_widget_element_borrows, std::size_t{0});
+    check_equal(released.unverified_external_widget_hosts, std::size_t{0});
     check_equal(box.resolve_handle(page_handle), page);
     check_equal(box.get_by_id("sales::label"), sales_label);
   }

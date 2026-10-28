@@ -52,7 +52,11 @@ public:
     // alone is enough to prevent the target scope from being destroyed.
     for (const auto& tab : tabs_)
       if (tab.page && retired_nodes.count(tab.page) != 0) ++borrows;
-    return {true, borrows};
+    // A native change closure may capture arbitrary Element* identities.
+    // Its capture graph is not introspectable. The direct page references
+    // remain countable, but cross-scope *completion* requires the callback
+    // itself to be retired as independent owner evidence.
+    return {!static_cast<bool>(on_change_), borrows};
   }
   bool paints_host_box() const override { return true; }
 

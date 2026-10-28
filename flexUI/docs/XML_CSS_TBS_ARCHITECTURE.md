@@ -922,3 +922,15 @@ owner or a physical unmount transaction.
 The native foreign-child regression still tests refusal before mutation;
 it now also verifies that a valid Box-owned child is accepted by the
 same audited branch. #302 stays Draft and does not grant unmount.
+
+## 2026-10-28 M4b6k — foreign native callback closure owners fail closed
+
+Known Tab::page pointers are enumerable, but a sibling TabsWidget native
+on_change callback may capture an arbitrary target Element* in its opaque
+`std::function` closure. `inspect_external_element_borrows` reports known
+page pointers even while a callback is present, but returns `audited=false`
+until the callback is explicitly released. A real `sale`/`sales` test
+clears the direct page link while retaining a native closure, requires
+zero *known* pages but one unverified foreign Widget, then clears the
+closure and requires both counts zero. This prevents a false unmount
+admission certificate from an opaque callback capture graph.
