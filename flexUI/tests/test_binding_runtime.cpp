@@ -355,6 +355,104 @@ spec("UiBindingRuntime projects typed C++ inputs through MIR") {
     check_equal(runtime.inputs().string("name"), "External");
   }
 
+  it("keeps copied Widget observer callbacks inert after unbind") {
+    flexUI::Box box(nullptr);
+    auto* root = box.create("div", "root");
+    auto* input_element =
+        box.create_widget<flexUI::InputWidget>("input", "sale");
+    auto* textarea_element =
+        box.create_widget<flexUI::TextAreaWidget>("textarea", "sales");
+    root->append(input_element);
+    root->append(textarea_element);
+    box.set_root(root);
+    auto* input = static_cast<flexUI::InputWidget*>(input_element->widget);
+    auto* textarea =
+        static_cast<flexUI::TextAreaWidget*>(textarea_element->widget);
+
+    auto& bindings = box.bindings();
+    bindings.inputs().set_string("sale_value", "original");
+    bindings.inputs().set_string("sales_value", "sibling");
+    // Register first: the Widget's notification snapshot will contain both
+    // this witness and the Binding callback, even after unbind removes it.
+    flexUI::UiBindingId sale_id = 0;
+    bool unbound_during_edit = false;
+    const auto witness = input->add_edit_observer([&](const std::string&) {
+      unbound_during_edit = bindings.targets().unbind(sale_id);
+    });
+    const auto sale = bindings.targets().bind_value(*input_element, "sale_value");
+    const auto sales =
+        bindings.targets().bind_value(*textarea_element, "sales_value");
+    sale_id = sale.id;
+    check(sale && sales);
+    const auto before = box.inspect_subtree_borrowers(input_element);
+    check(static_cast<bool>(before));
+    check_equal(before.binding_targets, std::size_t{1});
+    check_equal(before.value_observers, std::size_t{1});
+    check_equal(before.blocked_value_observers, std::size_t{0});
+    check_false(before.binding_mutation_active);
+    check_false(before.invalid_binding_ownership);
+
+    check(input->handle_event(flexUI::Event::text_input("!"), *input_element));
+    check(unbound_during_edit);
+    // The copied Binding callback was retired before its turn. It must not
+    // write to the shared application input or use a destroyed Binding owner.
+    check_equal(bindings.inputs().string("sale_value"), "original");
+    check_equal(bindings.stats().binding_count, std::size_t{1});
+    check(input->remove_edit_observer(witness));
+    const auto after = box.inspect_subtree_borrowers(input_element);
+    check(static_cast<bool>(after));
+    check_equal(after.value_observers, std::size_t{0});
+    const auto sibling = box.inspect_subtree_borrowers(textarea_element);
+    check(static_cast<bool>(sibling));
+    check_equal(sibling.value_observers, std::size_t{1});
+    check_equal(sibling.blocked_value_observers, std::size_t{0});
+
+    // M4b4's observer proof grants NO raw Box retirement of a Widget.
+    check_false(box.retire_bound_structural_subtree("sales"));
+    check_equal(bindings.stats().binding_count, std::size_t{1});
+    check(textarea->handle_event(flexUI::Event::text_input("?"),
+                                 *textarea_element));
+    check_equal(bindings.inputs().string("sales_value"), textarea->text());
+    check(bindings.targets().unbind(sales.id));
+  }
+
+  it("refuses Binding-owned unbind while its callback is executing") {
+    flexUI::Box box(nullptr);
+    auto* root = box.create("div", "root");
+    auto* input_element =
+        box.create_widget<flexUI::InputWidget>("input", "sale");
+    root->append(input_element);
+    box.set_root(root);
+    auto* input = static_cast<flexUI::InputWidget*>(input_element->widget);
+
+    std::unique_ptr<flexUI::UiBindingRuntime> runtime;
+    flexUI::UiBindingId bound_id = 0;
+    bool armed = false;
+    bool saw_busy = false;
+    bool refused_reentrant_unbind = false;
+    runtime = std::make_unique<flexUI::UiBindingRuntime>([&] {
+      if (!armed) return;
+      const auto checked = runtime->inspect_target_observers(input_element);
+      saw_busy = checked.value_observers == std::size_t{1} &&
+                 checked.blocked_value_observers == std::size_t{1} &&
+                 !checked.owned_observers_retirable();
+      refused_reentrant_unbind = !runtime->targets().unbind(bound_id);
+    });
+    runtime->inputs().set_string("sale_value", "first");
+    const auto binding =
+        runtime->targets().bind_value(*input_element, "sale_value");
+    bound_id = binding.id;
+    armed = true;
+    check(input->handle_event(flexUI::Event::text_input("!"), *input_element));
+    check(saw_busy);
+    check(refused_reentrant_unbind);
+    check_equal(runtime->inputs().string("sale_value"), input->text());
+    const auto idle = runtime->inspect_target_observers(input_element);
+    check_equal(idle.blocked_value_observers, std::size_t{0});
+    check(idle.owned_observers_retirable());
+    check(runtime->targets().unbind(bound_id));
+  }
+
   it("rejects invalid input lifetimes values and binding definitions") {
     flexUI::Box box(nullptr);
     auto* root = box.create("div", "root");

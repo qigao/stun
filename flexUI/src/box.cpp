@@ -1187,7 +1187,12 @@ Box::inspect_subtree_borrowers(const Element *subtree_root) const noexcept {
       }
       ++result.mounted_elements;
       if (element->widget) ++result.widget_hosts;
-      if (bindings_.has_binding_target(element)) ++result.binding_targets;
+      const auto observer = bindings_.inspect_target_observers(element);
+      if (observer.binding_count != 0) ++result.binding_targets;
+      result.value_observers += observer.value_observers;
+      result.blocked_value_observers += observer.blocked_value_observers;
+      result.binding_mutation_active |= observer.binding_mutation_active;
+      result.invalid_binding_ownership |= observer.invalid_ownership;
       if (element->click_callback()) ++result.native_click_callbacks;
       if (element->is_focus() || element->is_hover() || element->is_active())
         result.local_interaction_state = true;

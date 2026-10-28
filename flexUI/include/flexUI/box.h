@@ -48,6 +48,10 @@ struct BoxSubtreeBorrowSnapshot {
   std::size_t mounted_elements = 0;
   std::size_t widget_hosts = 0;
   std::size_t binding_targets = 0;
+  std::size_t value_observers = 0;
+  std::size_t blocked_value_observers = 0;
+  bool binding_mutation_active = false;
+  bool invalid_binding_ownership = false;
   std::size_t native_click_callbacks = 0;
   std::size_t active_widget_hosts = 0;
   std::size_t keyed_repeater_hosts = 0;

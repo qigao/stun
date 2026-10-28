@@ -79,9 +79,18 @@ struct TextTarget {
   std::string previous;
 };
 
+// A widget may copy its observer array before notifying it. The cancellation
+// bit outlives removal of the Binding record through the copied callback's
+// shared ownership. Reentrant retirement must also see active callbacks.
+struct ValueObserverLease {
+  bool retired = false;
+  std::size_t active_callbacks = 0;
+};
+
 struct ValueTarget {
   TextValueWidget* widget = nullptr;
   TextValueObserverId observer_id = 0;
+  std::shared_ptr<ValueObserverLease> lease;
   std::string previous;
 };
 
@@ -372,6 +381,7 @@ struct UiBindingRuntime::Impl {
   ~Impl() {
     for (auto& binding : bindings) {
       if (auto* value = std::get_if<ValueTarget>(&binding.target)) {
+        if (value->lease) value->lease->retired = true;
         if (value->observer_id != 0) {
           value->widget->remove_edit_observer(value->observer_id);
         }
@@ -542,6 +552,9 @@ struct UiBindingRuntime::Impl {
           } else if constexpr (std::is_same_v<T, TextTarget>) {
             binding.element->set_text(target.previous);
           } else if constexpr (std::is_same_v<T, ValueTarget>) {
+            // Invalidate any widget-owned notification snapshot BEFORE the
+            // binding's raw runtime pointer can become stale.
+            if (target.lease) target.lease->retired = true;
             target.widget->remove_edit_observer(target.observer_id);
             target.observer_id = 0;
             target.widget->set_text_value(target.previous);
@@ -619,6 +632,7 @@ void UiBindingRuntime::rollback_transaction(
   while (impl_->bindings.size() > checkpoint.binding_count) {
     auto& binding = impl_->bindings.back();
     if (auto* value = std::get_if<ValueTarget>(&binding.target)) {
+      if (value->lease) value->lease->retired = true;
       if (value->observer_id != 0) {
         value->widget->remove_edit_observer(value->observer_id);
         value->observer_id = 0;
@@ -792,20 +806,34 @@ UiBindingHandle UiBindingTargets::bind_value(Element& target,
   }
 
   const flex::Symbol input_symbol(string_input);
+  auto lease = std::make_shared<ValueObserverLease>();
   const TextValueObserverId observer_id = value_widget->add_edit_observer(
-      [runtime = runtime_, input = std::move(string_input)](
-          const std::string& value) { runtime->inputs().set_string(input, value); });
+      [runtime = runtime_, lease, input = std::move(string_input)](
+          const std::string& value) {
+        // A Widget notification may already have copied this callback when
+        // an earlier observer unbinds the target. It must become a no-op.
+        if (lease->retired) return;
+        struct ActiveCall {
+          ValueObserverLease& lease;
+          explicit ActiveCall(ValueObserverLease& value) noexcept : lease(value) {
+            ++lease.active_callbacks;
+          }
+          ~ActiveCall() { --lease.active_callbacks; }
+        } active(*lease);
+        runtime->inputs().set_string(input, value);
+      });
 
   UiBindingRuntime::Impl::Binding binding;
   binding.element = &target;
   binding.target =
-      ValueTarget{value_widget, observer_id, value_widget->text_value()};
+      ValueTarget{value_widget, observer_id, lease, value_widget->text_value()};
   binding.source = BindingSource::StringInput;
   binding.string_input = input_symbol;
   binding.dependencies = {input_symbol};
   try {
     return runtime_->impl_->add_binding(std::move(binding));
   } catch (...) {
+    lease->retired = true;
     value_widget->remove_edit_observer(observer_id);
     throw;
   }
@@ -873,6 +901,10 @@ bool UiBindingTargets::unbind(UiBindingId id) {
   if (it == runtime_->impl_->bindings.end()) {
     return false;
   }
+  // Never destroy the callback's runtime while it is executing.
+  if (const auto* value = std::get_if<ValueTarget>(&it->target)) {
+    if (!value->lease || value->lease->active_callbacks != 0) return false;
+  }
   runtime_->impl_->restore(*it);
   runtime_->impl_->owned_targets.erase(it->owned_target_key);
   runtime_->impl_->bindings.erase(it);
@@ -883,6 +915,12 @@ bool UiBindingTargets::unbind(UiBindingId id) {
 }
 
 void UiBindingTargets::clear() {
+  for (const auto &binding : runtime_->impl_->bindings) {
+    if (const auto* value = std::get_if<ValueTarget>(&binding.target)) {
+      if (!value->lease || value->lease->active_callbacks != 0)
+        throw std::logic_error("cannot clear an active Widget value observer");
+    }
+  }
   for (auto it = runtime_->impl_->bindings.rbegin();
        it != runtime_->impl_->bindings.rend(); ++it) {
     runtime_->impl_->restore(*it);
@@ -902,17 +940,43 @@ bool UiBindingRuntime::has_binding_target(const Element *element) const noexcept
                      });
 }
 
+UiBindingTargetObserverSnapshot
+UiBindingRuntime::inspect_target_observers(const Element *target) const noexcept {
+  UiBindingTargetObserverSnapshot result;
+  result.binding_mutation_active =
+      impl_->transaction_active || impl_->evaluation_depth != 0;
+  if (!target) return result;
+  for (const auto &binding : impl_->bindings) {
+    if (binding.element != target) continue;
+    ++result.binding_count;
+    if (impl_->owned_targets.count(binding.owned_target_key) == 0)
+      result.invalid_ownership = true;
+    if (const auto* value = std::get_if<ValueTarget>(&binding.target)) {
+      ++result.value_observers;
+      if (!value->widget || value->observer_id == 0 || !value->lease ||
+          value->lease->retired || value->lease->active_callbacks != 0)
+        ++result.blocked_value_observers;
+    }
+  }
+  return result;
+}
+
 bool UiBindingRuntime::can_retire_target_set(
     const std::unordered_set<Element *> &targets) const noexcept {
   if (impl_->transaction_active || impl_->evaluation_depth != 0) return false;
   for (const auto &binding : impl_->bindings) {
     if (targets.count(binding.element) == 0) continue;
-    // ValueTarget installs a two-way observer on a Widget. The Box structural
-    // retirement contract rejects Widgets, so silently detaching an observer
-    // here would violate component/widget lifecycle.
-    if (std::holds_alternative<ValueTarget>(binding.target) ||
-        impl_->owned_targets.count(binding.owned_target_key) == 0)
+    if (impl_->owned_targets.count(binding.owned_target_key) == 0)
       return false;
+    if (const auto* value = std::get_if<ValueTarget>(&binding.target)) {
+      // Only a future application-scoped transaction may retire this target
+      // together with its Widget. The current Box entry point still rejects
+      // all compiled programs and all Widget owners.
+      if (!value->lease || value->lease->retired ||
+          value->lease->active_callbacks != 0 || !value->widget ||
+          value->observer_id == 0)
+        return false;
+    }
   }
   return true;
 }
@@ -923,8 +987,14 @@ void UiBindingRuntime::discard_retired_target_set(
   // target set and ownership ledger. No Element is mutated or restored.
   static_assert(std::is_nothrow_move_assignable_v<Impl::Binding>,
                 "Binding retirement requires no-throw vector compaction");
-  for (const auto &binding : impl_->bindings) {
+  for (auto &binding : impl_->bindings) {
     if (targets.count(binding.element) == 0) continue;
+    // Callback snapshots retained by the doomed Widget become inert even
+    // if a later owner transaction destroys the Binding record first.
+    // Observer vector destruction belongs to the SAME Widget teardown.
+    if (auto* value = std::get_if<ValueTarget>(&binding.target)) {
+      if (value->lease) value->lease->retired = true;
+    }
     const auto entry = impl_->owned_targets.find(binding.owned_target_key);
     if (entry != impl_->owned_targets.end())
       impl_->owned_targets.erase(entry);

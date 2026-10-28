@@ -552,3 +552,28 @@ Flex DSL：用户不再编写 `.flex` 文档，MIR 也不负责 UI 结构或事�
   per-frame native Timeline 热路径；需以 benchmark 决定是否增加 pure-expression profile。
 - `LOW`（常用做法）：XML/CSS/TBS 的职责分离更接近成熟桌面 UI 工具链，但本决策的主要依据仍是
   仓库现有 IR、runtime 与 controller 边界，而不是形式相似性。
+
+
+## 2026-10-28 P4.4 M4b4a — Binding-owned value observer lease (Draft #302)
+
+A bidirectional `bind_value` callback used to capture its raw UiBindingRuntime and
+was only unregistered from the Widget's live observer vector. Both native
+InputWidget and TextAreaWidget copy that vector for notification, so a
+callback that was already copied could still execute after `unbind`.
+
+The one Binding runtime now retains a shared **retirement lease** with each
+value observer. A copied callback checks its lease before touching the runtime;
+a live callback holds an active-call guard until it exits. `unbind` and
+`clear` refuse/throw during an active owned value callback; rollback,
+destruction, restoration and future doomed-target discard retire the lease
+before the Binding record is removed. The Box's read-only subtree snapshot
+reports owned value observers, active/blocked leases, Binding mutation and
+ownership inconsistencies without creating a second ownership index.
+
+This proves ONLY Binding-owned callback retirement readiness. It does not
+inspect arbitrary third-party Widget listeners, release a live Widget, join an
+endpoint/PluginHost worker, remove the installed compiled program, or authorize
+`unmount(scope)`. `Box::retire_bound_structural_subtree` still refuses
+Widgets and any installed compiled program. M4b4's remaining Widget-owner
+contract, M4b5 independent scope worker join and M4b6 atomic physical detach
+are separate mandatory gates under #298/#275.
