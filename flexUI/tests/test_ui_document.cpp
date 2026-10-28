@@ -21,6 +21,14 @@
 #include <flexUI/widgets/breadcrumb_widget.h>
 #include <flexUI/widgets/pagination_widget.h>
 #include <flexUI/widgets/stepper_widget.h>
+#include <flexUI/widgets/image_widget.h>
+#include <flexUI/widgets/calendar_widget.h>
+#include <flexUI/widgets/table_widget.h>
+#include <flexUI/widgets/tree_widget.h>
+#include <flexUI/widgets/colorpicker_widget.h>
+#include <flexUI/widgets/avatar_widget.h>
+#include <flexUI/widgets/gradient_editor_widget.h>
+#include <flexUI/widgets/markdown_widget.h>
 #include <flexUI/widget.h>
 #include <flexUI/keyed_repeater.h>
 
@@ -2221,5 +2229,78 @@ spec("FlexUI M4b6d overlay, timer and simple native callback owner audits") {
     check_equal(breadcrumb.inspect_local_borrowers().native_callback_owners, std::size_t{0});
     check_equal(pagination.inspect_local_borrowers().native_callback_owners, std::size_t{0});
     check_equal(stepper.inspect_local_borrowers().native_callback_owners, std::size_t{0});
+  }
+}
+
+spec("FlexUI M4b6e external-source Widget owner retirement preflight") {
+  it("flags unretired image sources and native image load callbacks") {
+    flexUI::ImageWidget image("assets/image.png");
+    check(image.inspect_local_borrowers().audited);
+    check(image.inspect_local_borrowers().interaction_or_callback_active);
+    image.set_load_callback([](bool) {});
+    check_equal(image.inspect_local_borrowers().native_callback_owners, std::size_t{1});
+    image.set_load_callback({});
+    check_equal(image.inspect_local_borrowers().native_callback_owners, std::size_t{0});
+    // A loaded URL still requires backend image-resource lifetime proof.
+    check(image.inspect_local_borrowers().interaction_or_callback_active);
+    image.set_src("");
+    check_false(image.inspect_local_borrowers().interaction_or_callback_active);
+
+    flexUI::AvatarWidget avatar("Alice", "assets/alice.png");
+    check(avatar.inspect_local_borrowers().audited);
+    check(avatar.inspect_local_borrowers().interaction_or_callback_active);
+    avatar.set_image_url("");
+    check_false(avatar.inspect_local_borrowers().interaction_or_callback_active);
+  }
+
+  it("audits calendar, table, tree, color, and gradient callbacks independently") {
+    flexUI::CalendarWidget calendar;
+    flexUI::TableWidget table;
+    flexUI::TreeWidget tree;
+    flexUI::ColorPickerWidget picker;
+    flexUI::GradientEditorWidget gradient;
+    for (const flexUI::Widget* w : {
+         static_cast<flexUI::Widget*>(&calendar),
+         static_cast<flexUI::Widget*>(&table),
+         static_cast<flexUI::Widget*>(&tree),
+         static_cast<flexUI::Widget*>(&picker),
+         static_cast<flexUI::Widget*>(&gradient)}) {
+      check(w->inspect_local_borrowers().audited);
+      check_equal(w->inspect_local_borrowers().native_callback_owners, std::size_t{0});
+    }
+    calendar.set_select_callback([](const flexUI::Date&) {});
+    table.set_select_callback([](int) {});
+    tree.set_select_callback([](flexUI::TreeNode*) {});
+    picker.set_change_callback([](const flexUI::Color&) {});
+    gradient.set_change_callback([] {});
+    gradient.set_stop_select_callback([](int, const flexUI::Color&) {});
+    check_equal(calendar.inspect_local_borrowers().native_callback_owners, std::size_t{1});
+    check_equal(table.inspect_local_borrowers().native_callback_owners, std::size_t{1});
+    check_equal(tree.inspect_local_borrowers().native_callback_owners, std::size_t{1});
+    check_equal(picker.inspect_local_borrowers().native_callback_owners, std::size_t{1});
+    check_equal(gradient.inspect_local_borrowers().native_callback_owners, std::size_t{2});
+    // TreeNode references are independently retained in the Widget graph
+    // and cannot be treated as a resolved, borrower-free Element subtree.
+    tree.add_node("root", "Tree root");
+    check(tree.inspect_local_borrowers().interaction_or_callback_active);
+    calendar.set_select_callback({});
+    table.set_select_callback({});
+    tree.set_select_callback({});
+    picker.set_change_callback({});
+    gradient.set_change_callback({});
+    gradient.set_stop_select_callback({});
+    check_equal(gradient.inspect_local_borrowers().native_callback_owners, std::size_t{0});
+    check(tree.inspect_local_borrowers().interaction_or_callback_active);
+    tree.clear();
+    check_false(tree.inspect_local_borrowers().interaction_or_callback_active);
+  }
+
+  it("retains conservative default denial for Markdown's private projection lifecycle") {
+    flexUI::MarkdownWidget markdown("# still mounted");
+    const auto owner = markdown.inspect_local_borrowers();
+    check_false(owner.audited);
+    check_equal(owner.native_callback_owners, std::size_t{0});
+    // Projection reconciliation and deferred retirement must first prove
+    // their own callback-safe Box/Element destruction order.
   }
 }

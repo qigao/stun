@@ -796,3 +796,20 @@ Widgets with retained external sources or complex runtime projections
 A future physical deletion transaction still needs explicit callback
 retirement, external resource release, and no-throw Element/Widget part
 ownership transfer. #302 remains Draft and #298/#275 open.
+
+## 2026-10-28 M4b6e — audited native source and structured-data Widget borrowers
+
+The read-only probes now cover Image and Avatar external backend image
+identities (a nonempty URL/src remains an active external-resource blocker),
+Calendar/Table/ColorPicker/GradientEditor native change/select callbacks,
+and Tree-owned shared node forest plus selected/hover raw pointers. All
+extra probes are independent of the one WidgetHost/Box Element owner scan.
+The real headless `test_ui_document` suite exercises callback registration/
+removal, URL clearing, TreeNode forest disposal, and both GradientEditor
+callbacks, while retaining the explicit default unaudited state of
+MarkdownWidget's asynchronous/private projection lifecycle.
+
+Auditing a Widget's LOCAL callbacks/interaction is only necessary, not
+sufficient: backend resources, fully retired host Element parts, compiled
+program/binding target disposal, no-throw same-generation commit and exact
+sibling stability remain separate gates. `unmount(scope)` is still absent.
