@@ -3132,3 +3132,62 @@ spec("Desktop XML components share one native ScriptController and Effects engin
           flexUI::DesktopApplicationErrorCode::ScriptRequired);
   }
 }
+
+spec("Desktop M4b6m compiled topology authenticates live Box-owned Node addresses") {
+  it("rejects externally allocated XML lookalikes before reading their Node vtables") {
+    flexUI::DesktopApplicationBuilder builder(nullptr);
+    builder.xml_entry(
+        "<ui name=\"Identity\"><main id=\"root\">"
+        "<section id=\"host\"/><section id=\"sibling\"/></main></ui>")
+        .scoped_xml_component(
+            "sale", "host",
+            "<ui name=\"Panel\"><div id=\"panel\">"
+            "<span id=\"value\">Live</span></div></ui>")
+        .scoped_xml_component(
+            "sales", "sibling",
+            "<ui name=\"Other\"><label id=\"label\">Sibling</label></ui>");
+    auto built = builder.build();
+    check(static_cast<bool>(built));
+    if (!built) return;
+    auto &app = *built.application;
+    auto *host = app.box().get_by_id("host");
+    auto *panel = app.box().get_by_id("sale::panel");
+    auto *sibling = app.box().get_by_id("sales::label");
+    check_not_null(host);
+    check_not_null(panel);
+    check_not_null(sibling);
+    if (!host || !panel || !sibling) return;
+    const auto sibling_handle = app.box().handle_for(*sibling);
+    const auto panel_handle = app.box().handle_for(*panel);
+    check(static_cast<bool>(app.inspect_scoped_component_topology("sale")));
+    check(static_cast<bool>(app.inspect_scoped_component_borrowers("sale")));
+
+    // A foreign Element may forge the right tag and compiled ID, and
+    // Element::append will even copy the owner_box_ back-reference. It is
+    // still NOT present in the single Box unique_ptr<Element> owner vector.
+    flexUI::Element foreign;
+    foreign.set_tag("div");
+    foreign.set_element_id("sale::panel");
+    check(host->remove(panel));
+    check_equal(host->append(&foreign), &foreign);
+    const auto invalid = app.inspect_scoped_component_topology("sale");
+    check_false(static_cast<bool>(invalid));
+    check(invalid.error.code ==
+          flexUI::DesktopApplicationErrorCode::InvalidState);
+    const auto invalid_borrowers = app.inspect_scoped_component_borrowers("sale");
+    check_false(static_cast<bool>(invalid_borrowers));
+    check(invalid_borrowers.error.code ==
+          flexUI::DesktopApplicationErrorCode::InvalidState);
+    check_equal(app.box().resolve_handle(sibling_handle), sibling);
+    check_equal(app.box().resolve_handle(panel_handle), panel);
+
+    // The failed preflight must not mutate any node or invalidate the
+    // compiler ledger; restoring the genuine owned Element restores proof.
+    check(host->remove(&foreign));
+    check_equal(host->append(panel), panel);
+    check(static_cast<bool>(app.inspect_scoped_component_topology("sale")));
+    check(static_cast<bool>(app.inspect_scoped_component_borrowers("sale")));
+    check_equal(app.box().resolve_handle(sibling_handle), sibling);
+    check_equal(app.box().get_by_id("sales::label"), sibling);
+  }
+}

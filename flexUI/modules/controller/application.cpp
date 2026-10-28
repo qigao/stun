@@ -607,6 +607,18 @@ DesktopApplication::inspect_scoped_component_topology(std::string_view scope) co
   }
 
   try {
+    // Compiler ordinals identify borrowed Node* addresses; a modified
+    // live Group can contain an externally allocated or STALE child.
+    // Authenticate ALL Node identities against the sole Box unique_ptr
+    // ownership store before RTTI, parent, ID or Widget dereference.
+    // This temporary map is the exact same Box staging policy used by
+    // inspect_subtree_borrowers(), never a second persistent owner table.
+    std::unordered_map<const flex::Node*, const Element*> owned_nodes;
+    if (!live_box.stage_current_owned_node_addresses(owned_nodes) ||
+        owned_nodes.count(static_cast<const flex::Node*>(host)) == 0) {
+      return refused(DesktopApplicationErrorCode::InvalidState,
+                     "scoped topology host is not owned by the current Box");
+    }
     // Ephemeral local pointers only: NO second runtime ownership registry.
     // Every ID, anonymous Widget and relative child ordinal is checked
     // against the currently mounted Box. Allocation has no live side effects.
@@ -640,9 +652,15 @@ DesktopApplication::inspect_scoped_component_topology(std::string_view scope) co
         return refused(DesktopApplicationErrorCode::InvalidState,
                        "scoped topology compiled child ordinal is no longer live");
       }
-      const auto *element =
-          dynamic_cast<const Element *>(parent->children()[node.child_index]);
-      if (element == nullptr || element->parent_elem() != parent ||
+      const auto owned_child =
+          owned_nodes.find(parent->children()[node.child_index]);
+      // Read no Node vtable/parent data before membership succeeds.
+      if (owned_child == owned_nodes.end()) {
+        return refused(DesktopApplicationErrorCode::InvalidState,
+                       "scoped topology child is not a current Box-owned Element");
+      }
+      const Element *element = owned_child->second;
+      if (element->parent_elem() != parent ||
           element->is_widget_owned() || element->id() != node.qualified_id ||
           element->tag() != node.tag ||
           (element->widget != nullptr) != node.widget ||
@@ -697,28 +715,44 @@ DesktopApplication::inspect_scoped_component_borrowers(std::string_view scope) c
     return result;
   }
   auto &box = *impl_->active->box;
-  const auto *host = box.get_by_id(found->host_id);
-  if (!host || found->root_child_index >= host->children().size()) {
-    result.error = fail(DesktopApplicationErrorCode::InvalidState,
+  try {
+    std::unordered_map<const flex::Node*, const Element*> owned_nodes;
+    if (!box.stage_current_owned_node_addresses(owned_nodes)) {
+      result.error = fail(DesktopApplicationErrorCode::InvalidState,
+                          DesktopApplicationStage::CandidateBuild,
+                          "scoped Box ownership map has duplicate or invalid nodes");
+      return result;
+    }
+    const auto *host = box.get_by_id(found->host_id);
+    if (!host ||
+        owned_nodes.count(static_cast<const flex::Node*>(host)) == 0 ||
+        found->root_child_index >= host->children().size()) {
+      result.error = fail(DesktopApplicationErrorCode::InvalidState,
+                          DesktopApplicationStage::CandidateBuild,
+                          "scoped root position changed during owner inspection");
+      return result;
+    }
+    const auto root_owner =
+        owned_nodes.find(host->children()[found->root_child_index]);
+    if (root_owner == owned_nodes.end()) {
+      result.error = fail(DesktopApplicationErrorCode::InvalidState,
+                          DesktopApplicationStage::CandidateBuild,
+                          "scoped root is not a currently Box-owned Element");
+      return result;
+    }
+    result.borrowers = box.inspect_subtree_borrowers(root_owner->second);
+    if (!result.borrowers) {
+      result.error = fail(DesktopApplicationErrorCode::InvalidState,
+                          DesktopApplicationStage::CandidateBuild,
+                          "mounted Box cannot safely inspect scoped root borrowers");
+    }
+    return result;
+  } catch (...) {
+    result.error = fail(DesktopApplicationErrorCode::CandidateBuildFailed,
                         DesktopApplicationStage::CandidateBuild,
-                        "scoped root position changed during owner inspection");
+                        "scoped borrower owner-address staging failed");
     return result;
   }
-  const auto *root = dynamic_cast<const Element *>(
-      host->children()[found->root_child_index]);
-  if (!root) {
-    result.error = fail(DesktopApplicationErrorCode::InvalidState,
-                        DesktopApplicationStage::CandidateBuild,
-                        "scoped root is no longer an Element");
-    return result;
-  }
-  result.borrowers = box.inspect_subtree_borrowers(root);
-  if (!result.borrowers) {
-    result.error = fail(DesktopApplicationErrorCode::InvalidState,
-                        DesktopApplicationStage::CandidateBuild,
-                        "mounted Box cannot safely inspect scoped root borrowers");
-  }
-  return result;
 }
 
 ScriptController *DesktopApplication::controller() noexcept {

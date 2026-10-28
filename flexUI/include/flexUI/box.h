@@ -339,6 +339,7 @@ private:
   friend class UiKeyedRepeater;
   friend class UiDocumentInstantiator;
   friend class BoxPreparedMutation;
+  friend class DesktopApplication;
   friend class Element;
   friend class Widget;
   friend class MarkdownWidget;
@@ -349,6 +350,12 @@ private:
   void validate_utility_token(std::string_view token) const;
   void apply_theme_to_root();
   bool owns_element(const Element *element) const;
+  /// Stage the one Box's CURRENT unique_ptr-owned Element identities as
+  /// Node addresses. Check each address against this temporary map BEFORE
+  /// RTTI, parent traversal, Widget lookup or ID access. This is not a
+  /// persistent owner index; callers must be the Box/application owner.
+  bool stage_current_owned_node_addresses(
+      std::unordered_map<const flex::Node*, const Element*>& result) const;
   void deactivate_subtree(Element *root);
   bool retire_structural_subtree_impl(
       const std::string &root_id, bool discard_owned_bindings) noexcept;

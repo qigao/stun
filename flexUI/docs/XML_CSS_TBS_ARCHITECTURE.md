@@ -956,3 +956,23 @@ counts are nonzero blockers for any future physical unmount. A framework
 callback may remain application-installed even when its routes are retired;
 that scenario still needs independent proof and must not be silently
 treated as safe. #302 stays Draft / unmerged; no `unmount(scope)`.
+
+## 2026-10-28 M4b6m — compiler topology must authenticate Node* identities
+
+The read-only DesktopApplication scoped topology/borrower facade previously
+performed `dynamic_cast<Element*>` on a child from a compiled ordinal
+without verifying that the child still exists in the current Box owner.
+That could dereference a dead Node vtable if a structurally modified host
+retained a stale child pointer. Both application inspections now stage the
+EXACT same temporary `Node* -> Element*` membership map from the one
+Box::elements_ unique_ptr vector; host and every compiled child address
+must belong to that map BEFORE any type/parent/ID/Widget read.
+
+`Box::stage_current_owned_node_addresses` is a private owner-thread
+helper shared by the Box borrower walk and its friend DesktopApplication,
+not a second stored runtime table or public unmount API. Failed admission
+leaves the compiled owner ledger, Box and adjacent scope untouched.
+A native DesktopApplication regression replaces a true compiled component
+root with an externally allocated lookalike (even propagating owner_box_),
+requires both topology and borrower preflights to refuse, then restores
+the real node and validates its sibling's original UiHandle.

@@ -936,6 +936,18 @@ bool Box::owns_element(const Element* element) const {
   return element && element->owner_box_ == this;
 }
 
+bool Box::stage_current_owned_node_addresses(
+    std::unordered_map<const flex::Node*, const Element*>& result) const {
+  result.reserve(elements_.size());
+  for (const auto &owner : elements_) {
+    if (!owner ||
+        !result.emplace(static_cast<const flex::Node*>(owner.get()),
+                        owner.get()).second)
+      return false;
+  }
+  return true;
+}
+
 void Box::sync_utility_stylesheet() {
   if (!utility_jit_ || !utility_tree_dirty_) {
     return;
@@ -1157,14 +1169,9 @@ Box::inspect_subtree_borrowers(const Element *subtree_root) const noexcept {
     // Node* could read freed vtable memory. The Box's unique_ptr vector
     // remains the ONLY lifetime owner; this index dies with inspection.
     std::unordered_map<const flex::Node*, const Element*> owned_elements;
-    owned_elements.reserve(elements_.size());
-    for (const auto &owner : elements_) {
-      if (!owner ||
-          !owned_elements.emplace(static_cast<const flex::Node*>(owner.get()),
-                                  owner.get()).second) {
-        result.error = BoxSubtreeBorrowErrorCode::InconsistentTree;
-        return result;
-      }
+    if (!stage_current_owned_node_addresses(owned_elements)) {
+      result.error = BoxSubtreeBorrowErrorCode::InconsistentTree;
+      return result;
     }
     if (owned_elements.count(subtree_root) == 0 ||
         owned_elements.count(root_) == 0 ||
