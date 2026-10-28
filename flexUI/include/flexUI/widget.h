@@ -8,9 +8,11 @@
 #define FLEXUI_WIDGET_H
 
 #include <flexUI/types.h>
+#include <cstddef>
 #include <string>
 #include <string_view>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 
 namespace flexUI {
@@ -19,6 +21,28 @@ namespace flexUI {
 class Element;
 struct Event;
 class RenderCommandList;
+
+/// Read-only local Widget callback/interaction audit. This does not count
+/// TextValueWidget bidirectional value observers, which are inspected by
+/// the Binding/Widget-owned edit observer boundary separately.
+struct WidgetLocalBorrowSnapshot {
+  // Base/third-party widgets fail closed until their own owners are audited.
+  bool audited = false;
+  std::size_t native_callback_owners = 0;
+  bool interaction_or_callback_active = false;
+  /// Shadow metrics for Widget-private Box-owned projection identities.
+  /// These counts are diagnostics, not authority to detach their Elements.
+  std::size_t published_projection_nodes = 0;
+  std::size_t pending_retirement_nodes = 0;
+};
+
+/// External Element pointer borrow audit against ONE temporary Box-owned
+/// subtree identity set. An unaudited Widget is an explicit blocker. An
+/// audited Widget counts only direct pointer references, never follows them.
+struct WidgetExternalElementBorrowSnapshot {
+  bool audited = false;
+  std::size_t borrowed_references = 0;
+};
 
 /**
  * Widget - 所有 UI 组件的基类
@@ -32,6 +56,24 @@ class RenderCommandList;
 class Widget {
 public:
   virtual ~Widget() = default;
+
+  /// Must report every Widget-owned native callback and active interaction
+  /// before its subtree can ever be considered for physical retirement.
+  /// This never invokes callbacks, allocates, or retires an owner. Unsupported
+  /// third-party Widgets are deliberately not treated as callback-free.
+  virtual WidgetLocalBorrowSnapshot inspect_local_borrowers() const noexcept {
+    return {};
+  }
+
+  /// A Widget in a SIBLING scope may borrow Element* identities in the
+  /// subtree being retired (for example TabsWidget::Tab::page). The Base
+  /// cannot claim that custom Widgets have no such references. All queried
+  /// addresses are borrowed/opaque, never dereferenced or persisted here.
+  virtual WidgetExternalElementBorrowSnapshot inspect_external_element_borrows(
+      const std::unordered_set<const Element*>& retired_nodes) const noexcept {
+    (void)retired_nodes;
+    return {};
+  }
 
   void bind_host_element(Element* elem);
 
@@ -206,6 +248,10 @@ protected:
   bool dirty_ = true;
 
 private:
+  // The one Box is already the sole owner of Widget allocation/lifetime.
+  // Its read-only subtree preflight must validate the native host link
+  // without allocating, dispatching, or exposing it as a public Widget API.
+  friend class Box;
   Element* host_element_ = nullptr;
   bool semantic_tree_rendering_ = false;
   std::unordered_map<Symbol, Element*, SymbolHash> parts_;

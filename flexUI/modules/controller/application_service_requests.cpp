@@ -50,6 +50,10 @@ void release_string(std::string &value) noexcept {
 }
 
 void clear_slot(RequestSlot &slot) noexcept {
+  // A retained C++ request may outlive terminal consumption or even this
+  // queue generation. Mark the SAME authoritative lease stale before removing
+  // it, so a reused token cannot start a new worker after scoped JOIN.
+  if (slot.cancellation) slot.cancellation->retire();
   slot.cancellation.reset();
   release_string(slot.origin_scope);
   release_string(slot.capability);
@@ -315,7 +319,7 @@ ApplicationServiceRequestQueue::reserve(const ApplicationCommandBatch &batch) {
                           command.payload});
       scoped_owners.emplace_back(batch.origin_scope());
       cancel_leases.emplace_back(new ApplicationServiceCancellationLease(
-          {token_id, impl_->generation}));
+          {token_id, impl_->generation}, scoped_owners.back()));
       reservation.emplace_back(free_indices[index], token_id);
     }
 
@@ -670,6 +674,21 @@ ApplicationServiceScopeQuiesceResult ApplicationServiceRequestQueue::quiesce_sco
   impl_->published_count = kept;
   impl_->published_tail = (impl_->published_head + kept) % impl_->limits.capacity;
   return result;
+}
+
+ApplicationScopedRegistryJoinResult
+ApplicationServiceRequestQueue::join_scoped_resources(
+    std::string_view scope, std::chrono::milliseconds timeout) {
+  const auto leases = inspect_scope_leases(scope);
+  if (!leases || !leases.quiesced || leases.total() != 0) {
+    return {0, {ApplicationServiceRegistryErrorCode::InvalidState, {}, {},
+                 "scope has not quiesced or still owns service tokens"}};
+  }
+  if (timeout.count() < 0) {
+    return {0, {ApplicationServiceRegistryErrorCode::InvalidState, {}, {},
+                 "scope endpoint join timeout must be nonnegative"}};
+  }
+  return impl_->registry->join_scoped_resources(scope, timeout);
 }
 
 ApplicationServiceControlResult

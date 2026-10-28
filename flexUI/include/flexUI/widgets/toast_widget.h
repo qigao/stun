@@ -38,6 +38,9 @@ public:
                               float available_height, float& out_width,
                               float& out_height) const override;
   const char* type_name() const override { return "ToastWidget"; }
+  WidgetLocalBorrowSnapshot inspect_local_borrowers() const noexcept override {
+    return {true, on_dismiss_ ? std::size_t{1} : std::size_t{0}, visible_ || opacity_ != 0.0f || timer_ != 0.0f};
+  }
 
   // Content
   const std::string& message() const { return message_; }

@@ -8,6 +8,7 @@
 #include <filesystem>
 #include <memory>
 #include <string>
+#include <string_view>
 
 namespace flexUI {
 
@@ -66,6 +67,7 @@ enum class PluginHostErrorCode {
   InvalidLimits,
   WrongThread,
   InvalidState,
+  InvalidScope,
   InvalidPath,
   ManifestReadFailed,
   InvalidManifest,
@@ -215,6 +217,11 @@ public:
   /// JoinTimedOut leaves the host in Stopping and may be retried. A negative
   /// timeout is invalid; milliseconds::max() waits without a deadline.
   PluginHostResult stop(std::chrono::milliseconds timeout);
+  /// Owner-thread per-scope v2.1 worker lifetime barrier; requires prior
+  /// application route retirement + admission quiescence. This does not
+  /// consume terminal records, release shared DLL or authorize unmount.
+  PluginHostResult join_scoped_workers(
+      std::string_view scope, std::chrono::milliseconds timeout);
   /// Reports whether the caller may perform owner-thread lifecycle work.
   /// This query is safe from any thread and does not advance plugin state.
   bool is_owner_thread() const noexcept;

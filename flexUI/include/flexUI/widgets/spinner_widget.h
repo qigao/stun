@@ -40,6 +40,9 @@ public:
   bool handle_event(const Event& event, Element& elem) override;
   void update(float delta_ms, Element& elem) override;
   const char* type_name() const override { return "SpinnerWidget"; }
+  WidgetLocalBorrowSnapshot inspect_local_borrowers() const noexcept override {
+    return {true, 0, spinning_};
+  }
 
   // Control
   void start() {

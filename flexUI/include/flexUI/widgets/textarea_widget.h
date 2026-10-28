@@ -12,6 +12,7 @@
 #include "../render_command.h"
 #include "../group.h"
 #include "../shapes.h"
+#include <cstddef>
 #include <cstdint>
 #include <string>
 #include <functional>
@@ -71,6 +72,11 @@ public:
   void set_text_value(const std::string& value) override { set_text(value); }
   TextValueObserverId add_edit_observer(EditObserver observer) override;
   bool remove_edit_observer(TextValueObserverId id) override;
+  bool inspect_edit_observers(TextValueObserverSnapshot& out) const noexcept override;
+  WidgetLocalBorrowSnapshot inspect_local_borrowers() const noexcept override {
+    return {true, change_callback_ ? std::size_t{1} : std::size_t{0},
+            notifying_edit_observers_depth_ != 0 || is_dragging_ || is_composing_};
+  }
 
   const std::string& placeholder() const { return placeholder_; }
   void set_placeholder(const std::string& placeholder) {
@@ -194,6 +200,7 @@ private:
   ChangeCallback change_callback_;
   std::vector<std::pair<TextValueObserverId, EditObserver>> edit_observers_;
   TextValueObserverId next_edit_observer_id_ = 1;
+  std::size_t notifying_edit_observers_depth_ = 0;
   bool is_dragging_ = false;
 
   bool is_composing_ = false;

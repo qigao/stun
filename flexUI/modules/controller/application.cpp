@@ -607,6 +607,18 @@ DesktopApplication::inspect_scoped_component_topology(std::string_view scope) co
   }
 
   try {
+    // Compiler ordinals identify borrowed Node* addresses; a modified
+    // live Group can contain an externally allocated or STALE child.
+    // Authenticate ALL Node identities against the sole Box unique_ptr
+    // ownership store before RTTI, parent, ID or Widget dereference.
+    // This temporary map is the exact same Box staging policy used by
+    // inspect_subtree_borrowers(), never a second persistent owner table.
+    std::unordered_map<const flex::Node*, const Element*> owned_nodes;
+    if (!live_box.stage_current_owned_node_addresses(owned_nodes) ||
+        owned_nodes.count(static_cast<const flex::Node*>(host)) == 0) {
+      return refused(DesktopApplicationErrorCode::InvalidState,
+                     "scoped topology host is not owned by the current Box");
+    }
     // Ephemeral local pointers only: NO second runtime ownership registry.
     // Every ID, anonymous Widget and relative child ordinal is checked
     // against the currently mounted Box. Allocation has no live side effects.
@@ -640,9 +652,15 @@ DesktopApplication::inspect_scoped_component_topology(std::string_view scope) co
         return refused(DesktopApplicationErrorCode::InvalidState,
                        "scoped topology compiled child ordinal is no longer live");
       }
-      const auto *element =
-          dynamic_cast<const Element *>(parent->children()[node.child_index]);
-      if (element == nullptr || element->parent_elem() != parent ||
+      const auto owned_child =
+          owned_nodes.find(parent->children()[node.child_index]);
+      // Read no Node vtable/parent data before membership succeeds.
+      if (owned_child == owned_nodes.end()) {
+        return refused(DesktopApplicationErrorCode::InvalidState,
+                       "scoped topology child is not a current Box-owned Element");
+      }
+      const Element *element = owned_child->second;
+      if (element->parent_elem() != parent ||
           element->is_widget_owned() || element->id() != node.qualified_id ||
           element->tag() != node.tag ||
           (element->widget != nullptr) != node.widget ||
@@ -674,6 +692,105 @@ DesktopApplication::inspect_scoped_component_topology(std::string_view scope) co
     return refused(DesktopApplicationErrorCode::CandidateBuildFailed,
                    "scoped live topology preflight raised an unknown exception");
   }
+}
+
+DesktopScopedComponentBorrowSnapshot
+DesktopApplication::inspect_scoped_component_borrowers(std::string_view scope) const {
+  DesktopScopedComponentBorrowSnapshot result;
+  const auto topology = inspect_scoped_component_topology(scope);
+  if (!topology) {
+    result.error = topology.error;
+    return result;
+  }
+  const auto found = std::find_if(
+      impl_->active->scoped_ownership.begin(),
+      impl_->active->scoped_ownership.end(),
+      [scope](const UiScopedComponentOwnership &item) {
+        return std::string_view(item.scope) == scope;
+      });
+  if (found == impl_->active->scoped_ownership.end()) {
+    result.error = fail(DesktopApplicationErrorCode::InvalidConfiguration,
+                        DesktopApplicationStage::CandidateBuild,
+                        "validated scoped owner disappeared");
+    return result;
+  }
+  auto &box = *impl_->active->box;
+  try {
+    std::unordered_map<const flex::Node*, const Element*> owned_nodes;
+    if (!box.stage_current_owned_node_addresses(owned_nodes)) {
+      result.error = fail(DesktopApplicationErrorCode::InvalidState,
+                          DesktopApplicationStage::CandidateBuild,
+                          "scoped Box ownership map has duplicate or invalid nodes");
+      return result;
+    }
+    const auto *host = box.get_by_id(found->host_id);
+    if (!host ||
+        owned_nodes.count(static_cast<const flex::Node*>(host)) == 0 ||
+        found->root_child_index >= host->children().size()) {
+      result.error = fail(DesktopApplicationErrorCode::InvalidState,
+                          DesktopApplicationStage::CandidateBuild,
+                          "scoped root position changed during owner inspection");
+      return result;
+    }
+    const auto root_owner =
+        owned_nodes.find(host->children()[found->root_child_index]);
+    if (root_owner == owned_nodes.end()) {
+      result.error = fail(DesktopApplicationErrorCode::InvalidState,
+                          DesktopApplicationStage::CandidateBuild,
+                          "scoped root is not a currently Box-owned Element");
+      return result;
+    }
+    result.borrowers = box.inspect_subtree_borrowers(root_owner->second);
+    if (!result.borrowers) {
+      result.error = fail(DesktopApplicationErrorCode::InvalidState,
+                          DesktopApplicationStage::CandidateBuild,
+                          "mounted Box cannot safely inspect scoped root borrowers");
+    }
+    return result;
+  } catch (...) {
+    result.error = fail(DesktopApplicationErrorCode::CandidateBuildFailed,
+                        DesktopApplicationStage::CandidateBuild,
+                        "scoped borrower owner-address staging failed");
+    return result;
+  }
+}
+
+DesktopScopedRetirementDiagnostics
+DesktopApplication::inspect_scoped_retirement_diagnostics(
+    std::string_view scope) const {
+  DesktopScopedRetirementDiagnostics result;
+  if (!is_owner_thread()) {
+    result.error = fail(DesktopApplicationErrorCode::WrongThread,
+                        DesktopApplicationStage::CandidateBuild,
+                        "scoped retirement diagnostics require the application owner thread");
+    return result;
+  }
+  const auto before_generation = generation();
+  result.topology = inspect_scoped_component_topology(scope);
+  if (!result.topology) {
+    result.error = result.topology.error;
+    return result;
+  }
+  result.element_borrowers = inspect_scoped_component_borrowers(scope);
+  if (!result.element_borrowers) {
+    result.error = result.element_borrowers.error;
+    return result;
+  }
+  result.service_drain = inspect_scoped_service_drain(scope);
+  if (!result.service_drain) {
+    result.error = result.service_drain.error;
+    return result;
+  }
+  // Even a read-only preflight must not return a misleading mixed-generation
+  // view when a custom Widget introspection implementation reenters reload.
+  if (generation() != before_generation) {
+    result.error = fail(DesktopApplicationErrorCode::InvalidState,
+                        DesktopApplicationStage::CandidateBuild,
+                        "scoped retirement evidence changed application generation");
+    return result;
+  }
+  result.generation = before_generation;
+  return result;
 }
 
 ScriptController *DesktopApplication::controller() noexcept {
@@ -1042,12 +1159,13 @@ DesktopApplicationResult DesktopApplication::retire_scoped_event_handlers(
                  DesktopApplicationStage::ControllerEventRetirement,
                  "scoped event retirement requires the ready state")};
   }
-  if (!impl_->active->controller || !impl_->active->event_bridge) {
-    return {fail(DesktopApplicationErrorCode::InvalidConfiguration,
+  if (impl_->active->controller && !impl_->active->event_bridge) {
+    return {fail(DesktopApplicationErrorCode::InvalidState,
                  DesktopApplicationStage::ControllerEventRetirement,
-                 "scoped event retirement requires a mounted script controller")};
+                 "scoped event retirement has an incomplete script bridge")};
   }
-  if (impl_->active->event_bridge->is_dispatching()) {
+  if (impl_->active->event_bridge &&
+      impl_->active->event_bridge->is_dispatching()) {
     return {fail(DesktopApplicationErrorCode::InvalidState,
                  DesktopApplicationStage::ControllerEventRetirement,
                  "cannot retire scoped events during native event bubbling")};
@@ -1063,7 +1181,46 @@ DesktopApplicationResult DesktopApplication::retire_scoped_event_handlers(
                  DesktopApplicationStage::ControllerEventRetirement,
                  "scoped event retirement requires a declared XML component scope")};
   }
-  auto retired = impl_->active->controller->retire_scoped_event_handlers(scope);
+  // A faulted/unmounted Controller must continue to report its OWN typed
+  // lifecycle error. The later topology preflight rejects the same state,
+  // but cannot replace ControllerErrorCode::InvalidState with a generic
+  // application error: real callers rely on the nested fault contract.
+  // The Controller public API refuses before touching its route table.
+  if (impl_->active->controller &&
+      impl_->active->controller->state() != ControllerState::Mounted) {
+    auto refused = impl_->active->controller->retire_scoped_event_handlers(scope);
+    if (refused) {
+      return {fail(DesktopApplicationErrorCode::InvalidState,
+                   DesktopApplicationStage::ControllerEventRetirement,
+                   "controller unexpectedly accepted route retirement outside Mounted")};
+    }
+    auto error = fail(DesktopApplicationErrorCode::ControllerEventRetirementFailed,
+                      DesktopApplicationStage::ControllerEventRetirement,
+                      refused.error.message);
+    error.controller_error = std::move(refused.error);
+    return {std::move(error)};
+  }
+  // The exact compiler ledger, including anonymous/Widget roots, must
+  // still match the currently mounted Box before any route marker is staged.
+  const auto topology = inspect_scoped_component_topology(scope);
+  if (!topology) {
+    auto error = topology.error;
+    error.stage = DesktopApplicationStage::ControllerEventRetirement;
+    return {std::move(error)};
+  }
+  if (!impl_->active->controller) {
+    // With no script module there can be NO active script route or producer.
+    // Retiring an eventless scope is vacuously true, without a fake callback
+    // or a second application-owned retirement marker.
+    if (topology.compiled_event_nodes != 0) {
+      return {fail(DesktopApplicationErrorCode::InvalidState,
+                   DesktopApplicationStage::ControllerEventRetirement,
+                   "scriptless component unexpectedly owns event routes")};
+    }
+    return {};
+  }
+  auto retired = impl_->active->controller->retire_scoped_event_handlers_impl(
+      scope, topology.compiled_event_nodes == 0);
   if (!retired) {
     auto error = fail(DesktopApplicationErrorCode::ControllerEventRetirementFailed,
                       DesktopApplicationStage::ControllerEventRetirement,
@@ -1090,12 +1247,14 @@ DesktopApplication::quiesce_retired_scoped_service_requests(std::string_view sco
     return fail_result(DesktopApplicationErrorCode::InvalidState,
                        "scoped service quiescence requires a ready application");
   }
-  if (!impl_->active->controller || !impl_->active->event_bridge) {
-    return fail_result(DesktopApplicationErrorCode::InvalidConfiguration,
-                       "scoped service quiescence requires a mounted script controller");
+  if (impl_->active->controller && !impl_->active->event_bridge) {
+    return fail_result(DesktopApplicationErrorCode::InvalidState,
+                       "scoped service quiescence has an incomplete script bridge");
   }
-  if (impl_->active->event_bridge->is_dispatching() ||
-      impl_->active->controller->state() != ControllerState::Mounted) {
+  if ((impl_->active->event_bridge &&
+       impl_->active->event_bridge->is_dispatching()) ||
+      (impl_->active->controller &&
+       impl_->active->controller->state() != ControllerState::Mounted)) {
     return fail_result(DesktopApplicationErrorCode::InvalidState,
                        "scoped service quiescence rejects active native/script callbacks");
   }
@@ -1112,9 +1271,19 @@ DesktopApplication::quiesce_retired_scoped_service_requests(std::string_view sco
   // A still-routable script event could emit a rejected command after the
   // queue gate closes and fault the WHOLE shared ScriptController. Refuse to
   // quiesce until the sole active controller records full route retirement.
-  if (!impl_->active->controller->is_scoped_event_route_retired(scope)) {
-    return fail_result(DesktopApplicationErrorCode::InvalidState,
-                       "retire scoped script event routes before service quiescence");
+  if (impl_->active->controller) {
+    if (!impl_->active->controller->is_scoped_event_route_retired(scope)) {
+      return fail_result(DesktopApplicationErrorCode::InvalidState,
+                         "retire scoped script event routes before service quiescence");
+    }
+  } else {
+    // No ScriptController means no routes to retire, but still require
+    // compiler/Box proof for the exact eventless scope.
+    const auto topology = inspect_scoped_component_topology(scope);
+    if (!topology || topology.compiled_event_nodes != 0) {
+      return fail_result(DesktopApplicationErrorCode::InvalidState,
+                         "scriptless scoped service quiescence requires a live eventless owner");
+    }
   }
   auto quiesced = impl_->service_requests->quiesce_scope_requests(scope);
   if (!quiesced) {
@@ -1144,12 +1313,14 @@ DesktopApplication::inspect_scoped_service_drain(std::string_view scope) const {
     return fail_result(DesktopApplicationErrorCode::InvalidState,
                        "scoped service drain inspection requires a ready application");
   }
-  if (!impl_->active->controller || !impl_->active->event_bridge) {
-    return fail_result(DesktopApplicationErrorCode::InvalidConfiguration,
-                       "scoped service drain inspection requires a mounted script controller");
+  if (impl_->active->controller && !impl_->active->event_bridge) {
+    return fail_result(DesktopApplicationErrorCode::InvalidState,
+                       "scoped service drain inspection has an incomplete script bridge");
   }
-  if (impl_->active->event_bridge->is_dispatching() ||
-      impl_->active->controller->state() != ControllerState::Mounted) {
+  if ((impl_->active->event_bridge &&
+       impl_->active->event_bridge->is_dispatching()) ||
+      (impl_->active->controller &&
+       impl_->active->controller->state() != ControllerState::Mounted)) {
     return fail_result(DesktopApplicationErrorCode::InvalidState,
                        "scoped service drain inspection rejects active native/script callbacks");
   }
@@ -1163,6 +1334,17 @@ DesktopApplication::inspect_scoped_service_drain(std::string_view scope) const {
     return fail_result(DesktopApplicationErrorCode::InvalidConfiguration,
                        "scoped service drain inspection requires a declared XML component scope");
   }
+  const auto topology = inspect_scoped_component_topology(scope);
+  if (!topology) {
+    DesktopApplicationScopedServiceDrainSnapshot result;
+    result.error = topology.error;
+    result.error.stage = DesktopApplicationStage::ServiceRequests;
+    return result;
+  }
+  if (!impl_->active->controller && topology.compiled_event_nodes != 0) {
+    return fail_result(DesktopApplicationErrorCode::InvalidState,
+                       "scriptless scoped service drain has unexpected event routes");
+  }
   auto leases = impl_->service_requests->inspect_scope_leases(scope);
   if (!leases) {
     DesktopApplicationScopedServiceDrainSnapshot result;
@@ -1174,11 +1356,62 @@ DesktopApplication::inspect_scoped_service_drain(std::string_view scope) const {
   }
   DesktopApplicationScopedServiceDrainSnapshot result;
   result.event_routes_retired =
+      !impl_->active->controller ||
       impl_->active->controller->is_scoped_event_route_retired(scope);
   result.admission_quiesced = leases.quiesced;
   result.reserved = leases.reserved;
   result.published = leases.published;
   result.in_flight = leases.in_flight;
+  return result;
+}
+
+DesktopApplicationScopedResourceJoinResult
+DesktopApplication::join_scoped_service_resources(
+    std::string_view scope, std::chrono::milliseconds timeout) {
+  DesktopApplicationScopedResourceJoinResult result;
+  if (!is_owner_thread()) {
+    result.error = fail(DesktopApplicationErrorCode::WrongThread,
+                        DesktopApplicationStage::ServiceRequests,
+                        "scope resource join requires the application owner thread");
+    return result;
+  }
+  if (timeout.count() < 0) {
+    result.error = fail(DesktopApplicationErrorCode::InvalidArgument,
+                        DesktopApplicationStage::ServiceRequests,
+                        "scope resource join timeout must be nonnegative");
+    return result;
+  }
+  const auto drained = inspect_scoped_service_drain(scope);
+  if (!drained) {
+    result.error = drained.error;
+    return result;
+  }
+  if (!drained.queue_drained()) {
+    result.error = fail(DesktopApplicationErrorCode::InvalidState,
+                        DesktopApplicationStage::ServiceRequests,
+                        "retire routes, quiesce admission and consume all terminals first");
+    return result;
+  }
+  const auto current_generation = generation();
+  const auto joined = impl_->service_requests->join_scoped_resources(scope, timeout);
+  if (!joined) {
+    result.error = fail(DesktopApplicationErrorCode::ServiceRegistryFailed,
+                        DesktopApplicationStage::ServiceRegistry,
+                        joined.error.message);
+    result.error.registry_error = joined.error;
+    return result;
+  }
+  // An Endpoint may reenter the application while joining: never return
+  // a stale-generation resource certificate.
+  const auto after = inspect_scoped_service_drain(scope);
+  if (generation() != current_generation || !after || !after.queue_drained()) {
+    result.error = fail(DesktopApplicationErrorCode::InvalidState,
+                        DesktopApplicationStage::ServiceRequests,
+                        "resource join invalidated by generation/admission change");
+    return result;
+  }
+  result.generation = current_generation;
+  result.joined_endpoints = joined.joined_endpoints;
   return result;
 }
 

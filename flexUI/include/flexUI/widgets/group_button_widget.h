@@ -35,6 +35,9 @@ public:
     void emit_render_commands(const Element& elem, RenderCommandList& commands) override;
     bool handle_event(const Event& event, Element& elem) override;
     const char* type_name() const override { return "GroupButtonWidget"; }
+  WidgetLocalBorrowSnapshot inspect_local_borrowers() const noexcept override {
+    return {true, on_click_ ? std::size_t{1} : std::size_t{0}, hovered_ || pressed_};
+  }
 
     // Button API
     const std::string& label() const { return label_; }

@@ -22,6 +22,9 @@
 #ifndef FLEXUI_TEST_BAD_ABI_PLUGIN
 #error FLEXUI_TEST_BAD_ABI_PLUGIN must name the bad ABI test library
 #endif
+#ifndef FLEXUI_TEST_OLD_MINOR_PLUGIN
+#error FLEXUI_TEST_OLD_MINOR_PLUGIN must name the rejected v2.0 test library
+#endif
 #ifndef FLEXUI_TEST_MISSING_ENTRY_PLUGIN
 #error FLEXUI_TEST_MISSING_ENTRY_PLUGIN must name the missing-entry test library
 #endif
@@ -226,6 +229,39 @@ suite("FlexUI PluginHost") {
       check_false(static_cast<bool>(result));
       check_equal(static_cast<int>(result.error.code),
                   static_cast<int>(flexUI::PluginHostErrorCode::UnsupportedAbi));
+    }
+
+    it("rejects ABI v2.0 even with the current major and nonnull entry point") {
+      flexUI::PluginHostBuilder builder;
+      const auto result = builder.load_plugin(
+          std::filesystem::path(FLEXUI_TEST_OLD_MINOR_PLUGIN));
+      check_false(static_cast<bool>(result));
+      check_equal(static_cast<int>(result.error.code),
+                  static_cast<int>(flexUI::PluginHostErrorCode::UnsupportedAbi));
+    }
+
+    it("rejects malformed or cross-thread scoped join without stopping plugins") {
+      auto built = build_echo_host();
+      check_true(static_cast<bool>(built));
+      if (!built) return;
+
+      for (const char *invalid : {"", "sale::action", "2sale", "sale."}) {
+        const auto result = built.host->join_scoped_workers(
+            invalid, std::chrono::milliseconds(0));
+        check_false(static_cast<bool>(result));
+        check_equal(static_cast<int>(result.error.code),
+                    static_cast<int>(flexUI::PluginHostErrorCode::InvalidScope));
+      }
+      flexUI::PluginHostResult foreign;
+      std::thread thread([&] {
+        foreign = built.host->join_scoped_workers(
+            "sale", std::chrono::milliseconds(0));
+      });
+      thread.join();
+      check_false(static_cast<bool>(foreign));
+      check_equal(static_cast<int>(foreign.error.code),
+                  static_cast<int>(flexUI::PluginHostErrorCode::WrongThread));
+      check_true(static_cast<bool>(built.host->stop(std::chrono::seconds(1))));
     }
 
     it("reports create failure without publishing a partial plugin") {
@@ -455,6 +491,17 @@ suite("FlexUI PluginHost") {
       check_false(outstanding.event_routes_retired);
       check_false(outstanding.admission_quiesced);
       check_false(outstanding.queue_drained());
+      const auto app_premature = app.join_scoped_service_resources(
+          "sale", std::chrono::milliseconds(0));
+      check_false(static_cast<bool>(app_premature));
+      check(app_premature.error.code ==
+            flexUI::DesktopApplicationErrorCode::InvalidState);
+      // Before a terminal is posted, an exact-scope join must fail closed.
+      const auto before_post = host.host->join_scoped_workers(
+          "sale", std::chrono::milliseconds(0));
+      check_false(static_cast<bool>(before_post));
+      check_equal(static_cast<int>(before_post.error.code),
+                  static_cast<int>(flexUI::PluginHostErrorCode::JoinTimedOut));
       check_true(static_cast<bool>(app.retire_scoped_event_handlers("sale")));
       auto q = app.quiesce_retired_scoped_service_requests("sale");
       check_true(static_cast<bool>(q));
@@ -514,8 +561,64 @@ suite("FlexUI PluginHost") {
       check_true(app.controller()->state() == flexUI::ControllerState::Mounted);
       const auto final_drain = app.inspect_scoped_service_drain("sale");
       check_true(final_drain.queue_drained());
-      // Do not treat that queue-only status as a worker-exit proof. The real
-      // PluginHost still owns the dynamic DLL and must stop/join successfully.
+      // Actual terminal was consumed, but the fixture worker intentionally
+      // remains alive until a separate release request. This is deterministic
+      // and MUST block physical unmount even though queue_drained() is true.
+      const auto still_live = app.join_scoped_service_resources(
+          "sale", std::chrono::milliseconds(0));
+      check_false(static_cast<bool>(still_live));
+      check(still_live.error.code ==
+            flexUI::DesktopApplicationErrorCode::ServiceRegistryFailed);
+      check(still_live.error.registry_error.code ==
+            flexUI::ApplicationServiceRegistryErrorCode::EndpointJoinBusy);
+
+      // This independent test-only native request releases only the held
+      // worker; the application and sales scope remain mounted.
+      auto release = request(999, "release-scoped-worker", "release");
+      auto endpoint = resolve(host, release).endpoint;
+      check_not_null(endpoint.get());
+      RecordingSink release_sink;
+      if (endpoint) {
+        check_true(static_cast<bool>(endpoint->try_submit(release, release_sink)));
+        check_true(release_sink.wait_for_count(1, std::chrono::seconds(1)));
+      }
+      const auto app_joined = app.join_scoped_service_resources(
+          "sale", std::chrono::seconds(2));
+      check_true(static_cast<bool>(app_joined));
+      check_equal(app_joined.generation, app.generation());
+      check_equal(app_joined.joined_endpoints, std::size_t{1});
+      // Provider-level scope barrier is idempotent; no sibling scope stop.
+      check_true(static_cast<bool>(host.host->join_scoped_workers(
+          "sale", std::chrono::seconds(1))));
+      check_true(static_cast<bool>(host.host->join_scoped_workers(
+          "sales", std::chrono::seconds(1))));
+      check_equal(static_cast<int>(host.host->state()),
+                  static_cast<int>(flexUI::PluginHostState::Started));
+      check_not_null(app.box().get_by_id("sales::action"));
+      // Explicit regression: the sibling must be able to publish and
+      // consume ANOTHER real native request after sale's worker has joined.
+      app.box().set_focus(sales);
+      auto sibling_event = flexUI::Event::key_down(flexUI::KeyCode::A);
+      check_true(static_cast<bool>(app.dispatch_event(sibling_event)));
+      check_equal(app.service_statistics().current_pending, std::size_t{1});
+      auto next_sibling = dispatcher.dispatcher->pump();
+      check_true(static_cast<bool>(next_sibling));
+      check_equal(next_sibling.submitted, std::size_t{1});
+      for (int n = 0; n < 300 && completions->size() < 2; ++n) {
+        auto polled = app.try_dispatch_service_completion();
+        check_false(static_cast<bool>(polled.error));
+        if (polled.status == flexUI::ApplicationServicePollStatus::Ready)
+          break;
+        if (polled.status == flexUI::ApplicationServicePollStatus::Empty)
+          std::this_thread::sleep_for(std::chrono::milliseconds(1));
+      }
+      check_equal(completions->size(), std::size_t{2});
+      if (completions->size() == 2) {
+        check_equal(completions->back().script_request_id, std::uint64_t{502});
+        check_equal(completions->back().payload, std::string("native-payload"));
+      }
+      check_true(app.inspect_scoped_service_drain("sale").queue_drained());
+      // Scope join cannot unload a DLL or close unrelated sibling routes.
       check_true(static_cast<bool>(host.host->stop(std::chrono::seconds(2))));
       check_true(static_cast<bool>(app.request_close()));
       check_true(static_cast<bool>(app.shutdown()));
@@ -535,6 +638,21 @@ suite("FlexUI PluginHost") {
                   static_cast<int>(flexUI::PluginHostErrorCode::StartFailed));
       check_null(built.host.get());
       check_null(built.registry.get());
+    }
+
+    it("wakes an actually sleeping worker when global stop races its wait") {
+      auto built = build_echo_host();
+      check_true(static_cast<bool>(built));
+      if (!built) return;
+      RecordingSink sink;
+      auto value = request(81, "wait-stop");
+      auto endpoint = resolve(built, value).endpoint;
+      check_not_null(endpoint.get());
+      if (!endpoint) return;
+      check_true(static_cast<bool>(endpoint->try_submit(value, sink)));
+      check_true(static_cast<bool>(built.host->stop(std::chrono::seconds(2))));
+      check_equal(static_cast<int>(built.host->state()),
+                  static_cast<int>(flexUI::PluginHostState::Stopped));
     }
 
     it("keeps the DLL loaded after timeout and permits a later join") {

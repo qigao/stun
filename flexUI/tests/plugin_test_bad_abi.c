@@ -4,8 +4,9 @@
 static const flexui_plugin_api_v2 bad_api = {
     sizeof(flexui_plugin_api_v2),
     99u,
+    FLEXUI_PLUGIN_ABI_MINOR,
     0u,
-    0u,
+    0,
     0,
     0,
     0,

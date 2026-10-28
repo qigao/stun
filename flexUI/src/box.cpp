@@ -4,6 +4,8 @@
 
 #include <flexUI/box.h>
 #include <flexUI/renderer.h>
+#include <flexUI/text_value_widget.h>
+#include <flexUI/widget.h>
 #include <flexUI/layout_manager.h>
 #include <flexUI/render_manager.h>
 #include <flexUI/view_pipeline.h>
@@ -934,6 +936,18 @@ bool Box::owns_element(const Element* element) const {
   return element && element->owner_box_ == this;
 }
 
+bool Box::stage_current_owned_node_addresses(
+    std::unordered_map<const flex::Node*, const Element*>& result) const {
+  result.reserve(elements_.size());
+  for (const auto &owner : elements_) {
+    if (!owner ||
+        !result.emplace(static_cast<const flex::Node*>(owner.get()),
+                        owner.get()).second)
+      return false;
+  }
+  return true;
+}
+
 void Box::sync_utility_stylesheet() {
   if (!utility_jit_ || !utility_tree_dirty_) {
     return;
@@ -1137,25 +1151,50 @@ Box::inspect_subtree_borrowers(const Element *subtree_root) const noexcept {
     result.error = BoxSubtreeBorrowErrorCode::WrongThread;
     return result;
   }
-  if (!subtree_root || subtree_root == root_ || !owns_element(subtree_root)) {
+  if (!subtree_root || subtree_root == root_) {
     result.error = BoxSubtreeBorrowErrorCode::InvalidRoot;
     return result;
   }
-  // Detached Box-owned staged nodes are not live subtree roots. Validate
-  // the exact ancestor chain without calling a Widget or a native callback.
-  const Element *ancestor = subtree_root;
-  std::size_t hops = 0;
-  while (ancestor != root_) {
-    if (!ancestor || ++hops > elements_.size()) {
+
+  try {
+    // An Element* is only an opaque address until the Box's UNIQUE
+    // unique_ptr<Element> owner table confirms its current membership.
+    // In particular, calling owns_element() or parent_elem() first would
+    // dereference an already-retired raw UiElement pointer (ASan UAF).
+    // Stage exactly one temporary owner-membership set, not another runtime
+    // ownership registry. Allocation failure cannot change the live Box.
+    // Key by Node* (the actual type of Group::children()) and keep its
+    // verified Element* in the same temporary index. For children, address
+    // membership must precede RTTI/parent access: dynamic_cast on a stale
+    // Node* could read freed vtable memory. The Box's unique_ptr vector
+    // remains the ONLY lifetime owner; this index dies with inspection.
+    std::unordered_map<const flex::Node*, const Element*> owned_elements;
+    if (!stage_current_owned_node_addresses(owned_elements)) {
+      result.error = BoxSubtreeBorrowErrorCode::InconsistentTree;
+      return result;
+    }
+    if (owned_elements.count(subtree_root) == 0 ||
+        owned_elements.count(root_) == 0 ||
+        !owns_element(subtree_root)) {
       result.error = BoxSubtreeBorrowErrorCode::InvalidRoot;
       return result;
     }
-    ancestor = ancestor->parent_elem();
-  }
-  result.native_event_dispatching = events_.is_dispatching();
-  result.layout_or_widget_traversal_active = borrowed_tree_depth_ != 0;
 
-  try {
+    // Detached Box-owned staged nodes are not live roots. Every ancestor
+    // address must be a CURRENT Box-owned Element before any dereference.
+    const Element *ancestor = subtree_root;
+    std::size_t hops = 0;
+    while (ancestor != root_) {
+      if (!ancestor || owned_elements.count(ancestor) == 0 ||
+          ++hops > elements_.size()) {
+        result.error = BoxSubtreeBorrowErrorCode::InvalidRoot;
+        return result;
+      }
+      ancestor = ancestor->parent_elem();
+    }
+    result.native_event_dispatching = events_.is_dispatching();
+    result.layout_or_widget_traversal_active = borrowed_tree_depth_ != 0;
+
     // Bounded temporary set of ACTUALLY live descendants. This includes
     // Widget-owned internal parts as well as Box-owned compiled Elements,
     // so event focus/capture pointing into a Widget part is never missed.
@@ -1172,6 +1211,8 @@ Box::inspect_subtree_borrowers(const Element *subtree_root) const noexcept {
     }
     const std::size_t budget = elements_.size() +
         widgets_.size() * kMaximumPartsPerWidget + kExtraStructuralBudget;
+    // Descendant membership uses the same staged sole-Box owner set that
+    // already authenticated the root and every ancestor above.
     std::vector<const Element *> pending{subtree_root};
     std::unordered_set<const Element *> visited;
     while (!pending.empty()) {
@@ -1186,19 +1227,98 @@ Box::inspect_subtree_borrowers(const Element *subtree_root) const noexcept {
         return result;
       }
       ++result.mounted_elements;
-      if (element->widget) ++result.widget_hosts;
-      if (bindings_.has_binding_target(element)) ++result.binding_targets;
+      // This snapshot MUST account for real Widget-owned parts, not just
+      // compiler-authored Elements. Every descendant must belong to the one
+      // live Box; a borrowed/fabricated Widget host is never accepted.
+      if (!owns_element(element) || owned_elements.count(element) == 0) {
+        result.error = BoxSubtreeBorrowErrorCode::InconsistentTree;
+        return result;
+      }
+      ++result.box_owned_elements;
+      if (element->is_widget_owned()) {
+        // Widget parts are private direct children of an actual Widget host.
+        // Neither an arbitrary Box node nor a different Widget's subtree
+        // may claim their lifetime through an inherited owner_box_ pointer.
+        const auto *host = element->parent_elem();
+        if (!host || !host->widget || !owned_elements.count(host)) {
+          result.error = BoxSubtreeBorrowErrorCode::InconsistentTree;
+          return result;
+        }
+        ++result.widget_owned_parts;
+      }
+      if (element->widget) {
+        const auto owned_widget = std::find_if(
+            widgets_.begin(), widgets_.end(),
+            [element](const std::unique_ptr<Widget> &candidate) {
+              return candidate.get() == element->widget;
+            });
+        if (owned_widget == widgets_.end() ||
+            (*owned_widget)->host_element() != element) {
+          result.error = BoxSubtreeBorrowErrorCode::InconsistentTree;
+          return result;
+        }
+        ++result.widget_hosts;
+        const auto widget_owners = element->widget->inspect_local_borrowers();
+        if (!widget_owners.audited) ++result.unverified_widget_hosts;
+        // A partial/unsupported audit can still report real borrowers; the
+        // "audited" bit governs admission, not whether diagnostics are kept.
+        result.native_widget_callback_owners +=
+            widget_owners.native_callback_owners;
+        if (widget_owners.interaction_or_callback_active)
+          ++result.active_widget_local_borrowers;
+        result.retained_widget_projection_nodes +=
+            widget_owners.published_projection_nodes;
+        result.deferred_widget_retirement_nodes +=
+            widget_owners.pending_retirement_nodes;
+      }
+      const auto identity = reinterpret_cast<std::uintptr_t>(element);
+      if (transitions_.retains_element(identity))
+        ++result.retained_transition_elements;
+      if (animations_.retains_element(identity))
+        ++result.retained_animation_elements;
+      if (styled_elements_.count(identity) != 0)
+        ++result.styled_element_cache_entries;
+      if (container_widths_.count(element) != 0)
+        ++result.container_width_cache_entries;
+      const auto observer = bindings_.inspect_target_observers(element);
+      if (observer.binding_count != 0) ++result.binding_targets;
+      result.value_observers += observer.value_observers;
+      result.blocked_value_observers += observer.blocked_value_observers;
+      result.binding_mutation_active |= observer.binding_mutation_active;
+      result.invalid_binding_ownership |= observer.invalid_ownership;
+      if (element->widget) {
+        if (const auto* editable =
+                dynamic_cast<const TextValueWidget*>(element->widget)) {
+          TextValueObserverSnapshot widget_observers;
+          if (!editable->inspect_edit_observers(widget_observers)) {
+            result.uninspectable_edit_widget = true;
+          } else {
+            result.widget_edit_observers += widget_observers.registered;
+            result.widget_observer_notifications_active |=
+                widget_observers.notifying_depth != 0;
+            if (widget_observers.registered < observer.value_observers) {
+              result.invalid_binding_ownership = true;
+            } else {
+              result.unowned_widget_edit_observers +=
+                  widget_observers.registered - observer.value_observers;
+            }
+          }
+        }
+      }
       if (element->click_callback()) ++result.native_click_callbacks;
       if (element->is_focus() || element->is_hover() || element->is_active())
         result.local_interaction_state = true;
 
       for (const auto *child : element->children()) {
-        const auto *owner = dynamic_cast<const Element *>(child);
-        if (!owner || owner->parent_elem() != element) {
+        const auto owned_child = owned_elements.find(child);
+        // Do NOT RTTI-cast or access parent on an address not owned by Box.
+        // A foreign or stale child remains an opaque Node pointer here.
+        if (owned_child == owned_elements.end() ||
+            owned_child->second->parent_elem() != element) {
           result.error = BoxSubtreeBorrowErrorCode::InconsistentTree;
           return result;
         }
-        pending.push_back(owner);
+        pending.push_back(owned_child->second);
       }
     }
     result.focused_descendant =
@@ -1214,6 +1334,34 @@ Box::inspect_subtree_borrowers(const Element *subtree_root) const noexcept {
     }
     for (const Element *host : keyed_repeater_hosts_) {
       if (visited.count(host) != 0) ++result.keyed_repeater_hosts;
+    }
+
+    // The one Box owns ALL Element::on_click() closures, including on
+    // siblings and detached staged nodes. A closure attached to "sales"
+    // may capture a raw "sale" Element even though it isn't in the target
+    // tree. Count all opaque external closures without invoking any.
+    for (const auto &owner : elements_) {
+      if (visited.count(owner.get()) == 0 && owner->click_callback())
+        ++result.foreign_native_click_callbacks;
+    }
+    result.opaque_global_event_callback_owners =
+        events_.opaque_global_callback_owners();
+
+    // No second external-pointer registry: re-use the exact temporary set
+    // just built from the mounted target subtree. A foreign Widget may keep
+    // borrowed page pointers into it even after its script routes and queue
+    // have drained. NEVER assume such cross-scope borrows are zero.
+    for (const auto& widget : widgets_) {
+      if (!widget || (widget->host_element_ &&
+                      owned_elements.count(widget->host_element_) == 0)) {
+        result.error = BoxSubtreeBorrowErrorCode::InconsistentTree;
+        return result;
+      }
+      if (visited.count(widget->host_element_) != 0) continue;
+      const auto external =
+          widget->inspect_external_element_borrows(visited);
+      if (!external.audited) ++result.unverified_external_widget_hosts;
+      result.foreign_widget_element_borrows += external.borrowed_references;
     }
     return result;
   } catch (...) {

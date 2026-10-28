@@ -58,6 +58,12 @@ flexui_plugin_status FLEXUI_PLUGIN_CALL join_instance(
   ++counts.lifecycle_calls;
   return FLEXUI_PLUGIN_STATUS_INVALID_STATE;
 }
+flexui_plugin_status FLEXUI_PLUGIN_CALL join_scope_instance(
+    flexui_plugin_instance*, flexui_plugin_bytes_view, std::uint64_t,
+    flexui_plugin_error_buffer*) {
+  ++counts.lifecycle_calls;
+  return FLEXUI_PLUGIN_STATUS_INVALID_STATE;
+}
 
 void FLEXUI_PLUGIN_CALL destroy_instance(flexui_plugin_instance* instance) {
   if (counts.live_exceptions != 0) ++counts.destroys_during_exception;
@@ -76,12 +82,13 @@ const flexui_plugin_operation_descriptor_v2 operation = {
 const flexui_plugin_service_descriptor_v2 service = {
     sizeof(service), 1, literal_view("test.create-unwind/1"), &operation, {0}};
 const flexui_plugin_descriptor_v2 descriptor = {
-    sizeof(descriptor), 0, literal_view("test.create-unwind"),
+    sizeof(descriptor), FLEXUI_PLUGIN_ABI_MINOR,
+    literal_view("test.create-unwind"),
     literal_view("1.0.0"), 1, 0, &service, {0}};
 const flexui_plugin_api_v2 plugin_api = {
     sizeof(plugin_api), FLEXUI_PLUGIN_ABI_MAJOR, FLEXUI_PLUGIN_ABI_MINOR, 0,
     &descriptor, create_instance, start_instance, submit_request, start_instance,
-    join_instance, destroy_instance, {0}};
+    join_instance, destroy_instance, join_scope_instance, {0}};
 
 void reset(CreateUnwindMode requested_mode) {
   mode = requested_mode;

@@ -1,12 +1,14 @@
 #define FLEXUI_PLUGIN_BUILD
 #include <flexUI/plugin_abi.h>
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
 #include <cstdint>
 #include <cstring>
 #include <mutex>
+#include <limits>
 #include <new>
 #include <string>
 #include <thread>
@@ -61,6 +63,14 @@ void write_error(flexui_plugin_error_buffer *error, const char *message) {
   error->message_size = count;
 }
 
+struct WorkerRecord {
+  std::string scope;
+  std::uint64_t token_id = 0;
+  std::uint64_t generation = 0;
+  std::thread thread;
+  bool finished = false;
+};
+
 struct TestInstance {
   flexui_host_api_v2 host{};
   std::atomic<bool> started{false};
@@ -69,7 +79,8 @@ struct TestInstance {
   std::mutex mutex;
   std::condition_variable idle;
   std::size_t active_workers = 0;
-  std::vector<std::thread> workers;
+  bool release_scoped_worker = false;
+  std::vector<WorkerRecord> workers;
 };
 
 flexui_plugin_status post_completion(TestInstance &instance,
@@ -111,8 +122,14 @@ flexui_plugin_status post_cancelled(TestInstance &instance,
                                        &error);
 }
 
-void finish_worker(TestInstance &instance) {
+void finish_worker(TestInstance &instance, std::uint64_t token_id,
+                   std::uint64_t generation) {
   std::lock_guard<std::mutex> lock(instance.mutex);
+  const auto found = std::find_if(instance.workers.begin(), instance.workers.end(),
+      [token_id, generation](const WorkerRecord &item) {
+        return item.token_id == token_id && item.generation == generation;
+      });
+  if (found != instance.workers.end()) found->finished = true;
   --instance.active_workers;
   instance.idle.notify_all();
 }
@@ -176,8 +193,16 @@ submit_request(flexui_plugin_instance *opaque,
     write_error(error, "instance is stopping");
     return FLEXUI_PLUGIN_STATUS_CLOSED;
   }
+  if (request->struct_size < sizeof(flexui_plugin_request_v2) ||
+      request->origin_scope.size > 253 ||
+      (request->origin_scope.size != 0 && request->origin_scope.data == nullptr)) {
+    write_error(error, "invalid v2.1 request origin");
+    return FLEXUI_PLUGIN_STATUS_INVALID_ARGUMENT;
+  }
   const auto operation = copy_view(request->operation);
   const auto payload = copy_view(request->payload);
+  const auto scope = request->origin_scope.size == 0
+                         ? std::string{} : copy_view(request->origin_scope);
   if (operation == "echo") {
     return post_completion(instance, request->token_id,
                            request->token_generation, payload);
@@ -188,6 +213,15 @@ submit_request(flexui_plugin_instance *opaque,
   }
   if (operation == "hold") {
     return FLEXUI_PLUGIN_STATUS_OK;
+  }
+  if (operation == "release-scoped-worker") {
+    {
+      std::lock_guard<std::mutex> lock(instance.mutex);
+      instance.release_scoped_worker = true;
+      instance.idle.notify_all();
+    }
+    return post_completion(instance, request->token_id,
+                           request->token_generation, payload);
   }
   if (operation == "cancel-watch") {
     std::uint32_t requested = 0;
@@ -203,17 +237,23 @@ submit_request(flexui_plugin_instance *opaque,
     throw 7;
   }
   if (operation != "retry" && operation != "block" &&
-      operation != "deferred-copy" && operation != "cancel-watch") {
+      operation != "deferred-copy" && operation != "cancel-watch" &&
+      operation != "wait-stop") {
     write_error(error, "operation is unsupported");
     return FLEXUI_PLUGIN_STATUS_REJECTED;
   }
 
   try {
+    WorkerRecord record;
+    record.scope = scope;
+    record.token_id = request->token_id;
+    record.generation = request->token_generation;
     {
       std::lock_guard<std::mutex> lock(instance.mutex);
+      instance.workers.emplace_back(std::move(record));
       ++instance.active_workers;
-    }
-    instance.workers.emplace_back(
+      try {
+        instance.workers.back().thread = std::thread(
         [&instance, operation, payload, token_id = request->token_id,
          generation = request->token_generation] {
           if (operation == "cancel-watch") {
@@ -227,10 +267,23 @@ submit_request(flexui_plugin_instance *opaque,
               if (status != FLEXUI_PLUGIN_STATUS_OK) break;
               if (requested != 0) {
                 (void)post_cancelled(instance, token_id, generation);
+                // Deterministic proof: the terminal is ALREADY posted, but
+                // the worker remains alive until an independent release call
+                // or global stop. Queue drain must never impersonate join.
+                std::unique_lock<std::mutex> lock(instance.mutex);
+                instance.idle.wait(lock, [&instance] {
+                  return instance.release_scoped_worker ||
+                         instance.stopping.load();
+                });
                 break;
               }
               std::this_thread::sleep_for(kRetryDelay);
             }
+          } else if (operation == "wait-stop") {
+            std::unique_lock<std::mutex> lock(instance.mutex);
+            instance.idle.wait(lock, [&instance] {
+              return instance.stopping.load();
+            });
           } else if (operation == "block") {
             std::this_thread::sleep_for(kBlockDelay);
             if (!instance.stopping.load()) {
@@ -253,10 +306,15 @@ submit_request(flexui_plugin_instance *opaque,
               std::this_thread::sleep_for(kRetryDelay);
             }
           }
-          finish_worker(instance);
+          finish_worker(instance, token_id, generation);
         });
+      } catch (...) {
+        --instance.active_workers;
+        instance.workers.pop_back();
+        throw;
+      }
+    }
   } catch (...) {
-    finish_worker(instance);
     write_error(error, "worker creation failed");
     return FLEXUI_PLUGIN_STATUS_RESOURCE_LIMIT;
   }
@@ -277,7 +335,13 @@ stop_instance(flexui_plugin_instance *opaque,
     return FLEXUI_PLUGIN_STATUS_REJECTED;
   }
 #endif
-  instance.stopping.store(true);
+  {
+    // Hold the SAME mutex used by both worker wait predicates, so a stop
+    // cannot slip between a false predicate read and wait admission.
+    std::lock_guard<std::mutex> lock(instance.mutex);
+    instance.stopping.store(true);
+  }
+  instance.idle.notify_all();
   return FLEXUI_PLUGIN_STATUS_OK;
 }
 
@@ -305,12 +369,66 @@ join_instance(flexui_plugin_instance *opaque, std::uint64_t timeout_ms,
   }
   lock.unlock();
   for (auto &worker : instance.workers) {
-    if (worker.joinable()) {
-      worker.join();
+    if (worker.thread.joinable()) {
+      worker.thread.join();
     }
   }
   instance.workers.clear();
   return FLEXUI_PLUGIN_STATUS_OK;
+}
+
+flexui_plugin_status FLEXUI_PLUGIN_CALL
+join_scope_instance(flexui_plugin_instance *opaque,
+                    flexui_plugin_bytes_view source,
+                    std::uint64_t timeout_ms,
+                    flexui_plugin_error_buffer *error) {
+  if (!opaque || source.size == 0 || source.size > 253 || !source.data) {
+    write_error(error, "valid scoped join input required");
+    return FLEXUI_PLUGIN_STATUS_INVALID_ARGUMENT;
+  }
+  auto &instance = *reinterpret_cast<TestInstance *>(opaque);
+  try {
+    const auto scope = copy_view(source);
+    std::unique_lock<std::mutex> lock(instance.mutex);
+    const auto done = [&] {
+      return std::none_of(instance.workers.begin(), instance.workers.end(),
+          [&scope](const WorkerRecord &item) {
+            return item.scope == scope && !item.finished;
+          });
+    };
+    bool ready = false;
+    if (timeout_ms == FLEXUI_PLUGIN_TIMEOUT_INFINITE) {
+      instance.idle.wait(lock, done);
+      ready = true;
+    } else {
+      const auto bounded = std::min(timeout_ms,
+          static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max()));
+      ready = instance.idle.wait_for(lock,
+          std::chrono::milliseconds(static_cast<std::int64_t>(bounded)), done);
+    }
+    if (!ready) {
+      write_error(error, "worker still running after scoped terminal post");
+      return FLEXUI_PLUGIN_STATUS_TIMED_OUT;
+    }
+    // Reserve before moving any joinable thread out of authoritative storage.
+    std::vector<std::thread> retired;
+    retired.reserve(instance.workers.size());
+    for (auto it = instance.workers.begin(); it != instance.workers.end();) {
+      if (it->scope == scope) {
+        retired.push_back(std::move(it->thread));
+        it = instance.workers.erase(it);
+      } else {
+        ++it;
+      }
+    }
+    lock.unlock();
+    for (auto &worker : retired)
+      if (worker.joinable()) worker.join();
+    return FLEXUI_PLUGIN_STATUS_OK;
+  } catch (...) {
+    write_error(error, "scoped join failed");
+    return FLEXUI_PLUGIN_STATUS_INTERNAL;
+  }
 }
 
 void FLEXUI_PLUGIN_CALL destroy_instance(flexui_plugin_instance *opaque) {
@@ -325,10 +443,14 @@ const flexui_plugin_operation_descriptor_v2 operations[] = {
     {sizeof(flexui_plugin_operation_descriptor_v2), 0, literal_view("hold"),
      4096, {0}},
     {sizeof(flexui_plugin_operation_descriptor_v2), 0,
+     literal_view("release-scoped-worker"), 4096, {0}},
+    {sizeof(flexui_plugin_operation_descriptor_v2), 0,
      literal_view("cancel-watch"), 4096, {0}},
     {sizeof(flexui_plugin_operation_descriptor_v2), 0, literal_view("retry"),
      4096, {0}},
     {sizeof(flexui_plugin_operation_descriptor_v2), 0, literal_view("block"),
+     4096, {0}},
+    {sizeof(flexui_plugin_operation_descriptor_v2), 0, literal_view("wait-stop"),
      4096, {0}},
     {sizeof(flexui_plugin_operation_descriptor_v2), 0, literal_view("throw"),
      4096, {0}},
@@ -341,18 +463,24 @@ const flexui_plugin_service_descriptor_v2 services[] = {
      static_cast<std::uint32_t>(sizeof(operations) / sizeof(operations[0])),
      literal_view(FLEXUI_TEST_PLUGIN_SERVICE), operations, {0}}};
 
+#if defined(FLEXUI_TEST_OLD_MINOR)
+constexpr std::uint32_t kPluginMinor = 0;
+#else
+constexpr std::uint32_t kPluginMinor = FLEXUI_PLUGIN_ABI_MINOR;
+#endif
+
 const flexui_plugin_descriptor_v2 descriptor = {
-    sizeof(flexui_plugin_descriptor_v2), 0,
+    sizeof(flexui_plugin_descriptor_v2), kPluginMinor,
     literal_view(FLEXUI_TEST_PLUGIN_ID),
     literal_view("1.0.0"), 1, 0, services, {0}};
 
 const flexui_plugin_api_v2 api = {
     sizeof(flexui_plugin_api_v2), FLEXUI_PLUGIN_ABI_MAJOR,
-    FLEXUI_PLUGIN_ABI_MINOR,      0,
+    kPluginMinor,                0,
     &descriptor,                  &create_instance,
     &start_instance,             &submit_request,
     &stop_instance,              &join_instance,
-    &destroy_instance,           {0}};
+    &destroy_instance,           &join_scope_instance, {0}};
 
 } // namespace
 

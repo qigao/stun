@@ -246,6 +246,37 @@ spec("FlexUI application service requests") {
     check_equal(created.queue->statistics().current_pending, std::size_t{0});
   }
 
+  it("invalidates retained cancellation leases after normal terminal consumption") {
+    auto created = registered_queue(17);
+    check(created);
+    if (!created) return;
+    flexUI::ApplicationCommandEngine engine(*created.queue);
+    auto queued = engine.reserve(batch_with({command(170)}));
+    check(queued);
+    if (!queued) return;
+    queued.prepared->publish();
+    auto received = created.queue->try_receive_request();
+    check(received);
+    if (!received) return;
+    auto retained = received.request->cancellation;
+    check_not_null(retained.get());
+    if (!retained) return;
+    check_false(retained->requested());
+    check_false(retained->retired());
+    const auto completed = created.queue->resolve_completion(
+        completion(received.request->token));
+    check(completed);
+    check(completed.status == flexUI::ApplicationServicePollStatus::Ready);
+    check_false(retained->requested());
+    check(retained->retired());
+    check_equal(created.queue->statistics().current_pending, std::size_t{0});
+    check(created.queue->state() == flexUI::ApplicationServiceRequestState::Accepting);
+    // Retiring the token does not invalidate the typed request values held
+    // by the application, but must prevent reusing its lifetime authority.
+    check_equal(retained->token().id, received.request->token.id);
+    check_equal(retained->token().generation, std::uint64_t{17});
+  }
+
   it("cancels old requests across generation reset and close") {
     flexUI::ApplicationServiceRequestLimits limits;
     limits.capacity = 3;

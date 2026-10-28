@@ -1,5 +1,34 @@
 #include <flexUI.h>
 #include <flexUI/widgets/label_widget.h>
+#include <flexUI/widgets/checkbox_widget.h>
+#include <flexUI/widgets/radio_widget.h>
+#include <flexUI/widgets/switch_widget.h>
+#include <flexUI/widgets/slider_widget.h>
+#include <flexUI/widgets/progressbar_widget.h>
+#include <flexUI/widgets/select_widget.h>
+#include <flexUI/widgets/dropdown_widget.h>
+#include <flexUI/widgets/tabs_widget.h>
+#include <flexUI/widgets/accordion_widget.h>
+#include <flexUI/widgets/tooltip_widget.h>
+#include <flexUI/widgets/modal_widget.h>
+#include <flexUI/widgets/toast_widget.h>
+#include <flexUI/widgets/spinner_widget.h>
+#include <flexUI/widgets/divider_widget.h>
+#include <flexUI/widgets/badge_widget.h>
+#include <flexUI/widgets/card_widget.h>
+#include <flexUI/widgets/group_button_widget.h>
+#include <flexUI/widgets/toggle_group_widget.h>
+#include <flexUI/widgets/breadcrumb_widget.h>
+#include <flexUI/widgets/pagination_widget.h>
+#include <flexUI/widgets/stepper_widget.h>
+#include <flexUI/widgets/image_widget.h>
+#include <flexUI/widgets/calendar_widget.h>
+#include <flexUI/widgets/table_widget.h>
+#include <flexUI/widgets/tree_widget.h>
+#include <flexUI/widgets/colorpicker_widget.h>
+#include <flexUI/widgets/avatar_widget.h>
+#include <flexUI/widgets/gradient_editor_widget.h>
+#include <flexUI/widgets/markdown_widget.h>
 #include <flexUI/widget.h>
 #include <flexUI/keyed_repeater.h>
 
@@ -1220,7 +1249,13 @@ spec("Box structural subtree retirement rejects unsafe lifetime owners") {
     check_false(box.retire_unbound_structural_subtree("not-present"));
     check_equal(box.owned_element_count(), count);
 
+    // The old raw Element pointer becomes stale after actual deletion.
+    // Inspection must authenticate its ADDRESS against Box-owned unique_ptr
+    // entries before reading any freed bytes, including owner_box_/parent_.
+    const flexUI::Element *stale_panel_address = panel;
     check(box.retire_unbound_structural_subtree("scope::panel"));
+    const auto stale_snapshot = box.inspect_subtree_borrowers(stale_panel_address);
+    check(stale_snapshot.error == flexUI::BoxSubtreeBorrowErrorCode::InvalidRoot);
     check_equal(box.owned_element_count(), count - 3u);
     check_equal(host->child_count(), std::size_t{2});
     check_equal(host->child_at(0), left);
@@ -1999,5 +2034,480 @@ spec("Scoped XML components preserve local label and accessibility references") 
     check(merged.error.code == UiDocumentErrorCode::InvalidComponentScope);
     check_equal(app.program->definition().root.children.size(),
                 std::size_t{1});
+  }
+}
+
+spec("FlexUI M4b6f exact Box Element ownership membership") {
+  it("rejects externally allocated children carrying a copied Box back-pointer") {
+    flexUI::Box box(nullptr);
+    auto *root = box.create("main", "root");
+    auto *container = box.create("section", "container");
+    root->append(container);
+    box.set_root(root);
+    auto original = box.inspect_subtree_borrowers(container);
+    check(static_cast<bool>(original));
+    check_equal(original.box_owned_elements, std::size_t{1});
+
+    // Element::append propagates the Box back-pointer to an external
+    // element, but no unique_ptr ownership is ever transferred.
+    flexUI::Element foreign;
+    check_equal(container->append(&foreign), &foreign);
+    const auto invalid = box.inspect_subtree_borrowers(container);
+    check_false(static_cast<bool>(invalid));
+    check(invalid.error == flexUI::BoxSubtreeBorrowErrorCode::InconsistentTree);
+    const auto direct = box.inspect_subtree_borrowers(&foreign);
+    check_false(static_cast<bool>(direct));
+    check(direct.error == flexUI::BoxSubtreeBorrowErrorCode::InvalidRoot);
+
+    // The failed read must not detach, free, or invalidate sibling nodes.
+    check_equal(container->child_count(), std::size_t{1});
+    check(container->remove(&foreign));
+    check_equal(container->child_count(), std::size_t{0});
+    const auto recovered = box.inspect_subtree_borrowers(container);
+    check(static_cast<bool>(recovered));
+    check_equal(recovered.box_owned_elements, std::size_t{1});
+
+    // A valid native sibling is resolved through the EXACT same temporary
+    // Node*/Element* membership map, including its parent pointer.
+    auto *box_owned_child = box.create("span", "container::owned");
+    container->append(box_owned_child);
+    const auto owned = box.inspect_subtree_borrowers(container);
+    check(static_cast<bool>(owned));
+    check_equal(owned.mounted_elements, std::size_t{2});
+    check_equal(owned.box_owned_elements, std::size_t{2});
+    check_equal(box.get_by_id("container::owned"), box_owned_child);
+  }
+}
+
+spec("FlexUI M4b6c built-in Widget owner audits") {
+  it("counts actual form callbacks and hidden animation ownership without retiring") {
+    flexUI::CheckboxWidget checkbox("Chosen");
+    flexUI::RadioWidget radio;
+    flexUI::SwitchWidget toggle;
+    flexUI::SliderWidget slider;
+    flexUI::ProgressBarWidget progress;
+    check(checkbox.inspect_local_borrowers().audited);
+    check(radio.inspect_local_borrowers().audited);
+    check(toggle.inspect_local_borrowers().audited);
+    check(slider.inspect_local_borrowers().audited);
+    check(progress.inspect_local_borrowers().audited);
+    check_equal(checkbox.inspect_local_borrowers().native_callback_owners, std::size_t{0});
+    checkbox.set_change_callback([](bool) {});
+    radio.set_change_callback([](const std::string&, const std::string&) {});
+    toggle.set_change_callback([](bool) {});
+    slider.set_change_callback([](float) {});
+    for (const flexUI::Widget* owner :
+         {static_cast<flexUI::Widget*>(&checkbox), static_cast<flexUI::Widget*>(&radio),
+          static_cast<flexUI::Widget*>(&toggle), static_cast<flexUI::Widget*>(&slider)}) {
+      check_equal(owner->inspect_local_borrowers().native_callback_owners, std::size_t{1});
+    }
+    check_equal(progress.inspect_local_borrowers().native_callback_owners, std::size_t{0});
+
+    checkbox.set_checked(true);
+    radio.set_checked(true);
+    toggle.set_checked(true);
+    progress.set_indeterminate(true);
+    check(checkbox.inspect_local_borrowers().interaction_or_callback_active);
+    check(radio.inspect_local_borrowers().interaction_or_callback_active);
+    check(toggle.inspect_local_borrowers().interaction_or_callback_active);
+    check(progress.inspect_local_borrowers().interaction_or_callback_active);
+    progress.set_indeterminate(false);
+    check_false(progress.inspect_local_borrowers().interaction_or_callback_active);
+    checkbox.set_change_callback({});
+    radio.set_change_callback({});
+    toggle.set_change_callback({});
+    slider.set_change_callback({});
+    check_equal(checkbox.inspect_local_borrowers().native_callback_owners, std::size_t{0});
+    check_equal(radio.inspect_local_borrowers().native_callback_owners, std::size_t{0});
+    check_equal(toggle.inspect_local_borrowers().native_callback_owners, std::size_t{0});
+    check_equal(slider.inspect_local_borrowers().native_callback_owners, std::size_t{0});
+    // Clearing callbacks does NOT silently retire a still-active animation.
+    check(checkbox.inspect_local_borrowers().interaction_or_callback_active);
+  }
+
+  it("exposes open overlays, tab page borrows and accordion animation") {
+    flexUI::SelectWidget select({"one", "two"});
+    flexUI::DropdownWidget dropdown;
+    flexUI::TabsWidget tabs;
+    flexUI::AccordionWidget accordion;
+    check(select.inspect_local_borrowers().audited);
+    check(dropdown.inspect_local_borrowers().audited);
+    check(tabs.inspect_local_borrowers().audited);
+    check(accordion.inspect_local_borrowers().audited);
+    select.set_change_callback([](int, const std::string&) {});
+    dropdown.set_change_callback([](const std::string&) {});
+    tabs.set_change_callback([](int, const std::string&) {});
+    accordion.set_change_callback([](const std::string&, bool) {});
+    check_equal(select.inspect_local_borrowers().native_callback_owners, std::size_t{1});
+    check_equal(dropdown.inspect_local_borrowers().native_callback_owners, std::size_t{1});
+    check_equal(tabs.inspect_local_borrowers().native_callback_owners, std::size_t{1});
+    check_equal(accordion.inspect_local_borrowers().native_callback_owners, std::size_t{1});
+
+    select.set_expanded(true);
+    // A pending open target alone is live, but no dropdown height is
+    // retained until the native Widget update actually advances a frame.
+    check(select.inspect_local_borrowers().interaction_or_callback_active);
+    flexUI::Element select_host;
+    select.update(16.0f, select_host);
+    dropdown.open();
+    flexUI::Element foreign_page;
+    tabs.add_tab("First", "first", &foreign_page);
+    accordion.add_section("Details", "details");
+    accordion.expand("details");
+    check(select.inspect_local_borrowers().interaction_or_callback_active);
+    check(dropdown.inspect_local_borrowers().interaction_or_callback_active);
+    check(tabs.inspect_local_borrowers().interaction_or_callback_active);
+    check(accordion.inspect_local_borrowers().interaction_or_callback_active);
+    // An Element* page borrowed by Tabs must NOT be discarded as harmless.
+    tabs.clear_tabs();
+    check_false(tabs.inspect_local_borrowers().interaction_or_callback_active);
+    dropdown.close();
+    check_false(dropdown.inspect_local_borrowers().interaction_or_callback_active);
+    select.set_expanded(false);
+    // A REAL opening frame has already produced nonzero current height.
+    // Closing changes only the target; the still-unwinding animation is
+    // a live Widget-local borrower even though the overlay is closed.
+    check_false(select.is_expanded());
+    check(select.inspect_local_borrowers().interaction_or_callback_active);
+    select.update(200.0f, select_host);
+    check_false(select.inspect_local_borrowers().interaction_or_callback_active);
+
+    // Separate zero-frame case: opening and closing synchronously without
+    // ANY update never creates retained animation height. Do not invent a
+    // worker/animation borrower when both heights are genuinely zero.
+    select.set_expanded(true);
+    select.set_expanded(false);
+    check_false(select.inspect_local_borrowers().interaction_or_callback_active);
+  }
+
+  it("reports only live scoped native Widget ownership in the one Box") {
+    flexUI::Box box(nullptr);
+    auto* root = box.create("main", "root");
+    auto* target = box.create_widget<flexUI::CheckboxWidget>(
+        "checkbox", "scope", std::string("One"), false);
+    auto* sibling = box.create_widget<flexUI::ProgressBarWidget>(
+        "progress", "sibling", 0.0f, false);
+    root->append(target);
+    root->append(sibling);
+    box.set_root(root);
+    auto* owned = static_cast<flexUI::CheckboxWidget*>(target->widget);
+    const auto before = box.inspect_subtree_borrowers(target);
+    check(static_cast<bool>(before));
+    check_equal(before.widget_hosts, std::size_t{1});
+    check_equal(before.unverified_widget_hosts, std::size_t{0});
+    check_equal(before.native_widget_callback_owners, std::size_t{0});
+    const auto other = box.inspect_subtree_borrowers(sibling);
+    check(static_cast<bool>(other));
+    check_equal(other.active_widget_local_borrowers, std::size_t{0});
+
+    owned->set_change_callback([](bool) {});
+    const auto callbacks = box.inspect_subtree_borrowers(target);
+    check(static_cast<bool>(callbacks));
+    check_equal(callbacks.native_widget_callback_owners, std::size_t{1});
+    check_equal(box.inspect_subtree_borrowers(sibling).native_widget_callback_owners,
+                std::size_t{0});
+    owned->set_checked(true);
+    const auto active = box.inspect_subtree_borrowers(target);
+    check(static_cast<bool>(active));
+    check_equal(active.active_widget_local_borrowers, std::size_t{1});
+    check_equal(box.inspect_subtree_borrowers(sibling).active_widget_local_borrowers,
+                std::size_t{0});
+    // Existing compiled/Widget guards remain intact despite all audits.
+    check_false(box.retire_bound_structural_subtree("scope"));
+    check_not_null(box.get_by_id("scope"));
+  }
+}
+
+spec("FlexUI M4b6d overlay, timer and simple native callback owner audits") {
+  it("keeps active overlays and perpetual animation visible to scoped preflight") {
+    flexUI::TooltipWidget tooltip("Hint");
+    flexUI::ModalWidget modal("Heading");
+    flexUI::ToastWidget toast("Done");
+    flexUI::SpinnerWidget spinner;
+    check(tooltip.inspect_local_borrowers().audited);
+    check(modal.inspect_local_borrowers().audited);
+    check(toast.inspect_local_borrowers().audited);
+    check(spinner.inspect_local_borrowers().audited);
+    check_false(tooltip.inspect_local_borrowers().interaction_or_callback_active);
+    check_false(modal.inspect_local_borrowers().interaction_or_callback_active);
+    check_false(toast.inspect_local_borrowers().interaction_or_callback_active);
+    check(spinner.inspect_local_borrowers().interaction_or_callback_active);
+    tooltip.show();
+    modal.open();
+    toast.show();
+    check(tooltip.inspect_local_borrowers().interaction_or_callback_active);
+    check(modal.inspect_local_borrowers().interaction_or_callback_active);
+    check(toast.inspect_local_borrowers().interaction_or_callback_active);
+    modal.set_close_callback([] {});
+    toast.set_dismiss_callback([] {});
+    check_equal(modal.inspect_local_borrowers().native_callback_owners, std::size_t{1});
+    check_equal(toast.inspect_local_borrowers().native_callback_owners, std::size_t{1});
+    modal.set_close_callback({});
+    toast.set_dismiss_callback({});
+    check_equal(modal.inspect_local_borrowers().native_callback_owners, std::size_t{0});
+    check_equal(toast.inspect_local_borrowers().native_callback_owners, std::size_t{0});
+  }
+
+  it("audits static presentation and six independent native UI callback types") {
+    flexUI::DividerWidget divider;
+    flexUI::BadgeWidget badge("New");
+    flexUI::CardWidget card;
+    check(divider.inspect_local_borrowers().audited);
+    check(badge.inspect_local_borrowers().audited);
+    check(card.inspect_local_borrowers().audited);
+    check_false(divider.inspect_local_borrowers().interaction_or_callback_active);
+    check_false(badge.inspect_local_borrowers().interaction_or_callback_active);
+    check_false(card.inspect_local_borrowers().interaction_or_callback_active);
+    check_equal(card.inspect_local_borrowers().native_callback_owners, std::size_t{0});
+
+    flexUI::GroupButtonWidget group_button;
+    flexUI::ToggleGroupWidget toggle_group;
+    flexUI::BreadcrumbWidget breadcrumb;
+    flexUI::PaginationWidget pagination;
+    flexUI::StepperWidget stepper;
+    check(group_button.inspect_local_borrowers().audited);
+    check(toggle_group.inspect_local_borrowers().audited);
+    check(breadcrumb.inspect_local_borrowers().audited);
+    check(pagination.inspect_local_borrowers().audited);
+    check(stepper.inspect_local_borrowers().audited);
+    group_button.set_click_callback([] {});
+    toggle_group.set_change_callback([](int, const std::string&) {});
+    breadcrumb.set_click_callback([](int, const std::string&) {});
+    pagination.set_page_change_callback([](int) {});
+    stepper.set_change_callback([](int) {});
+    for (const flexUI::Widget* item : {
+         static_cast<flexUI::Widget*>(&group_button),
+         static_cast<flexUI::Widget*>(&toggle_group),
+         static_cast<flexUI::Widget*>(&breadcrumb),
+         static_cast<flexUI::Widget*>(&pagination),
+         static_cast<flexUI::Widget*>(&stepper)}) {
+      check_equal(item->inspect_local_borrowers().native_callback_owners,
+                  std::size_t{1});
+    }
+    group_button.set_click_callback({});
+    toggle_group.set_change_callback({});
+    breadcrumb.set_click_callback({});
+    pagination.set_page_change_callback({});
+    stepper.set_change_callback({});
+    check_equal(group_button.inspect_local_borrowers().native_callback_owners, std::size_t{0});
+    check_equal(toggle_group.inspect_local_borrowers().native_callback_owners, std::size_t{0});
+    check_equal(breadcrumb.inspect_local_borrowers().native_callback_owners, std::size_t{0});
+    check_equal(pagination.inspect_local_borrowers().native_callback_owners, std::size_t{0});
+    check_equal(stepper.inspect_local_borrowers().native_callback_owners, std::size_t{0});
+  }
+}
+
+spec("FlexUI M4b6e external-source Widget owner retirement preflight") {
+  it("flags unretired image sources and native image load callbacks") {
+    flexUI::ImageWidget image("assets/image.png");
+    check(image.inspect_local_borrowers().audited);
+    check(image.inspect_local_borrowers().interaction_or_callback_active);
+    image.set_load_callback([](bool) {});
+    check_equal(image.inspect_local_borrowers().native_callback_owners, std::size_t{1});
+    image.set_load_callback({});
+    check_equal(image.inspect_local_borrowers().native_callback_owners, std::size_t{0});
+    // A loaded URL still requires backend image-resource lifetime proof.
+    check(image.inspect_local_borrowers().interaction_or_callback_active);
+    image.set_src("");
+    check_false(image.inspect_local_borrowers().interaction_or_callback_active);
+
+    flexUI::AvatarWidget avatar("Alice", "assets/alice.png");
+    check(avatar.inspect_local_borrowers().audited);
+    check(avatar.inspect_local_borrowers().interaction_or_callback_active);
+    avatar.set_image_url("");
+    check_false(avatar.inspect_local_borrowers().interaction_or_callback_active);
+  }
+
+  it("audits calendar, table, tree, color, and gradient callbacks independently") {
+    flexUI::CalendarWidget calendar;
+    flexUI::TableWidget table;
+    flexUI::TreeWidget tree;
+    flexUI::ColorPickerWidget picker;
+    flexUI::GradientEditorWidget gradient;
+    for (const flexUI::Widget* w : {
+         static_cast<flexUI::Widget*>(&calendar),
+         static_cast<flexUI::Widget*>(&table),
+         static_cast<flexUI::Widget*>(&tree),
+         static_cast<flexUI::Widget*>(&picker),
+         static_cast<flexUI::Widget*>(&gradient)}) {
+      check(w->inspect_local_borrowers().audited);
+      check_equal(w->inspect_local_borrowers().native_callback_owners, std::size_t{0});
+    }
+    calendar.set_select_callback([](const flexUI::Date&) {});
+    table.set_select_callback([](int) {});
+    tree.set_select_callback([](flexUI::TreeNode*) {});
+    picker.set_change_callback([](const flexUI::Color&) {});
+    gradient.set_change_callback([] {});
+    gradient.set_stop_select_callback([](int, const flexUI::Color&) {});
+    check_equal(calendar.inspect_local_borrowers().native_callback_owners, std::size_t{1});
+    check_equal(table.inspect_local_borrowers().native_callback_owners, std::size_t{1});
+    check_equal(tree.inspect_local_borrowers().native_callback_owners, std::size_t{1});
+    check_equal(picker.inspect_local_borrowers().native_callback_owners, std::size_t{1});
+    check_equal(gradient.inspect_local_borrowers().native_callback_owners, std::size_t{2});
+    // TreeNode references are independently retained in the Widget graph
+    // and cannot be treated as a resolved, borrower-free Element subtree.
+    tree.add_node("root", "Tree root");
+    check(tree.inspect_local_borrowers().interaction_or_callback_active);
+    calendar.set_select_callback({});
+    table.set_select_callback({});
+    tree.set_select_callback({});
+    picker.set_change_callback({});
+    gradient.set_change_callback({});
+    gradient.set_stop_select_callback({});
+    check_equal(gradient.inspect_local_borrowers().native_callback_owners, std::size_t{0});
+    check(tree.inspect_local_borrowers().interaction_or_callback_active);
+    tree.clear();
+    check_false(tree.inspect_local_borrowers().interaction_or_callback_active);
+  }
+
+  it("retains conservative default denial for Markdown's private projection lifecycle") {
+    flexUI::MarkdownWidget markdown("# still mounted");
+    const auto owner = markdown.inspect_local_borrowers();
+    check_false(owner.audited);
+    check_equal(owner.native_callback_owners, std::size_t{0});
+    // Projection reconciliation and deferred retirement must first prove
+    // their own callback-safe Box/Element destruction order.
+  }
+}
+
+
+spec("FlexUI M4b6i cross-scope native Widget Element pointer borrows") {
+  it("finds a sibling Tabs page pointer into the exact target subtree") {
+    flexUI::Box box(nullptr);
+    auto* root = box.create("main", "root");
+    auto* sale = box.create("section", "sale");
+    auto* page = box.create("div", "sale::page");
+    auto* sales_tabs = box.create_widget<flexUI::TabsWidget>("tabs", "sales::tabs");
+    auto* sales_label = box.create_widget<flexUI::LabelWidget>(
+        "label", "sales::label", std::string("Sibling"));
+    sale->append(page);
+    root->append(sale);
+    root->append(sales_tabs);
+    root->append(sales_label);
+    box.set_root(root);
+
+    const auto page_handle = box.handle_for(*page);
+    const auto before = box.inspect_subtree_borrowers(sale);
+    check(static_cast<bool>(before));
+    check_equal(before.foreign_widget_element_borrows, std::size_t{0});
+    check_equal(before.unverified_external_widget_hosts, std::size_t{0});
+    auto* tabs = dynamic_cast<flexUI::TabsWidget*>(sales_tabs->widget);
+    check_not_null(tabs);
+    if (!tabs) return;
+
+    tabs->add_tab("Borrowed page", "first", page);
+    const auto borrowed = box.inspect_subtree_borrowers(sale);
+    check(static_cast<bool>(borrowed));
+    check_equal(borrowed.foreign_widget_element_borrows, std::size_t{1});
+    check_equal(borrowed.unverified_external_widget_hosts, std::size_t{0});
+    check_equal(box.resolve_handle(page_handle), page);
+    check_equal(box.get_by_id("sales::tabs"), sales_tabs);
+
+    // The exact sibling page borrow is independent of the Tabs' own scope
+    // and must not be hidden by coincidental scope prefix similarity.
+    const auto other = box.inspect_subtree_borrowers(sales_tabs);
+    check(static_cast<bool>(other));
+    check_equal(other.foreign_widget_element_borrows, std::size_t{0});
+    tabs->clear_tabs();  // Explicitly retire the ONLY known page pointer.
+    // Even without Tab::page, a native callback may capture the same raw
+    // Element pointer. Reject "audited" status until that closure is gone.
+    tabs->set_change_callback([page](int, const std::string&) {
+      (void)page;
+    });
+    const auto closure_borrow = box.inspect_subtree_borrowers(sale);
+    check(static_cast<bool>(closure_borrow));
+    check_equal(closure_borrow.foreign_widget_element_borrows, std::size_t{0});
+    check_equal(closure_borrow.unverified_external_widget_hosts, std::size_t{1});
+    tabs->set_change_callback({});
+    const auto released = box.inspect_subtree_borrowers(sale);
+    check(static_cast<bool>(released));
+    check_equal(released.foreign_widget_element_borrows, std::size_t{0});
+    check_equal(released.unverified_external_widget_hosts, std::size_t{0});
+    check_equal(box.resolve_handle(page_handle), page);
+    check_equal(box.get_by_id("sales::label"), sales_label);
+  }
+}
+
+
+
+spec("FlexUI M4b6l foreign native callback closure ownership") {
+  it("blocks a target scope when a sibling Element callback may capture its child") {
+    flexUI::Box box(nullptr);
+    auto* root = box.create("main", "root");
+    auto* sale = box.create("section", "sale");
+    auto* page = box.create("div", "sale::page");
+    auto* sales = box.create("section", "sales");
+    auto* button = box.create("button", "sales::button");
+    sale->append(page);
+    sales->append(button);
+    root->append(sale);
+    root->append(sales);
+    box.set_root(root);
+    const auto page_handle = box.handle_for(*page);
+    const auto sibling_handle = box.handle_for(*button);
+
+    const auto initial = box.inspect_subtree_borrowers(sale);
+    check(static_cast<bool>(initial));
+    check_equal(initial.foreign_native_click_callbacks, std::size_t{0});
+    check_equal(initial.opaque_global_event_callback_owners, std::size_t{0});
+    check_equal(initial.native_click_callbacks, std::size_t{0});
+
+    page->on_click([] {});
+    button->on_click([page] { (void)page; });
+    const auto borrowed = box.inspect_subtree_borrowers(sale);
+    check(static_cast<bool>(borrowed));
+    check_equal(borrowed.native_click_callbacks, std::size_t{1});
+    check_equal(borrowed.foreign_native_click_callbacks, std::size_t{1});
+    check_equal(borrowed.opaque_global_event_callback_owners, std::size_t{0});
+    const auto sibling = box.inspect_subtree_borrowers(sales);
+    check(static_cast<bool>(sibling));
+    check_equal(sibling.native_click_callbacks, std::size_t{1});
+    check_equal(sibling.foreign_native_click_callbacks, std::size_t{1});
+
+    // Explicitly disarming only the target-local handler does NOT retire
+    // the sibling's opaque capture. Neither callback was invoked.
+    page->on_click({});
+    const auto still_borrowed = box.inspect_subtree_borrowers(sale);
+    check(static_cast<bool>(still_borrowed));
+    check_equal(still_borrowed.native_click_callbacks, std::size_t{0});
+    check_equal(still_borrowed.foreign_native_click_callbacks, std::size_t{1});
+    button->on_click({});
+    const auto released = box.inspect_subtree_borrowers(sale);
+    check(static_cast<bool>(released));
+    check_equal(released.foreign_native_click_callbacks, std::size_t{0});
+    check_equal(box.resolve_handle(page_handle), page);
+    check_equal(box.resolve_handle(sibling_handle), button);
+  }
+
+  it("accounts for public and framework Box-wide closures independently") {
+    flexUI::Box box(nullptr);
+    auto* root = box.create("main", "root");
+    auto* sale = box.create("div", "sale");
+    auto* sales = box.create("div", "sales");
+    root->append(sale);
+    root->append(sales);
+    box.set_root(root);
+    const auto right = box.handle_for(*sales);
+    box.set_event_callback([sale](flexUI::Element&, const flexUI::Event&) {
+      (void)sale;
+    });
+    auto public_only = box.inspect_subtree_borrowers(sale);
+    check(static_cast<bool>(public_only));
+    check_equal(public_only.opaque_global_event_callback_owners, std::size_t{1});
+    box.set_framework_event_callback([sale](flexUI::Element&, const flexUI::Event&) {
+      (void)sale;
+    });
+    auto both = box.inspect_subtree_borrowers(sale);
+    check(static_cast<bool>(both));
+    check_equal(both.opaque_global_event_callback_owners, std::size_t{2});
+    check_equal(both.foreign_native_click_callbacks, std::size_t{0});
+    box.set_event_callback({});
+    const auto one = box.inspect_subtree_borrowers(sale);
+    check_equal(one.opaque_global_event_callback_owners, std::size_t{1});
+    box.set_framework_event_callback({});
+    const auto none = box.inspect_subtree_borrowers(sale);
+    check(static_cast<bool>(none));
+    check_equal(none.opaque_global_event_callback_owners, std::size_t{0});
+    check_equal(box.resolve_handle(right), sales);
   }
 }

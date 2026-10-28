@@ -1,4 +1,5 @@
 #include <flexUI/application.h>
+#include <flexUI/detail/style_property_registry.h>
 #include <flexUI/application_host_bridge.h>
 #include <flexUI/render_command.h>
 #include <flexUI/widgets/button_widget.h>
@@ -23,6 +24,26 @@ void count_completion_wakeup(void *context) noexcept {
   static_cast<std::atomic<std::uint64_t> *>(context)->fetch_add(
       1, std::memory_order_release);
 }
+
+class JoinedStorageEndpoint final : public flexUI::IApplicationServiceEndpoint {
+public:
+  flexUI::ApplicationServiceSubmitResult try_submit(
+      const flexUI::ApplicationServiceRequest &,
+      flexUI::IApplicationServiceCompletionSink &) override { return {}; }
+
+  flexUI::ApplicationEndpointScopeJoinCode
+  join_scoped_resources(std::string_view scope,
+                        std::chrono::milliseconds) override {
+    ++join_count;
+    last_scope.assign(scope);
+    return may_join ? flexUI::ApplicationEndpointScopeJoinCode::Joined
+                    : flexUI::ApplicationEndpointScopeJoinCode::Busy;
+  }
+
+  bool may_join = false;
+  std::size_t join_count = 0;
+  std::string last_scope;
+};
 
 class TestStorageEndpoint final : public flexUI::IApplicationServiceEndpoint {
 public:
@@ -438,6 +459,223 @@ spec("FlexUI desktop scoped service quiescence facade") {
   }
 }
 
+spec("FlexUI scoped Endpoint resource join admission") {
+  it("requires route retirement, queue drain and independent native join") {
+    const std::string root =
+        "<ui name=\"ScopedResource\"><main id=\"root\">"
+        "<section id=\"left\"/><section id=\"right\"/></main></ui>";
+    flexUI::ApplicationServiceRegistryBuilder services;
+    auto endpoint = std::make_shared<JoinedStorageEndpoint>();
+    check(services.register_service({"storage/1", {{"write", 1024}}}, endpoint));
+    auto registry = services.build();
+    check(static_cast<bool>(registry));
+    if (!registry) return;
+
+    flexUI::DesktopApplicationBuilder builder(nullptr);
+    builder.xml_entry(root)
+        .scoped_xml_component("sale", "left",
+            "<ui name=\"Sale\"><div><button id=\"send\">Send</button></div></ui>")
+        .scoped_xml_component("sales", "right",
+            "<ui name=\"Sales\"><div id=\"label\">Keep</div></ui>")
+        .services(std::move(registry.registry), {{"storage/1"}, {"storage/1"}});
+    auto built = builder.build();
+    check(static_cast<bool>(built));
+    if (!built) return;
+    auto &app = *built.application;
+    auto *sibling = app.box().get_by_id("sales::label");
+    check_not_null(sibling);
+    if (!sibling) return;
+    const auto sibling_handle = app.box().handle_for(*sibling);
+    const auto generation = app.generation();
+
+    auto premature = app.join_scoped_service_resources(
+        "sale", std::chrono::milliseconds{0});
+    check_false(static_cast<bool>(premature));
+    check(premature.error.code == flexUI::DesktopApplicationErrorCode::InvalidState);
+    check_equal(endpoint->join_count, std::size_t{0});
+    check(app.retire_scoped_event_handlers("sale"));
+    check(app.quiesce_retired_scoped_service_requests("sale"));
+    check(app.inspect_scoped_service_drain("sale").queue_drained());
+
+    auto busy = app.join_scoped_service_resources(
+        "sale", std::chrono::milliseconds{0});
+    check_false(static_cast<bool>(busy));
+    check(busy.error.code == flexUI::DesktopApplicationErrorCode::ServiceRegistryFailed);
+    check(busy.error.registry_error.code ==
+          flexUI::ApplicationServiceRegistryErrorCode::EndpointJoinBusy);
+    check_equal(endpoint->join_count, std::size_t{1});
+
+    endpoint->may_join = true;
+    auto joined = app.join_scoped_service_resources(
+        "sale", std::chrono::milliseconds{10});
+    check(static_cast<bool>(joined));
+    check_equal(joined.generation, generation);
+    check_equal(joined.joined_endpoints, std::size_t{1});
+    check_equal(endpoint->last_scope, std::string("sale"));
+    check_equal(app.box().resolve_handle(sibling_handle), sibling);
+    check_not_null(app.box().get_by_id("sale::send"));
+
+    flexUI::DesktopApplicationScopedResourceJoinResult foreign_thread;
+    std::thread worker([&] {
+      foreign_thread = app.join_scoped_service_resources(
+          "sale", std::chrono::milliseconds{0});
+    });
+    worker.join();
+    check(foreign_thread.error.code == flexUI::DesktopApplicationErrorCode::WrongThread);
+    auto missing = app.join_scoped_service_resources(
+        "missing", std::chrono::milliseconds{0});
+    check_false(static_cast<bool>(missing));
+    check(missing.error.code == flexUI::DesktopApplicationErrorCode::InvalidConfiguration);
+
+    check(app.reload({root, "", "", "new-generation"}));
+    auto stale = app.join_scoped_service_resources(
+        "sale", std::chrono::milliseconds{0});
+    check_false(static_cast<bool>(stale));
+    check(stale.error.code == flexUI::DesktopApplicationErrorCode::InvalidState);
+    check_not_null(app.box().get_by_id("sales::label"));
+  }
+
+  it("refuses unsupported Endpoint despite the scoped queue being drained") {
+    const std::string root =
+        "<ui name=\"Unsupported\"><main id=\"root\">"
+        "<section id=\"host\"/></main></ui>";
+    flexUI::DesktopApplicationBuilder builder(nullptr);
+    builder.xml_entry(root).scoped_xml_component(
+        "sale", "host",
+        "<ui name=\"Passive\"><div id=\"label\">NoEvents</div></ui>");
+    static_cast<void>(configure_storage_service(builder));
+    auto built = builder.build();
+    check(static_cast<bool>(built));
+    if (!built) return;
+    auto &app = *built.application;
+    check(app.retire_scoped_event_handlers("sale"));
+    check(app.quiesce_retired_scoped_service_requests("sale"));
+    check(app.inspect_scoped_service_drain("sale").queue_drained());
+    auto unsupported = app.join_scoped_service_resources(
+        "sale", std::chrono::milliseconds{0});
+    check_false(static_cast<bool>(unsupported));
+    check(unsupported.error.registry_error.code ==
+          flexUI::ApplicationServiceRegistryErrorCode::EndpointJoinUnsupported);
+    check_not_null(app.box().get_by_id("sale::label"));
+  }
+}
+
+spec("FlexUI eventless scoped retirement admission") {
+  it("retires zero routes using the compiled ledger without inventing a handler") {
+    auto probe = std::make_shared<ModuleProbe>();
+    const std::string root =
+        "<ui name=\"ScopedEventless\"><main id=\"root\">"
+        "<section id=\"left\"/><section id=\"right\"/></main></ui>";
+    const std::string passive =
+        "<ui name=\"Passive\"><div><button id=\"action\">Passive</button>"
+        "<span>Anonymous</span></div></ui>";
+    const std::string active =
+        "<ui name=\"Active\" xmlns:on=\"urn:flexui:event\">"
+        "<button id=\"action\" on:key_down=\"save_document\">Run</button></ui>";
+    flexUI::DesktopApplicationBuilder builder(nullptr);
+    builder.xml_entry(root)
+        .scoped_xml_component("sale", "left", passive)
+        .scoped_xml_component("sales", "right", active)
+        .script("eventless-scopes", fake_factory(probe));
+    auto built = builder.build();
+    check(static_cast<bool>(built));
+    if (!built) return;
+    auto &app = *built.application;
+    const auto topology = app.inspect_scoped_component_topology("sale");
+    check(static_cast<bool>(topology));
+    check(topology.compiled_event_nodes == std::size_t{0});
+    check(topology.compiled_widget_hosts == std::size_t{1});
+    check(app.inspect_scoped_component_borrowers("sale"));
+    const auto prior = app.inspect_scoped_service_drain("sale");
+    check(static_cast<bool>(prior));
+    check_false(prior.event_routes_retired);
+    check_false(prior.queue_drained());
+
+    // The Controller alone lacks the compiler ownership proof and must keep
+    // rejecting zero handlers. Only the application may attest this scope.
+    const auto raw = app.controller()->retire_scoped_event_handlers("sale");
+    check_false(static_cast<bool>(raw));
+    check(raw.error.code == flexUI::ControllerErrorCode::InvalidArgument);
+    auto foreign = app.retire_scoped_event_handlers("unknown");
+    check_false(static_cast<bool>(foreign));
+    check(foreign.error.code ==
+          flexUI::DesktopApplicationErrorCode::InvalidConfiguration);
+
+    check(app.retire_scoped_event_handlers("sale"));
+    check(app.retire_scoped_event_handlers("sale"));
+    check(app.controller()->is_scoped_event_route_retired("sale"));
+    check_false(app.controller()->is_scoped_event_route_retired("sales"));
+    auto quiesced = app.quiesce_retired_scoped_service_requests("sale");
+    check(static_cast<bool>(quiesced));
+    const auto drained = app.inspect_scoped_service_drain("sale");
+    check(drained.queue_drained());
+    check(drained.pending() == std::size_t{0});
+    check_not_null(app.box().get_by_id("sale::action"));
+    check_not_null(app.box().get_by_id("sales::action"));
+
+    auto *sibling = app.box().get_by_id("sales::action");
+    if (sibling) {
+      app.box().set_focus(sibling);
+      auto key = flexUI::Event::key_down(flexUI::KeyCode::A);
+      check(app.dispatch_event(key));
+      check_equal(probe->events.size(), std::size_t{1});
+    }
+    check(app.reload({root, "", "eventless-scopes", "generation-two"}));
+    const auto reloaded = app.inspect_scoped_service_drain("sale");
+    check(static_cast<bool>(reloaded));
+    check_false(reloaded.event_routes_retired);
+    check_false(reloaded.admission_quiesced);
+  }
+
+  it("admits a scriptless anonymous Widget subtree without a phantom controller") {
+    const std::string root =
+        "<ui name=\"Scriptless\"><main id=\"root\">"
+        "<section id=\"host\"/><section id=\"sibling\"/></main></ui>";
+    flexUI::DesktopApplicationBuilder builder(nullptr);
+    builder.xml_entry(root)
+        .scoped_xml_component(
+            "sale", "host",
+            "<ui name=\"Passive\"><div><button id=\"action\">Go</button>"
+            "<span>Untargeted</span></div></ui>")
+        .scoped_xml_component(
+            "sales", "sibling",
+            "<ui name=\"Other\"><div id=\"label\">Keep</div></ui>");
+    auto built = builder.build();
+    check(static_cast<bool>(built));
+    if (!built) return;
+    auto &app = *built.application;
+    check_null(app.controller());
+    const auto before = app.inspect_scoped_service_drain("sale");
+    check(static_cast<bool>(before));
+    check(before.event_routes_retired);
+    check_false(before.admission_quiesced);
+    check_false(before.queue_drained());
+    const auto borrowed = app.inspect_scoped_component_borrowers("sale");
+    check(static_cast<bool>(borrowed));
+    check(borrowed.borrowers.widget_hosts == std::size_t{1});
+    auto *sibling = app.box().get_by_id("sales::label");
+    check_not_null(sibling);
+    if (!sibling) return;
+    const auto handle = app.box().handle_for(*sibling);
+
+    check(app.retire_scoped_event_handlers("sale"));
+    const auto quiesced = app.quiesce_retired_scoped_service_requests("sale");
+    check(static_cast<bool>(quiesced));
+    check(app.inspect_scoped_service_drain("sale").queue_drained());
+    check_equal(app.box().resolve_handle(handle), sibling);
+    check_not_null(app.box().get_by_id("sale::action"));
+
+    // Eventless admission is NOT permission to bypass compiled Widget ownership.
+    check_false(app.box().retire_bound_structural_subtree("sale::action"));
+    check_equal(app.box().resolve_handle(handle), sibling);
+    check(app.reload({root, "", "", "new-generation"}));
+    const auto refreshed = app.inspect_scoped_service_drain("sale");
+    check(static_cast<bool>(refreshed));
+    check(refreshed.event_routes_retired);
+    check_false(refreshed.admission_quiesced);
+  }
+}
+
 spec("FlexUI scoped live Box topology preflight") {
   it("resolves eventless anonymous roots and Widget hosts without fake script events") {
     flexUI::DesktopApplicationBuilder builder(nullptr);
@@ -467,6 +705,13 @@ spec("FlexUI scoped live Box topology preflight") {
     check(owners[1].nodes[0].qualified_id == "other::frame");
     const auto checked = app.inspect_scoped_component_topology("eventless");
     check(static_cast<bool>(checked));
+    const auto borrowers = app.inspect_scoped_component_borrowers("eventless");
+    check(static_cast<bool>(borrowers));
+    check(borrowers.borrowers.mounted_elements >= std::size_t{3});
+    check(borrowers.borrowers.widget_hosts >= std::size_t{1});
+    const auto sibling_borrow = app.inspect_scoped_component_borrowers("missing");
+    check(sibling_borrow.error.code ==
+          flexUI::DesktopApplicationErrorCode::InvalidConfiguration);
     check(checked.resolved_compiled_nodes == std::size_t{3});
     check(checked.compiled_widget_hosts == std::size_t{1});
     check(checked.compiled_event_nodes == std::size_t{0});
@@ -491,6 +736,87 @@ spec("FlexUI scoped live Box topology preflight") {
     check(static_cast<bool>(baseline));
     check(baseline.mounted_elements >= std::size_t{3});
     check(baseline.widget_hosts >= std::size_t{1});
+    check_equal(baseline.unverified_widget_hosts, std::size_t{0});
+    check_equal(baseline.native_widget_callback_owners, std::size_t{0});
+    check_equal(baseline.active_widget_local_borrowers, std::size_t{0});
+    check(baseline.widget_owned_parts >= std::size_t{1});
+    check_equal(baseline.box_owned_elements, baseline.mounted_elements);
+    check_equal(baseline.retained_transition_elements, std::size_t{0});
+    check_equal(baseline.retained_animation_elements, std::size_t{0});
+    // Exercise real runtime stores without running a frame that would
+    // opportunistically collect expired records. The inspection itself must
+    // not mutate either owner store or the sibling subtree.
+    const auto *opacity = flexUI::detail::style_property_find("opacity");
+    check_not_null(opacity);
+    if (!opacity) return;
+    const auto action_identity = reinterpret_cast<std::uintptr_t>(action);
+    flexUI::TransitionDef transition;
+    transition.duration_ms = 100.0f;
+    transition.easing = flexUI::EasingType::Linear;
+    check(app.box().transitions().start_float(
+        action_identity, *opacity, 0.0f, 1.0f, transition, 0.0f));
+    flexUI::AnimationDef animation;
+    animation.duration_ms = 100.0f;
+    check(app.box().animations().start_float(
+        action_identity, *opacity, {{0.0f, 0.0f}, {1.0f, 1.0f}},
+        animation, 0.0f));
+    const auto with_effects = app.inspect_scoped_component_borrowers("eventless");
+    check(static_cast<bool>(with_effects));
+    check_equal(with_effects.borrowers.retained_transition_elements,
+                std::size_t{1});
+    check_equal(with_effects.borrowers.retained_animation_elements,
+                std::size_t{1});
+    const auto sibling_effects = app.inspect_scoped_component_borrowers("other");
+    check(static_cast<bool>(sibling_effects));
+    check_equal(sibling_effects.borrowers.retained_transition_elements,
+                std::size_t{0});
+    check_equal(sibling_effects.borrowers.retained_animation_elements,
+                std::size_t{0});
+    // No cleanup was allowed inside a nominally read-only preflight.
+    check(app.box().transitions().retains_element(action_identity));
+    check(app.box().animations().retains_element(action_identity));
+    app.box().transitions().clear_element(action_identity);
+    app.box().animations().clear_element(action_identity);
+    const auto cleared_effects = app.inspect_scoped_component_borrowers("eventless");
+    check(static_cast<bool>(cleared_effects));
+    check_equal(cleared_effects.borrowers.retained_transition_elements,
+                std::size_t{0});
+    check_equal(cleared_effects.borrowers.retained_animation_elements,
+                std::size_t{0});
+
+    // Completed records still retain the Element identity until an explicit
+    // manager collection. Read-only lifecycle checks cannot ignore them.
+    check(app.box().transitions().start_float(
+        action_identity, *opacity, 0.0f, 1.0f, transition, -200.0f));
+    check(app.box().animations().start_float(
+        action_identity, *opacity, {{0.0f, 0.0f}, {1.0f, 1.0f}},
+        animation, -200.0f));
+    check_false(app.box().transitions().has_active(action_identity, 0.0f));
+    check_false(app.box().animations().has_active(action_identity, 0.0f));
+    const auto expired_but_owned =
+        app.inspect_scoped_component_borrowers("eventless");
+    check(static_cast<bool>(expired_but_owned));
+    check_equal(expired_but_owned.borrowers.retained_transition_elements,
+                std::size_t{1});
+    check_equal(expired_but_owned.borrowers.retained_animation_elements,
+                std::size_t{1});
+    app.box().transitions().clear_element(action_identity);
+    app.box().animations().clear_element(action_identity);
+
+    auto *button = dynamic_cast<flexUI::ButtonWidget *>(action->widget);
+    check_not_null(button);
+    if (!button) return;
+    button->set_loading(true);
+    const auto spinning = app.inspect_scoped_component_borrowers("eventless");
+    check(static_cast<bool>(spinning));
+    check_equal(spinning.borrowers.active_widget_local_borrowers,
+                std::size_t{1});
+    button->set_loading(false);
+    const auto idle = app.inspect_scoped_component_borrowers("eventless");
+    check(static_cast<bool>(idle));
+    check_equal(idle.borrowers.active_widget_local_borrowers,
+                std::size_t{0});
+
     check_false(baseline.focused_descendant);
     check_false(baseline.captured_descendant);
     check_false(baseline.native_event_dispatching);
@@ -2133,10 +2459,17 @@ spec("Desktop XML components share one native ScriptController and Effects engin
     check(rejected.error.controller_error.code ==
           flexUI::ControllerErrorCode::ControllerFaulted);
     check_equal(probe->events.size(), std::size_t{1});
+    const auto retained = app.box().handle_for(*action);
     const auto retired = app.retire_scoped_event_handlers("sales");
     check_false(static_cast<bool>(retired));
+    check(retired.error.code ==
+          flexUI::DesktopApplicationErrorCode::ControllerEventRetirementFailed);
     check(retired.error.controller_error.code ==
           flexUI::ControllerErrorCode::InvalidState);
+    check(retired.error.controller_error.stage ==
+          flexUI::ControllerStage::EventRetirement);
+    check_equal(app.box().resolve_handle(retained), action);
+    check_false(app.controller()->is_scoped_event_route_retired("sales"));
   }
 
 
@@ -2797,5 +3130,151 @@ spec("Desktop XML components share one native ScriptController and Effects engin
     check_false(static_cast<bool>(no_module));
     check(no_module.error.code ==
           flexUI::DesktopApplicationErrorCode::ScriptRequired);
+  }
+}
+
+spec("Desktop M4b6m compiled topology authenticates live Box-owned Node addresses") {
+  it("rejects externally allocated XML lookalikes before reading their Node vtables") {
+    flexUI::DesktopApplicationBuilder builder(nullptr);
+    builder.xml_entry(
+        "<ui name=\"Identity\"><main id=\"root\">"
+        "<section id=\"host\"/><section id=\"sibling\"/></main></ui>")
+        .scoped_xml_component(
+            "sale", "host",
+            "<ui name=\"Panel\"><div id=\"panel\">"
+            "<span id=\"value\">Live</span></div></ui>")
+        .scoped_xml_component(
+            "sales", "sibling",
+            "<ui name=\"Other\"><label id=\"label\">Sibling</label></ui>");
+    auto built = builder.build();
+    check(static_cast<bool>(built));
+    if (!built) return;
+    auto &app = *built.application;
+    auto *host = app.box().get_by_id("host");
+    auto *panel = app.box().get_by_id("sale::panel");
+    auto *sibling = app.box().get_by_id("sales::label");
+    check_not_null(host);
+    check_not_null(panel);
+    check_not_null(sibling);
+    if (!host || !panel || !sibling) return;
+    const auto sibling_handle = app.box().handle_for(*sibling);
+    const auto panel_handle = app.box().handle_for(*panel);
+    check(static_cast<bool>(app.inspect_scoped_component_topology("sale")));
+    check(static_cast<bool>(app.inspect_scoped_component_borrowers("sale")));
+
+    // A foreign Element may forge the right tag and compiled ID, and
+    // Element::append will even copy the owner_box_ back-reference. It is
+    // still NOT present in the single Box unique_ptr<Element> owner vector.
+    flexUI::Element foreign;
+    foreign.set_tag("div");
+    foreign.set_element_id("sale::panel");
+    check(host->remove(panel));
+    check_equal(host->append(&foreign), &foreign);
+    const auto invalid = app.inspect_scoped_component_topology("sale");
+    check_false(static_cast<bool>(invalid));
+    check(invalid.error.code ==
+          flexUI::DesktopApplicationErrorCode::InvalidState);
+    const auto invalid_borrowers = app.inspect_scoped_component_borrowers("sale");
+    check_false(static_cast<bool>(invalid_borrowers));
+    check(invalid_borrowers.error.code ==
+          flexUI::DesktopApplicationErrorCode::InvalidState);
+    check_equal(app.box().resolve_handle(sibling_handle), sibling);
+    check_equal(app.box().resolve_handle(panel_handle), panel);
+
+    // The failed preflight must not mutate any node or invalidate the
+    // compiler ledger; restoring the genuine owned Element restores proof.
+    check(host->remove(&foreign));
+    check_equal(host->append(panel), panel);
+    check(static_cast<bool>(app.inspect_scoped_component_topology("sale")));
+    check(static_cast<bool>(app.inspect_scoped_component_borrowers("sale")));
+    check_equal(app.box().resolve_handle(sibling_handle), sibling);
+    check_equal(app.box().get_by_id("sales::label"), sibling);
+  }
+}
+
+spec("Desktop M4b6n read-only exact-generation retirement diagnostics") {
+  it("does not mistake a drained queue for released foreign native callbacks") {
+    flexUI::DesktopApplicationBuilder builder(nullptr);
+    builder.xml_entry(
+        "<ui name=\"Retirement\"><main id=\"root\">"
+        "<section id=\"left\"/><section id=\"right\"/></main></ui>")
+        .scoped_xml_component(
+            "sale", "left",
+            "<ui name=\"Panel\"><div id=\"panel\">"
+            "<label id=\"caption\">Sale</label></div></ui>")
+        .scoped_xml_component(
+            "sales", "right",
+            "<ui name=\"Panel\"><label id=\"caption\">Sibling</label></ui>");
+    auto built = builder.build();
+    check(static_cast<bool>(built));
+    if (!built) return;
+    auto &app = *built.application;
+    auto *sale = app.box().get_by_id("sale::panel");
+    auto *sales = app.box().get_by_id("sales::caption");
+    check_not_null(sale);
+    check_not_null(sales);
+    if (!sale || !sales) return;
+    const auto saved = app.box().handle_for(*sales);
+
+    const auto before = app.inspect_scoped_retirement_diagnostics("sale");
+    check(static_cast<bool>(before));
+    check_equal(before.generation, app.generation());
+    check_equal(before.topology.compiled_event_nodes, std::size_t{0});
+    check_false(before.service_drain.admission_quiesced);
+    check_equal(before.element_borrowers.borrowers.foreign_native_click_callbacks,
+                std::size_t{0});
+
+    // An opaque native sibling closure may retain the target even after
+    // independent exact-scope event-route and request-queue retirement.
+    sales->on_click([sale] { (void)sale; });
+    app.box().set_event_callback(
+        [sale](flexUI::Element&, const flexUI::Event&) { (void)sale; });
+    check(app.retire_scoped_event_handlers("sale"));
+    check(static_cast<bool>(app.quiesce_retired_scoped_service_requests("sale")));
+    const auto composed = app.inspect_scoped_retirement_diagnostics("sale");
+    check(static_cast<bool>(composed));
+    check_equal(composed.generation, before.generation);
+    check(composed.service_drain.queue_drained());
+    check_equal(composed.element_borrowers.borrowers.foreign_native_click_callbacks,
+                std::size_t{1});
+    check_equal(
+        composed.element_borrowers.borrowers.opaque_global_event_callback_owners,
+        before.element_borrowers.borrowers.opaque_global_event_callback_owners + 1u);
+    check_equal(app.box().resolve_handle(saved), sales);
+    check_equal(app.box().get_by_id("sale::panel"), sale);
+
+    // Clearing each independent source affects ONLY its respective count.
+    sales->on_click({});
+    const auto one = app.inspect_scoped_retirement_diagnostics("sale");
+    check(static_cast<bool>(one));
+    check(one.service_drain.queue_drained());
+    check_equal(one.element_borrowers.borrowers.foreign_native_click_callbacks,
+                std::size_t{0});
+    check_equal(
+        one.element_borrowers.borrowers.opaque_global_event_callback_owners,
+        before.element_borrowers.borrowers.opaque_global_event_callback_owners + 1u);
+    app.box().set_event_callback({});
+    const auto none = app.inspect_scoped_retirement_diagnostics("sale");
+    check(static_cast<bool>(none));
+    check(none.service_drain.queue_drained());
+    check_equal(
+        none.element_borrowers.borrowers.opaque_global_event_callback_owners,
+        before.element_borrowers.borrowers.opaque_global_event_callback_owners);
+    // This method still performs NO Endpoint join, Widget/Binding retirement,
+    // compiled ledger rewrite, or physical Element deletion.
+    check_equal(app.box().resolve_handle(saved), sales);
+    check_equal(app.box().get_by_id("sale::panel"), sale);
+
+    const auto missing = app.inspect_scoped_retirement_diagnostics("not-declared");
+    check_false(static_cast<bool>(missing));
+    check(missing.error.code ==
+          flexUI::DesktopApplicationErrorCode::InvalidConfiguration);
+    flexUI::DesktopApplicationErrorCode wrong_thread =
+        flexUI::DesktopApplicationErrorCode::None;
+    std::thread other([&] {
+      wrong_thread = app.inspect_scoped_retirement_diagnostics("sale").error.code;
+    });
+    other.join();
+    check(wrong_thread == flexUI::DesktopApplicationErrorCode::WrongThread);
   }
 }

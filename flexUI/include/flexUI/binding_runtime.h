@@ -36,6 +36,22 @@ struct UiBindingStats {
   std::uint64_t evaluation_count = 0;
 };
 
+/// Read-only borrower evidence for ONE live target. It covers Binding-owned
+/// editable-value callbacks, not arbitrary Widget listeners or external workers.
+/// All queries and callbacks belong to the UI owner thread.
+struct UiBindingTargetObserverSnapshot {
+  std::size_t binding_count = 0;
+  std::size_t value_observers = 0;
+  std::size_t blocked_value_observers = 0;
+  bool binding_mutation_active = false;
+  bool invalid_ownership = false;
+
+  bool owned_observers_retirable() const noexcept {
+    return !binding_mutation_active && !invalid_ownership &&
+           blocked_value_observers == 0;
+  }
+};
+
 /**
  * Typed input store for UI bindings.
  *
@@ -131,6 +147,10 @@ class UiBindingRuntime {
   /// Allocation-free target-ownership query used by Box retirement preflight.
   /// The pointer is compared by identity and is never dereferenced.
   bool has_binding_target(const Element *element) const noexcept;
+  /// Exact target-owned observer activity; no callback, mutation or detach.
+  /// A ready result is NOT a Widget, PluginHost or physical unmount grant.
+  UiBindingTargetObserverSnapshot
+  inspect_target_observers(const Element *element) const noexcept;
   UiBindingStats stats() const;
   std::uint64_t expression_compile_count() const;
 

@@ -47,6 +47,9 @@ public:
     bool handle_event(const Event& event, Element& elem) override;
     void update(float delta_ms, Element& elem) override;
     const char* type_name() const override { return "CardWidget"; }
+  WidgetLocalBorrowSnapshot inspect_local_borrowers() const noexcept override {
+    return {true, 0, false};
+  }
     bool paints_host_box() const override { return true; }
 
     // Properties

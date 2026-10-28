@@ -53,8 +53,8 @@ add_subdirectory("${STUN_ROOT}/shared/layout" graphlayout)
 set(BUILD_TESTING ON)
 add_custom_target(stun_xml_runtime_qualification)
 foreach(test IN ITEMS test_ui_content_models test_ui_xml_admission test_ui_xml
-    test_ui_document test_widget_registry test_desktop_application
-    test_script_controller test_application_service_requests
+    test_ui_document test_widget_registry test_binding_runtime
+    test_desktop_application test_script_controller test_application_service_requests
     test_service_registry test_application_completion
     test_application_service_dispatcher)
   add_executable(${test} "${STUN_ROOT}/flexUI/tests/${test}.cpp")

@@ -552,3 +552,447 @@ Flex DSL：用户不再编写 `.flex` 文档，MIR 也不负责 UI 结构或事�
   per-frame native Timeline 热路径；需以 benchmark 决定是否增加 pure-expression profile。
 - `LOW`（常用做法）：XML/CSS/TBS 的职责分离更接近成熟桌面 UI 工具链，但本决策的主要依据仍是
   仓库现有 IR、runtime 与 controller 边界，而不是形式相似性。
+
+
+## 2026-10-28 P4.4 M4b4a — Binding-owned value observer lease (Draft #302)
+
+A bidirectional `bind_value` callback used to capture its raw UiBindingRuntime and
+was only unregistered from the Widget's live observer vector. Both native
+InputWidget and TextAreaWidget copy that vector for notification, so a
+callback that was already copied could still execute after `unbind`.
+
+The one Binding runtime now retains a shared **retirement lease** with each
+value observer. A copied callback checks its lease before touching the runtime;
+a live callback holds an active-call guard until it exits. `unbind` and
+`clear` refuse/throw during an active owned value callback; rollback,
+destruction, restoration and future doomed-target discard retire the lease
+before the Binding record is removed. The Box's read-only subtree snapshot
+reports owned value observers, active/blocked leases, Binding mutation and
+ownership inconsistencies without creating a second ownership index.
+
+This proves ONLY Binding-owned callback retirement readiness. It does not
+inspect arbitrary third-party Widget listeners, release a live Widget, join an
+endpoint/PluginHost worker, remove the installed compiled program, or authorize
+`unmount(scope)`. `Box::retire_bound_structural_subtree` still refuses
+Widgets and any installed compiled program. M4b4's remaining Widget-owner
+contract, M4b5 independent scope worker join and M4b6 atomic physical detach
+are separate mandatory gates under #298/#275.
+
+
+## 2026-10-28 P4.4 M4b4b — Widget observer frame diagnostics (Draft #302)
+
+InputWidget and TextAreaWidget report the complete registered editable-observer
+count and notification-frame depth through `inspect_edit_observers`. The depth
+covers the copied notification batch and unwinds even on exception. The
+single Box borrower snapshot compares actual Widget listeners to Binding-owned
+leases, exposing external/unowned observers, active notification frames and
+uninspectable third-party text Widget adapters (fail-closed).
+
+This is independent read-only evidence, NOT an observer disconnect, PluginHost
+join, or permission to remove compiled Elements. Other non-text Widget owners
+still require their own lifecycle evidence. #298/#275 remain open.
+
+
+## 2026-10-28 P4.4 M4b5 — sole mandatory Plugin ABI v2.1 scoped JOIN (Draft #302)
+
+The one `flexui_plugin_get_api_v2` now requires ABI minor **1** and an
+explicit `join_scope` callback: neither old v2.0 nor a separate provider
+may silently fall back. The one `ApplicationServiceRequestQueue` owns the
+compiler-derived `origin_scope` and copies it into its exact-token
+cancellation lease before any slot publication. PluginHost hands only its
+borrowed byte view to a native plugin's `submit`; a worker must copy it.
+
+`PluginHost::join_scoped_workers(scope, timeout)` validates the owner thread,
+current Started host, bounded compiler-scope grammar, and no unposted
+exact-scope service terminal before calling each plugin's independent
+`join_scope`. On BUSY or TIMED_OUT the provider and DLL remain live for
+retry. This never triggers global plugin `stop`, joins `sales` when
+asked for `sale`, or consumes a terminal.
+
+A REAL dynamic plugin fixture retains a cooperative `sale` worker
+**after** posting CANCELLED and after the application's queue_drained becomes
+true. Scoped join must time out until a separate test-only native release
+signal arrives. The independent join then succeeds, the shared PluginHost
+remains Started, and sibling `sales` has received its completion.
+
+**Not sufficient for physical unmount:** this only certifies this trusted
+PluginHost's workers at a point in time. Full application admission
+quiescence + queue terminal consumption, native non-plugin endpoint lifetime
+proof, ALL Widget/Binding leases and an atomic compiled-subtree disposal
+transaction are still mandatory. No `unmount(scope)` on #302; keep #298/#275
+OPEN and Draft unmerged.
+
+
+M4b5's native scoped-worker acceptance also re-dispatches a fresh
+`sales::action` after `sale` has independently joined and asserts the
+actual second completion, script request ID and payload. The shared module
+remains Started; this is not a plugin-wide stop and not a same-content
+fixture mock.
+
+## 2026-10-28 P4.4 M4b5c — eventless scope route retirement admission (Draft #302)
+
+The application validates its compiler-authored exact-scope topology against
+the **live** Box before retiring script routes. A component with zero event
+definitions has no routes to unregister. Only DesktopApplication may request
+the existing ScriptController's private compiler-attested zero-route marker;
+the public Controller API still refuses unknown/zero-route scope names.
+The same marker is required before quiescing service admission, and resetting
+the application generation rearms it.
+
+A scriptless XML component has no Controller or script command producer. Its
+zero-route retirement is therefore vacuous, but its scope must still match
+the compiler's mounted Element/Widget ledger before queue quiescence, and the
+read-only drain reports this independently from admission retirement. Neither
+case creates a fake event binding, a second Controller, or a new owner registry.
+
+Native tests exercise anonymous roots, real Widget, sibling active events,
+wrong/foreign scope rejection, same-generation idempotence, and reload reset.
+The low-level Box compiled_program guard remains unchanged: NO physical
+\`unmount(scope)\` has been granted. Plugin/native endpoint joins and
+Widget/Binding disposal remain independent mandatory gates.
+
+## 2026-10-28 P4.4 M4b5d — native Endpoint join proof (Draft #302)
+
+The sole immutable ApplicationServiceRegistry now provides
+`join_scoped_resources(scope,timeout)`: it checks each DISTINCT registered
+endpoint once (shared capabilities do not double-join) and requires explicit
+`IApplicationServiceEndpoint::join_scoped_resources` evidence.
+The default is **Unsupported**, never implicit success. Busy/unsupported
+providers block complete retirement even when the application queue has
+consumed its terminal records. The PluginModule implements the same C++
+contract via its existing strict v2.1 `join_scope` and additionally checks
+module-owner thread affinity.
+
+The registry method neither consumes completions nor changes any Box state,
+and successful joins are NOT proof of an application-scoped route/queue
+quiescence or native UI detach. The future application-owned retirement
+preflight must compose these independent gates on its one owner thread
+in the correct order. No second runtime registry, no provider fallback, and
+`unmount(scope)` remains unimplemented.
+
+## 2026-10-28 P4.4 M4b5e — app-owned native Endpoint join proof (Draft #302)
+
+The same application validates current-generation compiler scope ownership,
+retired routes, a quiesced service request queue and actual consumed terminal
+count before calling `join_scoped_service_resources(scope,timeout)` on the
+one immutable registry. Missing C++ provider contracts fail closed; the Plugin
+endpoint reuses its mandatory ABI v2.1 join. After provider calls, the app
+rechecks generation and queue tombstone, rejecting reentrant reload.
+
+The returned result certifies only service worker retirement, not Widget or
+Binding observer teardown, physical deletion, DLL unload or safe unmount.
+No `unmount(scope)` implementation; #302 Draft, #298/#275 Open.
+
+## 2026-10-28 P4.4 M4b5f — no stale token re-admission after scoped JOIN
+
+The authoritative queue's existing cancellation lease now has a separate
+atomic `retired` bit, set on every real terminal consumption or slot
+discard BEFORE the queue drops ownership. This is distinct from a cooperative
+`requested` cancellation signal. Native PluginModule checks the existing
+lease's exact token/generation and refuses stale/retired/cancelled requests at
+submission, so a copied host request cannot start new work for an already
+drained and joined scope after terminal consumption. No second token-owner
+registry, raw pointer persistence, retry or alternate provider was added.
+
+Queued lease retirement is still NOT external worker exit. Physical unmount
+still requires the separate exact-scope provider JOIN, Widget/Binding lifetime
+and no-throw physical subtree commit; #302 stays Draft and unmerged.
+
+The native DSO/DLL acceptance now drives **the actual application facade**
+`join_scoped_service_resources`, not merely `PluginHost` directly:
+before script-route retirement it refuses; after real terminal consumption
+the deliberately still-live worker makes Registry report EndpointJoinBusy.
+Only a separate provider release permits a returned generation and exact
+joined provider count; the sibling `sales` continues to publish another
+real service request afterwards. No `unmount(scope)` is implied.
+
+## 2026-10-28 M4b5h — retain faulted Controller error contract
+
+Exact-head CI on 32be0299 found one real cross-platform RED in
+`test_desktop_application`: moving the live compiler-topology check ahead of
+Controller state validation caused a faulted script module to report a plain
+DesktopApplication InvalidState, dropping the historical nested
+`ControllerErrorCode::InvalidState` with EventRetirement stage.
+The application now preserves the Controller's original fail-fast typed error
+before the read-only topology check whenever the controller is not Mounted.
+This does not retire routes, synthesize an eventless handler or change the
+Box owner graph. Native regression asserts the exact nested code/stage,
+unchanged live Element handle and absence of a retired marker.
+
+## 2026-10-28 P4.4 M4b6a — read-only transition/animation/cache owner scan (Draft #302)
+
+The Box borrower snapshot now enumerates the actual mounted subtree's
+Box-owned nodes and its real Widget-internal child Elements, rejecting
+foreign host ownership and Widget pointers not owned by this Box.
+It reports per-subtree retained Transition and Animation owner records,
+including completed-but-uncollected or retained-fill records, and direct
+style/geometry cache entries. `TransitionManager::retains_element` and
+`AnimationManager::retains_element` are const and do not call update(),
+expire tracks or mutate the Box. Two adjacent compiled scopes are exercised
+with real effect records on only one; read-only inspection must report only
+the selected scope and leave both effect stores unchanged until explicit
+cleanup.
+
+These counters are **necessary evidence**, never an unmount grant.
+The eventual physical transaction must stage/commit disposal of all owner
+stores without a callback, avoid allocating during commit, and prove Widget,
+Binding, Controller, external endpoint and script resource retirement
+independently. No `unmount(scope)` has been implemented. #302 remains Draft.
+
+## 2026-10-28 P4.4 M4b6b — audit Widget-local callbacks and active lifetimes (Draft #302)
+
+`Widget::inspect_local_borrowers()` returns **unaudited** by default.
+The one Box owner scan now tracks unsupported Widget host count, native
+Widget callback count and live Widget-local interaction/callback frames.
+The first explicit built-in audits cover Button (loading/ripple/scale work),
+Label (no native callback), Input and TextArea (native change callback,
+IME/dragging and observer notification depth). Input/TextArea bidirectional
+edit observers remain separately counted through the Binding-owned
+`ValueTarget` and `TextValueWidget` snapshots. No duplicated subscriber
+table, no callback invocation and no retirement action is performed.
+
+A third-party Widget lacking this audit remains an explicit blocker; a zero
+count for these four builtins is NOT enough to physically delete any compiled
+component. The future commit must still prove ALL live owner types,
+preallocate full resource disposal, retire callbacks/observers and detach
+Widget parts before destroying their host Element. `unmount(scope)` is absent
+and #302 remains Draft.
+
+M4b6b regression adds an explicit third-party `UnverifiedWidget` with no
+callbacks; the default audit still refuses it, rather than interpreting zero
+listener count as proof. Built-in Button loading state must report an active
+Widget-local owner; a completed-but-not-reclaimed Transition and Animation
+must still appear as retained owners after `has_active()==false`.
+
+## 2026-10-28 P4.4 M4b6c — nine additional built-in Widget owner probes
+
+Checkbox/Radio/Switch/Slider now report native `std::function` change
+callbacks and in-progress control animations/drag state. ProgressBar exposes
+an active indeterminate animation, Select and Dropdown their overlays and
+relevant animation state. Tabs reports native callbacks, indicator animation
+AND any externally borrowed page Element pointer (regardless of animation);
+Accordion reports callbacks and unsynchronized section animation progress.
+All are allocation-free, read-only per-Widget probes. No callback is invoked
+or released and no Widget owner table has been introduced. Tests in the
+cross-platform headless `test_ui_document` cover callbacks, overlay open,
+borrowed Tabs page, accordion animation, and exact-scope Box isolation.
+
+A zero borrower count is NOT a physical unmount contract: other built-ins,
+third-party Widgets, owned Widget part lifetimes and the compiled tree/Binding
+commit remain outstanding. #302 stays Draft; #298/#275 open.
+
+## 2026-10-28 M4b6d — 12 more registered Widget-local borrower audits
+
+The owner probe covers Tooltip/Modal/Toast overlay and timers, Spinner's
+active loader animation, static Divider/Badge/Card presentation, and
+GroupButton/ToggleGroup/Breadcrumb/Pagination/Stepper native callbacks,
+pressed/hover interactions. Headless `test_ui_document` asserts that
+even when the callbacks have been removed, an active overlay/spinner
+still retains Widget-local work. These are read-only state probes only;
+there is no unmount, Widget destruction, or new resource table.
+
+Widgets with retained external sources or complex runtime projections
+(e.g. Image, Markdown) continue to report unaudited and reject retirement.
+A future physical deletion transaction still needs explicit callback
+retirement, external resource release, and no-throw Element/Widget part
+ownership transfer. #302 remains Draft and #298/#275 open.
+
+## 2026-10-28 M4b6e — audited native source and structured-data Widget borrowers
+
+The read-only probes now cover Image and Avatar external backend image
+identities (a nonempty URL/src remains an active external-resource blocker),
+Calendar/Table/ColorPicker/GradientEditor native change/select callbacks,
+and Tree-owned shared node forest plus selected/hover raw pointers. All
+extra probes are independent of the one WidgetHost/Box Element owner scan.
+The real headless `test_ui_document` suite exercises callback registration/
+removal, URL clearing, TreeNode forest disposal, and both GradientEditor
+callbacks, while retaining the explicit default unaudited state of
+MarkdownWidget's asynchronous/private projection lifecycle.
+
+Auditing a Widget's LOCAL callbacks/interaction is only necessary, not
+sufficient: backend resources, fully retired host Element parts, compiled
+program/binding target disposal, no-throw same-generation commit and exact
+sibling stability remain separate gates. `unmount(scope)` is still absent.
+
+## 2026-10-28 M4b6f — exact Box unique_ptr ownership is authoritative
+
+The Box subtree preflight now stages a temporary membership set from its
+sole `elements_` vector of unique_ptr<Element>, not from the mutable
+`owner_box_` back-pointer alone. It refuses a foreign child even if
+`Element::append` copied the Box pointer onto it, and refuses a Widget-owned
+part whose immediate parent is not a real Widget host in the same owner
+vector. Successful admission is still read-only and does not create another
+persistent owner table. A real headless test attaches/then removes an
+externally allocated Element to demonstrate the wrong-ownership rejection
+without deleting or corrupting the original tree.
+
+This is necessary proof for future physical deletion, not permission to
+bypass the compiled tree and Widget lifetime guards. #302 Draft,
+`unmount(scope)` still unavailable.
+
+## 2026-10-28 M4b6g — MarkdownWidget projection borrower evidence
+
+The sole MarkdownWidget C11 RichDoc renderer stores a published projection
+and a separately pending, detached retirement batch. Both are raw Element
+identities whose actual lifetime remains in Box::elements_. A new read-only
+`WidgetLocalBorrowSnapshot` projects **counts** for both lists, plus rebuild
+activity; the Box owner snapshot accumulates those counts even though
+MarkdownWidget deliberately remains `audited=false`. There is no C11 parse,
+callback, reattachment or mutation during inspection. The independent
+native MarkdownWidget test asserts a real parsed projection has positive
+borrower count, does not authorize retirement, and leaves the sibling subtree
+untouched.
+
+This remains fail-closed because Markdown's deferred retirement requires
+separate proof of no reentrant parse/update, staged cleanup of its published
+and detached Element identities, and Widget destruction ordering. Counting
+does NOT turn Markdown into an unmount-safe Widget. #302 Draft, #298/#275 Open.
+
+The existing real FocusOut-throw Markdown regression now asserts that the
+snapshot reports a POSITIVE deferred-retirement count after the old
+projection is detached but retained in the sole Box owner. With the
+throwing callback still present, repeated attempts cannot clear that
+count or publish extra projections. Once the callback is removed,
+a successful update clears only the pending owners, while the newly
+published projection continues to be reported as retained.
+
+## 2026-10-28 M4b6c SelectWidget native frame regression fix
+
+Cross-platform `test_ui_document` failed its final Select audit because the
+test opened and closed the dropdown without calling `Widget::update`.
+`set_expanded(true)` only establishes the target height: the actual
+`dropdown_height_` stays zero until `update_dropdown_animation` runs.
+Therefore an immediate close with no frame has no retained animation.
+
+The test now advances a real native Widget frame while open, closes with
+a nonzero current dropdown height, verifies the borrower remains live until
+a second frame completes the collapse, then explicitly verifies that an
+open/close pair with zero intervening frames does NOT falsely report active
+borrowers. The production SelectWidget state machine and its conservative
+`inspect_local_borrowers()` contract remain unchanged. This fixes the
+test's faulty timing assumption without weakening the physical unmount gate.
+
+## 2026-10-28 M4b6h — authenticate raw Element addresses before dereference
+
+The scoped Box borrower inspector's original `owns_element(subtree_root)`
+read `owner_box_` BEFORE proving that the pointer was a live member of the
+sole `elements_` unique_ptr store. A caller retaining a raw pointer after
+`retire_unbound_structural_subtree` could therefore turn a read-only
+preflight into a use-after-free. The inspector now stages a temporary owner
+membership set first and refuses invalid/stale root or ancestor addresses
+without dereferencing them. Every later descendant also uses that same
+single authoritative set, and all fallible staging occurs before any Box
+mutation (this inspector never mutates anything).
+
+The existing real native structural deletion suite now passes a stale raw
+Element pointer to the inspector after deletion, requires InvalidRoot and
+still checks surviving sibling IDs and handles. This does not authorize
+compiled component unmount or modify the physical deletion guards.
+
+## 2026-10-28 M4b6i — cross-scope Widget Element* borrow evidence
+
+A scoped Box subtree can be borrowed by a Widget hosted OUTSIDE that subtree
+(e.g. a `sales` TabsWidget holds a page pointer to `sale::page`). Counting
+only borrowers attached to `sale` would leave a dangling sibling pointer
+after physical deletion. `Widget::inspect_external_element_borrows` now
+returns **unaudited** by default; Tabs enumerates its actual raw page
+references against the Box's existing temporary target identity set, and
+Label explicitly proves it retains no external Element pointer. The Box
+snapshot reports matched foreign pointer borrows separately from unaudited
+sibling Widgets. A real `sale` vs `sales` test verifies that removing
+Tabs' page association makes the foreign borrow disappear while both scopes'
+actual Box elements and indexed handles remain unchanged.
+
+The method never follows a potentially stale pointer, mutates a Widget,
+allocates or installs a second owner registry. Other Widget subclasses
+remain **unverified for cross-subtree pointers** until separately audited:
+this new evidence is a deletion blocker, NOT `unmount(scope)`.
+
+## 2026-10-28 M4b6j — validate child Node addresses before RTTI
+
+Group child links are Node*; a broken/dangling child link can be rejected
+without reading its vtable. The Box read-only owner preflight now stages
+one temporary `Node* -> Element*` map derived exclusively from its
+`unique_ptr<Element>` owner vector, authenticates the root/ancestor and
+every child address against that map, then reads the verified Element's
+parent. It never calls `dynamic_cast` on an unverified child or dereferences
+a stale child pointer. This is an ephemeral index, NOT a second runtime
+owner or a physical unmount transaction.
+
+The native foreign-child regression still tests refusal before mutation;
+it now also verifies that a valid Box-owned child is accepted by the
+same audited branch. #302 stays Draft and does not grant unmount.
+
+## 2026-10-28 M4b6k — foreign native callback closure owners fail closed
+
+Known Tab::page pointers are enumerable, but a sibling TabsWidget native
+on_change callback may capture an arbitrary target Element* in its opaque
+`std::function` closure. `inspect_external_element_borrows` reports known
+page pointers even while a callback is present, but returns `audited=false`
+until the callback is explicitly released. A real `sale`/`sales` test
+clears the direct page link while retaining a native closure, requires
+zero *known* pages but one unverified foreign Widget, then clears the
+closure and requires both counts zero. This prevents a false unmount
+admission certificate from an opaque callback capture graph.
+
+## 2026-10-28 M4b6l — native Element/Box-wide callback captures across scopes
+
+A sibling Element's native on_click closure may capture an Element* inside
+the requested scope, even after all target-local handlers have retired.
+The one Box subtree snapshot now counts ALL foreign Element click closures
+as `foreign_native_click_callbacks`, including detached still-Box-owned
+staged nodes, and independently counts opaque user/framework-wide
+EventDispatcher closures as `opaque_global_event_callback_owners`.
+Neither count introspects, copies or invokes a callback, and there is no
+persistent subscription index or false inference that a scoped Controller
+route retirement clears global callback captures.
+
+Native tests create exact `sale` / `sales` sibling Elements, retain a
+native closure capturing the doomed child, and prove target-local callback
+clear does not retire the foreign closure. Separate public/framework-wide
+closure tests verify that both owners count independently, can be removed
+without executing them, and preserve sibling Box handles. These diagnostic
+counts are nonzero blockers for any future physical unmount. A framework
+callback may remain application-installed even when its routes are retired;
+that scenario still needs independent proof and must not be silently
+treated as safe. #302 stays Draft / unmerged; no `unmount(scope)`.
+
+## 2026-10-28 M4b6m — compiler topology must authenticate Node* identities
+
+The read-only DesktopApplication scoped topology/borrower facade previously
+performed `dynamic_cast<Element*>` on a child from a compiled ordinal
+without verifying that the child still exists in the current Box owner.
+That could dereference a dead Node vtable if a structurally modified host
+retained a stale child pointer. Both application inspections now stage the
+EXACT same temporary `Node* -> Element*` membership map from the one
+Box::elements_ unique_ptr vector; host and every compiled child address
+must belong to that map BEFORE any type/parent/ID/Widget read.
+
+`Box::stage_current_owned_node_addresses` is a private owner-thread
+helper shared by the Box borrower walk and its friend DesktopApplication,
+not a second stored runtime table or public unmount API. Failed admission
+leaves the compiled owner ledger, Box and adjacent scope untouched.
+A native DesktopApplication regression replaces a true compiled component
+root with an externally allocated lookalike (even propagating owner_box_),
+requires both topology and borrower preflights to refuse, then restores
+the real node and validates its sibling's original UiHandle.
+
+## 2026-10-28 M4b6n — one read-only app-scoped retirement diagnostic
+
+`DesktopApplication::inspect_scoped_retirement_diagnostics(scope)`
+composes the existing exact compiler ledger validation, sole-Box
+borrower snapshot and registered-scope service queue drain under
+one current application generation, and rechecks that generation before
+returning. It allocates no new persistent registry and does not call a
+service Endpoint. It cannot grant an unmount certificate, because it has
+neither independent native worker JOIN evidence nor Widget/Binding
+observer disconnect and failure-atomic physical Box transaction.
+
+A real headless scriptless application with `sale` and `sales` scopes
+now retires the former's event routes and drains its queue while a
+sibling Element and public Box event callback still capture its raw
+Element pointer. The composed diagnostic must report queue_drained()
+TRUE and the two independent foreign-closure counts NONZERO; each
+explicit callback release removes only its own blocker. The compiled
+target and exact sibling UiHandles survive all checks. Unknown
+scope and foreign-thread requests fail with typed errors.

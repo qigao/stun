@@ -20,7 +20,8 @@
 #endif
 
 #define FLEXUI_PLUGIN_ABI_MAJOR UINT32_C(2)
-#define FLEXUI_PLUGIN_ABI_MINOR UINT32_C(0)
+/* Sole v2.1 ABI: exact-scope join is REQUIRED, no v2.0 fallback. */
+#define FLEXUI_PLUGIN_ABI_MINOR UINT32_C(1)
 #define FLEXUI_PLUGIN_ENTRY_SYMBOL_V2 "flexui_plugin_get_api_v2"
 #define FLEXUI_PLUGIN_TIMEOUT_INFINITE UINT64_MAX
 
@@ -102,6 +103,8 @@ typedef struct flexui_plugin_request_v2 {
   uint64_t token_id;
   uint64_t token_generation;
   uint64_t script_request_id;
+  /* Borrowed compiler-origin scope. Copy it before any asynchronous work. */
+  flexui_plugin_bytes_view origin_scope;
   flexui_plugin_bytes_view capability;
   flexui_plugin_bytes_view operation;
   flexui_plugin_bytes_view payload;
@@ -166,6 +169,14 @@ typedef flexui_plugin_status(FLEXUI_PLUGIN_CALL *flexui_plugin_stop_v2_fn)(
 typedef flexui_plugin_status(FLEXUI_PLUGIN_CALL *flexui_plugin_join_v2_fn)(
     flexui_plugin_instance *instance, uint64_t timeout_ms,
     flexui_plugin_error_buffer *error);
+/* REQUIRED v2.1 scope barrier: OK only after ALL exact-scope worker threads
+ * and retained resources have exited/joined, even after completion posting.
+ * TIMED_OUT/BUSY preserves library and provider for safe retry. No global
+ * stop, no sibling-scope join, no synthetic terminal consumption. The app
+ * must quiesce scope admission and consume its terminal queue separately. */
+typedef flexui_plugin_status(FLEXUI_PLUGIN_CALL *flexui_plugin_join_scope_v2_fn)(
+    flexui_plugin_instance *instance, flexui_plugin_bytes_view origin_scope,
+    uint64_t timeout_ms, flexui_plugin_error_buffer *error);
 /* destroy is no-fail and is valid only after join succeeds or create unwind. */
 typedef void(FLEXUI_PLUGIN_CALL *flexui_plugin_destroy_v2_fn)(
     flexui_plugin_instance *instance);
@@ -182,6 +193,7 @@ typedef struct flexui_plugin_api_v2 {
   flexui_plugin_stop_v2_fn stop;
   flexui_plugin_join_v2_fn join;
   flexui_plugin_destroy_v2_fn destroy;
+  flexui_plugin_join_scope_v2_fn join_scope;
   uint64_t reserved[8];
 } flexui_plugin_api_v2;
 

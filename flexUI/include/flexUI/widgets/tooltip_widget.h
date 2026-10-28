@@ -44,6 +44,9 @@ public:
                               float available_height, float& out_width,
                               float& out_height) const override;
   const char* type_name() const override { return "TooltipWidget"; }
+  WidgetLocalBorrowSnapshot inspect_local_borrowers() const noexcept override {
+    return {true, 0, visible_ || target_visible_ || opacity_ != 0.0f || delay_timer_ != 0.0f};
+  }
 
   // Content
   const std::string& text() const { return text_; }

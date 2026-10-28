@@ -46,6 +46,9 @@ public:
                               float available_height, float& out_width,
                               float& out_height) const override;
   const char* type_name() const override { return "SelectWidget"; }
+  WidgetLocalBorrowSnapshot inspect_local_borrowers() const noexcept override {
+    return {true, change_callback_ ? std::size_t{1} : std::size_t{0}, expanded_ || dropdown_height_ != 0.0f || target_dropdown_height_ != 0.0f};
+  }
   bool paints_host_box() const override { return true; }
   bool has_overlay() const override { return expanded_ && dropdown_height_ > 0.1f; }
   bool wants_mouse_capture() const override { return expanded_; }

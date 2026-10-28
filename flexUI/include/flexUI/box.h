@@ -46,9 +46,46 @@ enum class BoxSubtreeBorrowErrorCode {
 struct BoxSubtreeBorrowSnapshot {
   BoxSubtreeBorrowErrorCode error = BoxSubtreeBorrowErrorCode::None;
   std::size_t mounted_elements = 0;
+  /// All Box-owned nodes, including children with Widget-managed semantics.
+  std::size_t box_owned_elements = 0;
+  /// Real dynamically created Widget-owned internal Element parts.
+  std::size_t widget_owned_parts = 0;
   std::size_t widget_hosts = 0;
+  /// No other Widget class is presumed safe: unknown third-party owners
+  /// are counted independently and must fail a future detach preflight.
+  std::size_t unverified_widget_hosts = 0;
+  std::size_t native_widget_callback_owners = 0;
+  std::size_t active_widget_local_borrowers = 0;
+  /// Markdown projection pointers may survive outside the visible subtree.
+  std::size_t retained_widget_projection_nodes = 0;
+  std::size_t deferred_widget_retirement_nodes = 0;
+  /// Sibling/other-owned Widgets can point INTO this subtree, even when
+  /// its own Widget and Binding counts are zero. A nonzero count is a hard
+  /// deletion blocker; any unaudited external Widget must also fail closed.
+  std::size_t foreign_widget_element_borrows = 0;
+  std::size_t unverified_external_widget_hosts = 0;
+  /// These live/stale cache owners must be cleaned in a future physical
+  /// detach; neither a current_time check nor a zero-frame snapshot clears.
+  std::size_t retained_transition_elements = 0;
+  std::size_t retained_animation_elements = 0;
+  std::size_t styled_element_cache_entries = 0;
+  std::size_t container_width_cache_entries = 0;
   std::size_t binding_targets = 0;
+  std::size_t value_observers = 0;
+  std::size_t blocked_value_observers = 0;
+  std::size_t widget_edit_observers = 0;
+  std::size_t unowned_widget_edit_observers = 0;
+  bool widget_observer_notifications_active = false;
+  bool uninspectable_edit_widget = false;
+  bool binding_mutation_active = false;
+  bool invalid_binding_ownership = false;
   std::size_t native_click_callbacks = 0;
+  /// Native Element::on_click() closures OUTSIDE the requested subtree.
+  /// They may capture raw pointers INTO it; they cannot be introspected.
+  std::size_t foreign_native_click_callbacks = 0;
+  /// Public/framework-wide Box event closures can borrow ANY Element.
+  /// Separate from compiled ScriptController's scoped route retirement.
+  std::size_t opaque_global_event_callback_owners = 0;
   std::size_t active_widget_hosts = 0;
   std::size_t keyed_repeater_hosts = 0;
   bool native_event_dispatching = false;
@@ -302,6 +339,7 @@ private:
   friend class UiKeyedRepeater;
   friend class UiDocumentInstantiator;
   friend class BoxPreparedMutation;
+  friend class DesktopApplication;
   friend class Element;
   friend class Widget;
   friend class MarkdownWidget;
@@ -312,6 +350,12 @@ private:
   void validate_utility_token(std::string_view token) const;
   void apply_theme_to_root();
   bool owns_element(const Element *element) const;
+  /// Stage the one Box's CURRENT unique_ptr-owned Element identities as
+  /// Node addresses. Check each address against this temporary map BEFORE
+  /// RTTI, parent traversal, Widget lookup or ID access. This is not a
+  /// persistent owner index; callers must be the Box/application owner.
+  bool stage_current_owned_node_addresses(
+      std::unordered_map<const flex::Node*, const Element*>& result) const;
   void deactivate_subtree(Element *root);
   bool retire_structural_subtree_impl(
       const std::string &root_id, bool discard_owned_bindings) noexcept;

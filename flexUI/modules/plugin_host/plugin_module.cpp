@@ -263,11 +263,13 @@ PluginModule::load(const std::filesystem::path &absolute_path,
     auto entry = reinterpret_cast<flexui_plugin_get_api_v2_fn>(entry_address);
     const flexui_plugin_api_v2 *api = entry();
     if (api == nullptr ||
-        api->struct_size < field_end(&flexui_plugin_api_v2::destroy) ||
+        api->struct_size < field_end(&flexui_plugin_api_v2::join_scope) ||
         api->abi_major != FLEXUI_PLUGIN_ABI_MAJOR ||
+        api->abi_minor != FLEXUI_PLUGIN_ABI_MINOR ||
         api->descriptor == nullptr || api->create == nullptr ||
         api->start == nullptr || api->submit == nullptr || api->stop == nullptr ||
-        api->join == nullptr || api->destroy == nullptr) {
+        api->join == nullptr || api->destroy == nullptr ||
+        api->join_scope == nullptr) {
       return {{}, host_error(PluginHostErrorCode::UnsupportedAbi, "validate_abi",
                              library.path(),
                              "plugin ABI table is missing, truncated, or incompatible")};
@@ -276,7 +278,7 @@ PluginModule::load(const std::filesystem::path &absolute_path,
     const auto *descriptor = api->descriptor;
     if (descriptor->struct_size <
             field_end(&flexui_plugin_descriptor_v2::services) ||
-        descriptor->required_host_minor > FLEXUI_PLUGIN_ABI_MINOR ||
+        descriptor->required_host_minor != FLEXUI_PLUGIN_ABI_MINOR ||
         descriptor->service_count == 0 ||
         descriptor->service_count > limits.registry.max_services ||
         descriptor->services == nullptr) {
@@ -391,7 +393,11 @@ PluginModule::~PluginModule() {
 ApplicationServiceSubmitResult PluginModule::try_submit(
     const ApplicationServiceRequest &request,
     IApplicationServiceCompletionSink &completion_sink) {
-  if (!request.token || request.script_request_id == 0) {
+  if (!request.token || request.script_request_id == 0 ||
+      (request.cancellation &&
+       (request.cancellation->token().id != request.token.id ||
+        request.cancellation->token().generation != request.token.generation ||
+        request.cancellation->requested() || request.cancellation->retired()))) {
     std::lock_guard<std::mutex> lock(slots_mutex_);
     ++statistics_.rejected;
     return {submit_error(ApplicationServiceSubmitErrorCode::InvalidRequest,
@@ -452,6 +458,8 @@ ApplicationServiceSubmitResult PluginModule::try_submit(
   abi_request.token_id = request.token.id;
   abi_request.token_generation = request.token.generation;
   abi_request.script_request_id = request.script_request_id;
+  abi_request.origin_scope = view_of(request.cancellation
+      ? request.cancellation->origin_scope() : std::string_view{});
   abi_request.capability = view_of(request.capability);
   abi_request.operation = view_of(request.operation);
   abi_request.payload = view_of(request.payload);
@@ -534,6 +542,77 @@ PluginHostResult PluginModule::start() {
 void PluginModule::disable_submissions() noexcept {
   std::lock_guard<std::mutex> lock(slots_mutex_);
   accepting_ = false;
+}
+
+PluginHostResult PluginModule::join_scoped_workers(
+    std::string_view scope, std::chrono::milliseconds timeout) {
+  if (std::this_thread::get_id() != owner_thread_) {
+    return {host_error(PluginHostErrorCode::WrongThread, "join_scope", path(),
+                       "scoped join requires plugin module owner thread", plugin_id_)};
+  }
+  std::lock_guard<std::mutex> lifecycle_lock(lifecycle_mutex_);
+  if (lifecycle_state_ != LifecycleState::Started || instance_ == nullptr ||
+      api_ == nullptr) {
+    return {host_error(PluginHostErrorCode::InvalidState, "join_scope", path(),
+                       "scoped join requires started plugin", plugin_id_)};
+  }
+  {
+    std::lock_guard<std::mutex> lock(slots_mutex_);
+    // A synchronous submit may POST its terminal before try_submit itself
+    // returns and releases the borrowed C request, including origin_scope.
+    // Do not attest to worker retirement while ANY submit bridge is active.
+    if (active_submit_calls_ != 0) {
+      return {host_error(PluginHostErrorCode::JoinTimedOut, "join_scope",
+                         path(), "plugin submit bridge is still active",
+                         plugin_id_, FLEXUI_PLUGIN_STATUS_BUSY)};
+    }
+    for (const auto &slot : slots_) {
+      if (slot.state != SlotState::Free && slot.cancellation &&
+          slot.cancellation->origin_scope() == scope) {
+        return {host_error(PluginHostErrorCode::JoinTimedOut, "join_scope",
+                           path(), "scope has an unposted terminal",
+                           plugin_id_, FLEXUI_PLUGIN_STATUS_BUSY)};
+      }
+    }
+  }
+  AbiErrorBuffer buffer(limits_.max_error_message_bytes);
+  const auto millis = timeout == std::chrono::milliseconds::max()
+                          ? FLEXUI_PLUGIN_TIMEOUT_INFINITE
+                          : static_cast<std::uint64_t>(timeout.count());
+  flexui_plugin_status status = FLEXUI_PLUGIN_STATUS_INTERNAL;
+  const char *boundary_error = nullptr;
+  try {
+    status = api_->join_scope(instance_, view_of(scope), millis, &buffer.abi);
+  } catch (const std::bad_alloc &) {
+    status = FLEXUI_PLUGIN_STATUS_RESOURCE_LIMIT;
+    boundary_error = "plugin scoped join threw allocation exception";
+  } catch (...) {
+    boundary_error = "plugin scoped join threw across the C ABI";
+  }
+  if (status == FLEXUI_PLUGIN_STATUS_TIMED_OUT ||
+      status == FLEXUI_PLUGIN_STATUS_BUSY) {
+    return {host_error(PluginHostErrorCode::JoinTimedOut, "join_scope", path(),
+                       boundary_error == nullptr ? buffer.message()
+                                                 : std::string(boundary_error),
+                       plugin_id_, status)};
+  }
+  if (status != FLEXUI_PLUGIN_STATUS_OK) {
+    return {host_error(PluginHostErrorCode::JoinFailed, "join_scope", path(),
+                       boundary_error == nullptr ? buffer.message()
+                                                 : std::string(boundary_error),
+                       plugin_id_, status)};
+  }
+  return {};
+}
+
+ApplicationEndpointScopeJoinCode
+PluginModule::join_scoped_resources(std::string_view scope,
+                                   std::chrono::milliseconds timeout) {
+  const auto joined = join_scoped_workers(scope, timeout);
+  if (joined) return ApplicationEndpointScopeJoinCode::Joined;
+  if (joined.error.code == PluginHostErrorCode::JoinTimedOut)
+    return ApplicationEndpointScopeJoinCode::Busy;
+  return ApplicationEndpointScopeJoinCode::Failed;
 }
 
 PluginHostResult PluginModule::stop(std::chrono::milliseconds timeout) {

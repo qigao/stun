@@ -8,6 +8,8 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <string_view>
+#include <utility>
 
 namespace flexUI {
 
@@ -23,18 +25,33 @@ public:
   ApplicationServiceCancellationLease &operator=(const ApplicationServiceCancellationLease &) = delete;
 
   ApplicationRequestToken token() const noexcept { return token_; }
+  /// Trusted immutable compiler scope from the one owning request queue.
+  std::string_view origin_scope() const noexcept { return origin_scope_; }
   bool requested() const noexcept {
     return requested_.load(std::memory_order_acquire);
   }
+  /// True once the sole queue has discarded or CONSUMED this exact token.
+  /// This is not a cancellation request and may coexist with requested()==false.
+  bool retired() const noexcept {
+    return retired_.load(std::memory_order_acquire);
+  }
+  /// Queue-owned terminal/discard publication; no external C++ endpoint has
+  /// mutable access because it receives shared_ptr<const ...> only.
+  void retire() noexcept {
+    retired_.store(true, std::memory_order_release);
+  }
 
 private:
-  explicit ApplicationServiceCancellationLease(ApplicationRequestToken token) noexcept
-      : token_(token) {}
+  explicit ApplicationServiceCancellationLease(ApplicationRequestToken token,
+                                               std::string scope)
+      : token_(token), origin_scope_(std::move(scope)) {}
   void request_cancel() noexcept {
     requested_.store(true, std::memory_order_release);
   }
   ApplicationRequestToken token_;
+  const std::string origin_scope_;
   std::atomic<bool> requested_{false};
+  std::atomic<bool> retired_{false};
   friend class ApplicationServiceRequestQueue;
 };
 

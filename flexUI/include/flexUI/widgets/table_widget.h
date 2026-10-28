@@ -38,6 +38,9 @@ public:
     return false;
   }
   const char* type_name() const override { return "TableWidget"; }
+  WidgetLocalBorrowSnapshot inspect_local_borrowers() const noexcept override {
+    return {true, on_select_ ? std::size_t{1} : std::size_t{0}, resizing_col_ >= 0 || hover_row_ >= 0};
+  }
   bool paints_host_box() const override { return true; }
 
   void add_column(const std::string& header, float width = 100.0f);

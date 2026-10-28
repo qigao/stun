@@ -2,6 +2,7 @@
 
 #include <tinytest.hpp>
 
+#include <chrono>
 #include <cstddef>
 #include <initializer_list>
 #include <memory>
@@ -11,6 +12,26 @@
 #include <vector>
 
 namespace {
+
+class ScopedEndpoint final : public flexUI::IApplicationServiceEndpoint {
+public:
+  flexUI::ApplicationServiceSubmitResult try_submit(
+      const flexUI::ApplicationServiceRequest &,
+      flexUI::IApplicationServiceCompletionSink &) override { return {}; }
+  flexUI::ApplicationEndpointScopeJoinCode
+  join_scoped_resources(std::string_view scope,
+                        std::chrono::milliseconds timeout) override {
+    ++joins;
+    scopes.emplace_back(scope);
+    timeouts.push_back(timeout);
+    return ready ? flexUI::ApplicationEndpointScopeJoinCode::Joined
+                 : flexUI::ApplicationEndpointScopeJoinCode::Busy;
+  }
+  bool ready = false;
+  std::size_t joins = 0;
+  std::vector<std::string> scopes;
+  std::vector<std::chrono::milliseconds> timeouts;
+};
 
 class FakeEndpoint final : public flexUI::IApplicationServiceEndpoint {
 public:
@@ -222,6 +243,66 @@ spec("FlexUI application service registry") {
     check(resolved.endpoint == endpoint);
     check_true(built.registry->contains("document.storage/1"));
     check_false(built.registry->contains("document.print/1"));
+  }
+
+  it("fails closed for native endpoints lacking independent scoped join") {
+    flexUI::ApplicationServiceRegistryBuilder builder;
+    check(builder.register_service(descriptor(), std::make_shared<FakeEndpoint>()));
+    auto built = builder.build();
+    check(built);
+    if (!built) return;
+    const auto refused = built.registry->join_scoped_resources(
+        "sale", std::chrono::milliseconds{0});
+    check_false(static_cast<bool>(refused));
+    check(refused.error.code ==
+          flexUI::ApplicationServiceRegistryErrorCode::EndpointJoinUnsupported);
+    check_equal(refused.joined_endpoints, std::size_t{0});
+  }
+
+  it("joins distinct endpoints once, preserves BUSY, and isolates sibling scope") {
+    flexUI::ApplicationServiceRegistryBuilder builder;
+    auto first = std::make_shared<ScopedEndpoint>();
+    auto second = std::make_shared<ScopedEndpoint>();
+    check(builder.register_service(descriptor("service.a/1"), first));
+    check(builder.register_service(descriptor("service.b/1"), first));
+    check(builder.register_service(descriptor("service.c/1"), second));
+    auto built = builder.build();
+    check(built);
+    if (!built) return;
+    first->ready = true;
+    const auto blocked = built.registry->join_scoped_resources(
+        "sale", std::chrono::milliseconds{5});
+    check_false(static_cast<bool>(blocked));
+    check(blocked.error.code ==
+          flexUI::ApplicationServiceRegistryErrorCode::EndpointJoinBusy);
+    check_equal(blocked.joined_endpoints, std::size_t{1});
+    check_equal(first->joins, std::size_t{1});
+    check_equal(second->joins, std::size_t{1});
+    check_equal(first->scopes.front(), std::string("sale"));
+    second->ready = true;
+    const auto success = built.registry->join_scoped_resources(
+        "sale", std::chrono::milliseconds{5});
+    check(static_cast<bool>(success));
+    check_equal(success.joined_endpoints, std::size_t{2});
+    check_equal(first->joins, std::size_t{2});
+    check_equal(second->joins, std::size_t{2});
+    check_equal(second->scopes.back(), std::string("sale"));
+
+    const auto sibling = built.registry->join_scoped_resources(
+        "sales", std::chrono::milliseconds{5});
+    check(static_cast<bool>(sibling));
+    check_equal(first->scopes.back(), std::string("sales"));
+    check_equal(second->scopes.back(), std::string("sales"));
+    const auto invalid = built.registry->join_scoped_resources(
+        "sale::action", std::chrono::milliseconds{1});
+    check_false(static_cast<bool>(invalid));
+    check(invalid.error.code ==
+          flexUI::ApplicationServiceRegistryErrorCode::InvalidState);
+    check_equal(first->joins, std::size_t{3});
+    const auto invalid_timeout = built.registry->join_scoped_resources(
+        "sale", std::chrono::milliseconds{-1});
+    check_false(static_cast<bool>(invalid_timeout));
+    check_equal(first->joins, std::size_t{3});
   }
 
   it("restricts mutable builder operations to its owner thread") {

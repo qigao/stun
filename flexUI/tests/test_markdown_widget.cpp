@@ -1017,6 +1017,15 @@ spec("MarkdownWidget Parsing") {
         auto* visible = md->child_at(0u);
         check(visible->text() == "可见内容 ✅");
         check(box->owned_element_count() == steady_count + 1u);
+        // The old projection is now detached but STILL Box-owned. The
+        // visible tree traversal alone cannot find this pending resource;
+        // the Widget's independent pending-retirement metric must.
+        const auto pending_owner = box->inspect_subtree_borrowers(md);
+        check(static_cast<bool>(pending_owner));
+        check_equal(pending_owner.unverified_widget_hosts, std::size_t{1});
+        check(pending_owner.retained_widget_projection_nodes > std::size_t{0});
+        check(pending_owner.deferred_widget_retirement_nodes > std::size_t{0});
+        check_equal(box->get_by_id("md-c11-focus-throw-231"), md);
 
         // Even repeated source changes cannot admit another projection
         // while an old detached subtree is still held by Box.
@@ -1037,6 +1046,11 @@ spec("MarkdownWidget Parsing") {
             check(md->child_at(0u)->text() == "延后处理 🏯");
         check(box->owned_element_count() == steady_count);
         check(box->focused_element() == nullptr);
+        const auto retired_owner = box->inspect_subtree_borrowers(md);
+        check(static_cast<bool>(retired_owner));
+        check_equal(retired_owner.deferred_widget_retirement_nodes, std::size_t{0});
+        check(retired_owner.retained_widget_projection_nodes > std::size_t{0});
+        check_equal(retired_owner.unverified_widget_hosts, std::size_t{1});
     }
 
     it("projects owned SAFE link/image metadata without exposing unsafe URIs") {
@@ -1363,4 +1377,41 @@ spec("C++ Tokenizer") {
         check(has_keyword);
         check(has_number);
     }
+}
+
+spec("MarkdownWidget M4b6g scoped projection lifetime probe") {
+  it("reports actual published projection and deferred owner counts without granting retirement") {
+    auto box = std::make_unique<Box>(nullptr);
+    auto *root = box->create("div", "root");
+    auto *widget_host = box->create_widget<MarkdownWidget>(
+        "div", "markdown-projection", "# Heading\n\nBody");
+    auto *sibling = box->create("div", "sibling");
+    root->append(widget_host);
+    root->append(sibling);
+    box->set_root(root);
+    auto *widget = static_cast<MarkdownWidget*>(widget_host->widget);
+    const auto initial = box->inspect_subtree_borrowers(widget_host);
+    check(static_cast<bool>(initial));
+    check_equal(initial.unverified_widget_hosts, std::size_t{1});
+    check_equal(initial.retained_widget_projection_nodes, std::size_t{0});
+    check_equal(initial.deferred_widget_retirement_nodes, std::size_t{0});
+    check_equal(initial.active_widget_local_borrowers, std::size_t{1});
+
+    widget->update(0.0f, *widget_host);
+    const auto projected = box->inspect_subtree_borrowers(widget_host);
+    check(static_cast<bool>(projected));
+    check_equal(projected.unverified_widget_hosts, std::size_t{1});
+    check(projected.retained_widget_projection_nodes > std::size_t{0});
+    check_equal(projected.deferred_widget_retirement_nodes, std::size_t{0});
+    check_equal(projected.active_widget_local_borrowers, std::size_t{1});
+    const auto peer = box->inspect_subtree_borrowers(sibling);
+    check(static_cast<bool>(peer));
+    check_equal(peer.retained_widget_projection_nodes, std::size_t{0});
+    check_equal(peer.deferred_widget_retirement_nodes, std::size_t{0});
+    check_equal(peer.unverified_widget_hosts, std::size_t{0});
+    // No detached/compiled path may bypass the still-unverified projection.
+    check_false(box->retire_bound_structural_subtree("markdown-projection"));
+    check_equal(box->get_by_id("sibling"), sibling);
+    check_equal(box->get_by_id("markdown-projection"), widget_host);
+  }
 }

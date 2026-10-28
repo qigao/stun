@@ -51,6 +51,9 @@ public:
     bool handle_event(const Event& event, Element& elem) override;
     void update(float delta_ms, Element& elem) override;
     const char* type_name() const override { return "ToggleGroupWidget"; }
+  WidgetLocalBorrowSnapshot inspect_local_borrowers() const noexcept override {
+    return {true, change_callback_ ? std::size_t{1} : std::size_t{0}, hovered_index_ >= 0};
+  }
 
     // Options
     void set_options(const std::vector<Option>& options);

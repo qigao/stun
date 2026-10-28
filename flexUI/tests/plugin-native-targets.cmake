@@ -11,6 +11,9 @@ function(flexui_add_native_plugin_tests)
   endif()
   add_library(flexui_test_plugin_missing_entry MODULE "${FLEXUI_PLUGIN_NATIVE_TESTS_DIR}/plugin_test_missing_entry.c")
   add_library(flexui_test_plugin_bad_abi MODULE "${FLEXUI_PLUGIN_NATIVE_TESTS_DIR}/plugin_test_bad_abi.c")
+  add_library(flexui_test_plugin_old_minor MODULE "${FLEXUI_PLUGIN_NATIVE_TESTS_DIR}/plugin_test_echo.cpp")
+  target_compile_definitions(flexui_test_plugin_old_minor
+    PRIVATE FLEXUI_TEST_OLD_MINOR=1)
   add_library(flexui_test_plugin_echo MODULE "${FLEXUI_PLUGIN_NATIVE_TESTS_DIR}/plugin_test_echo.cpp")
   add_library(flexui_test_plugin_fail_start MODULE "${FLEXUI_PLUGIN_NATIVE_TESTS_DIR}/plugin_test_echo.cpp")
   add_library(flexui_test_plugin_fail_create MODULE "${FLEXUI_PLUGIN_NATIVE_TESTS_DIR}/plugin_test_echo.cpp")
@@ -23,6 +26,8 @@ function(flexui_add_native_plugin_tests)
     flexui_test_plugin_create_unwind PRIVATE FlexUI::PluginSDK)
   target_link_libraries(
     flexui_test_plugin_bad_abi PRIVATE FlexUI::PluginSDK)
+  target_link_libraries(
+    flexui_test_plugin_old_minor PRIVATE FlexUI::PluginSDK)
   target_link_libraries(
     flexui_test_plugin_echo PRIVATE FlexUI::PluginSDK)
   target_link_libraries(
@@ -70,6 +75,7 @@ function(flexui_add_native_plugin_tests)
   set_target_properties(
     flexui_test_plugin_missing_entry flexui_test_plugin_bad_abi
     flexui_test_plugin_echo flexui_test_plugin_fail_start
+    flexui_test_plugin_old_minor
     flexui_test_plugin_fail_create flexui_test_plugin_fail_stop
     flexui_test_plugin_static_crt
     flexui_test_plugin_provider flexui_test_plugin_consumer
@@ -86,6 +92,7 @@ function(flexui_add_native_plugin_tests)
     test_plugin_host
     PRIVATE FLEXUI_TEST_ECHO_PLUGIN="$<TARGET_FILE:flexui_test_plugin_echo>"
             FLEXUI_TEST_BAD_ABI_PLUGIN="$<TARGET_FILE:flexui_test_plugin_bad_abi>"
+            FLEXUI_TEST_OLD_MINOR_PLUGIN="$<TARGET_FILE:flexui_test_plugin_old_minor>"
             FLEXUI_TEST_MISSING_ENTRY_PLUGIN="$<TARGET_FILE:flexui_test_plugin_missing_entry>"
             FLEXUI_TEST_FAIL_START_PLUGIN="$<TARGET_FILE:flexui_test_plugin_fail_start>"
             FLEXUI_TEST_FAIL_CREATE_PLUGIN="$<TARGET_FILE:flexui_test_plugin_fail_create>"
@@ -96,6 +103,7 @@ function(flexui_add_native_plugin_tests)
     flexui_test_plugin_fail_create flexui_test_plugin_fail_stop
     flexui_test_plugin_static_crt
     flexui_test_plugin_bad_abi
+    flexui_test_plugin_old_minor
     flexui_test_plugin_missing_entry)
   set_target_properties(test_plugin_host PROPERTIES FOLDER "flexUI/tests")
   add_test(NAME test_plugin_host COMMAND test_plugin_host)

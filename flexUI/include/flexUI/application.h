@@ -7,6 +7,7 @@
 #include "flexUI/controller.h"
 #include "flexUI/widget_registry.h"
 
+#include <chrono>
 #include <functional>
 #include <memory>
 #include <optional>
@@ -177,6 +178,16 @@ struct DesktopApplicationScopedServiceDrainSnapshot {
   }
 };
 
+/// Independent resource join proof for the current application generation.
+/// Does not imply Widget/Binding release or physical unmount.
+struct DesktopApplicationScopedResourceJoinResult {
+  std::uint64_t generation = 0;
+  std::size_t joined_endpoints = 0;
+  DesktopApplicationError error;
+
+  explicit operator bool() const noexcept { return !static_cast<bool>(error); }
+};
+
 /// A bounded, owner-thread-only validation of compiler-attributed nodes against
 /// the CURRENT live Box. No Element* is retained or returned. This proves only
 /// topology/ID/Widget factory presence; it does NOT prove focus/capture,
@@ -189,6 +200,35 @@ struct DesktopScopedComponentTopologySnapshot {
   DesktopApplicationError error;
 
   explicit operator bool() const noexcept { return !static_cast<bool>(error); }
+};
+
+/// Application-validated scoped root plus the sole Box's read-only borrower
+/// snapshot. No resource is freed, no worker joins, and no unmount is granted.
+struct DesktopScopedComponentBorrowSnapshot {
+  BoxSubtreeBorrowSnapshot borrowers;
+  DesktopApplicationError error;
+  explicit operator bool() const noexcept {
+    return !static_cast<bool>(error) && static_cast<bool>(borrowers);
+  }
+};
+
+/// Generation-local READ-ONLY composition of the three independent
+/// retirement observations. It is expressly NOT a safe-unmount certificate:
+/// it cannot join native workers, disconnect callback closures/observers,
+/// stage compiled-program or Widget destruction, or authorize deletion.
+struct DesktopScopedRetirementDiagnostics {
+  std::uint64_t generation = 0;
+  DesktopScopedComponentTopologySnapshot topology;
+  DesktopScopedComponentBorrowSnapshot element_borrowers;
+  DesktopApplicationScopedServiceDrainSnapshot service_drain;
+  DesktopApplicationError error;
+
+  explicit operator bool() const noexcept {
+    return !static_cast<bool>(error) &&
+           static_cast<bool>(topology) &&
+           static_cast<bool>(element_borrowers) &&
+           static_cast<bool>(service_drain);
+  }
 };
 
 struct DesktopApplicationBuildResult {
@@ -253,6 +293,18 @@ public:
   /// stage of the future unmount preflight, NOT resource release evidence.
   DesktopScopedComponentTopologySnapshot
   inspect_scoped_component_topology(std::string_view scope) const;
+  /// Read current Box borrowers of the exact compiled component root after
+  /// validating topology. The root is located by host ID and compiler ordinal,
+  /// never a possibly missing/root-local Element ID. This does not validate
+  /// plugin join, Binding observer release, or safe unmount.
+  DesktopScopedComponentBorrowSnapshot
+  inspect_scoped_component_borrowers(std::string_view scope) const;
+  /// Combine compiler topology, current Box borrowers (including external
+  /// closure owners), and exact-scope service drain under one generation.
+  /// Read-only, no join/detach/retire, and intentionally NO ready-to-unmount
+  /// predicate: joined Endpoint/Widget/Binding lifetimes are not proved here.
+  DesktopScopedRetirementDiagnostics
+  inspect_scoped_retirement_diagnostics(std::string_view scope) const;
   ScriptController *controller() noexcept;
   const ScriptController *controller() const noexcept;
   const DesktopApplicationSources &sources() const noexcept;
@@ -366,6 +418,12 @@ public:
   /// No endpoint callbacks or completion mailbox consumption occur here.
   DesktopApplicationScopedServiceDrainSnapshot
   inspect_scoped_service_drain(std::string_view scope) const;
+
+  /// Requires exact-scope routes retired, service admission quiesced and all
+  /// real terminals consumed. Delegates to the one immutable ServiceRegistry;
+  /// unsupported native providers fail closed. Never detaches Elements.
+  DesktopApplicationScopedResourceJoinResult join_scoped_service_resources(
+      std::string_view scope, std::chrono::milliseconds timeout);
 
 private:
   struct Impl;

@@ -1,6 +1,7 @@
 #include "flexUI/service_registry.h"
 
 #include <algorithm>
+#include <chrono>
 #include <cstdint>
 #include <limits>
 #include <new>
@@ -400,6 +401,72 @@ ApplicationServiceRegistry::resolve(const ApplicationServiceRequest &request,
                            "registered service endpoint is missing", request.capability)};
   }
   return {service->endpoint, {}};
+}
+
+ApplicationScopedRegistryJoinResult
+ApplicationServiceRegistry::join_scoped_resources(
+    std::string_view scope, std::chrono::milliseconds timeout) const {
+  if (scope.empty() || scope.size() > 253 || timeout.count() < 0) {
+    return {0, registry_error(ApplicationServiceRegistryErrorCode::InvalidState,
+                              "scoped endpoint join requires a valid scope and timeout")};
+  }
+  const auto start = [](char ch) noexcept {
+    return (ch >= 'A' && ch <= 'Z') ||
+           (ch >= 'a' && ch <= 'z') || ch == '_';
+  };
+  const auto rest = [&](char ch) noexcept {
+    return start(ch) || (ch >= '0' && ch <= '9') || ch == '-';
+  };
+  if (!start(scope.front()) ||
+      !std::all_of(scope.begin() + 1, scope.end(), rest)) {
+    return {0, registry_error(ApplicationServiceRegistryErrorCode::InvalidState,
+                              "scoped endpoint join requires compiler-valid ASCII identity")};
+  }
+  const bool infinite = timeout == std::chrono::milliseconds::max();
+  const auto deadline = infinite ? std::chrono::steady_clock::time_point::max()
+      : std::chrono::steady_clock::now() + timeout;
+  ApplicationScopedRegistryJoinResult result;
+  // Immutable provider descriptors are the SOLE source; no second registry,
+  // allocation, endpoint pointer retention or duplicated worker ownership.
+  for (std::size_t i = 0; i < impl_->entries.size(); ++i) {
+    const auto &entry = impl_->entries[i];
+    if (!entry.endpoint) {
+      result.error = registry_error(ApplicationServiceRegistryErrorCode::InternalInvariant,
+                                    "registered endpoint disappeared", entry.descriptor.capability);
+      return result;
+    }
+    bool already_seen = false;
+    for (std::size_t j = 0; j < i; ++j) {
+      if (impl_->entries[j].endpoint.get() == entry.endpoint.get()) {
+        already_seen = true;
+        break;
+      }
+    }
+    if (already_seen) continue;
+    const auto now = std::chrono::steady_clock::now();
+    const auto remaining = infinite ? std::chrono::milliseconds::max()
+        : now >= deadline ? std::chrono::milliseconds{0}
+        : std::chrono::duration_cast<std::chrono::milliseconds>(deadline - now);
+    ApplicationEndpointScopeJoinCode verdict = ApplicationEndpointScopeJoinCode::Failed;
+    try {
+      verdict = entry.endpoint->join_scoped_resources(scope, remaining);
+    } catch (...) {
+      verdict = ApplicationEndpointScopeJoinCode::Failed;
+    }
+    if (verdict != ApplicationEndpointScopeJoinCode::Joined) {
+      const auto code = verdict == ApplicationEndpointScopeJoinCode::Busy
+          ? ApplicationServiceRegistryErrorCode::EndpointJoinBusy
+          : verdict == ApplicationEndpointScopeJoinCode::Unsupported
+          ? ApplicationServiceRegistryErrorCode::EndpointJoinUnsupported
+          : ApplicationServiceRegistryErrorCode::EndpointJoinFailed;
+      result.error = registry_error(code,
+                                    "native endpoint has not proven scoped worker retirement",
+                                    entry.descriptor.capability);
+      return result;
+    }
+    ++result.joined_endpoints;
+  }
+  return result;
 }
 
 bool ApplicationServiceRegistry::contains(std::string_view capability) const noexcept {
