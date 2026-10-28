@@ -45,6 +45,15 @@ public:
   WidgetLocalBorrowSnapshot inspect_local_borrowers() const noexcept override {
     return {true, on_change_ ? std::size_t{1} : std::size_t{0}, indicator_x_ != target_indicator_x_ || indicator_width_ != target_indicator_width_ || std::any_of(tabs_.begin(), tabs_.end(), [](const Tab& tab) { return tab.page != nullptr; })};
   }
+  WidgetExternalElementBorrowSnapshot inspect_external_element_borrows(
+      const std::unordered_set<const Element*>& retired_nodes) const noexcept override {
+    std::size_t borrows = 0;
+    // No dereference: a page can already be a stale pointer. Its address
+    // alone is enough to prevent the target scope from being destroyed.
+    for (const auto& tab : tabs_)
+      if (tab.page && retired_nodes.count(tab.page) != 0) ++borrows;
+    return {true, borrows};
+  }
   bool paints_host_box() const override { return true; }
 
   // Tab management

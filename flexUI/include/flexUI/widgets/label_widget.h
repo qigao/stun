@@ -56,6 +56,11 @@ public:
       // Label has no independent callback, worker or per-frame timer.
       return {true, 0, false};
     }
+    WidgetExternalElementBorrowSnapshot inspect_external_element_borrows(
+        const std::unordered_set<const Element*>&) const noexcept override {
+      // Label retains only owned string/style/render-cache data, no Element*.
+      return {true, 0};
+    }
 
     // Text access
     const std::string& text() const { return text_; }

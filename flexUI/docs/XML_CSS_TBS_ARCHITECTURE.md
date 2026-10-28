@@ -888,3 +888,22 @@ The existing real native structural deletion suite now passes a stale raw
 Element pointer to the inspector after deletion, requires InvalidRoot and
 still checks surviving sibling IDs and handles. This does not authorize
 compiled component unmount or modify the physical deletion guards.
+
+## 2026-10-28 M4b6i — cross-scope Widget Element* borrow evidence
+
+A scoped Box subtree can be borrowed by a Widget hosted OUTSIDE that subtree
+(e.g. a `sales` TabsWidget holds a page pointer to `sale::page`). Counting
+only borrowers attached to `sale` would leave a dangling sibling pointer
+after physical deletion. `Widget::inspect_external_element_borrows` now
+returns **unaudited** by default; Tabs enumerates its actual raw page
+references against the Box's existing temporary target identity set, and
+Label explicitly proves it retains no external Element pointer. The Box
+snapshot reports matched foreign pointer borrows separately from unaudited
+sibling Widgets. A real `sale` vs `sales` test verifies that removing
+Tabs' page association makes the foreign borrow disappear while both scopes'
+actual Box elements and indexed handles remain unchanged.
+
+The method never follows a potentially stale pointer, mutates a Widget,
+allocates or installs a second owner registry. Other Widget subclasses
+remain **unverified for cross-subtree pointers** until separately audited:
+this new evidence is a deletion blocker, NOT `unmount(scope)`.

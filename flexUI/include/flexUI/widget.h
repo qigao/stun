@@ -12,6 +12,7 @@
 #include <string>
 #include <string_view>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 
 namespace flexUI {
@@ -35,6 +36,14 @@ struct WidgetLocalBorrowSnapshot {
   std::size_t pending_retirement_nodes = 0;
 };
 
+/// External Element pointer borrow audit against ONE temporary Box-owned
+/// subtree identity set. An unaudited Widget is an explicit blocker. An
+/// audited Widget counts only direct pointer references, never follows them.
+struct WidgetExternalElementBorrowSnapshot {
+  bool audited = false;
+  std::size_t borrowed_references = 0;
+};
+
 /**
  * Widget - 所有 UI 组件的基类
  *
@@ -53,6 +62,16 @@ public:
   /// This never invokes callbacks, allocates, or retires an owner. Unsupported
   /// third-party Widgets are deliberately not treated as callback-free.
   virtual WidgetLocalBorrowSnapshot inspect_local_borrowers() const noexcept {
+    return {};
+  }
+
+  /// A Widget in a SIBLING scope may borrow Element* identities in the
+  /// subtree being retired (for example TabsWidget::Tab::page). The Base
+  /// cannot claim that custom Widgets have no such references. All queried
+  /// addresses are borrowed/opaque, never dereferenced or persisted here.
+  virtual WidgetExternalElementBorrowSnapshot inspect_external_element_borrows(
+      const std::unordered_set<const Element*>& retired_nodes) const noexcept {
+    (void)retired_nodes;
     return {};
   }
 

@@ -2359,3 +2359,51 @@ spec("FlexUI M4b6e external-source Widget owner retirement preflight") {
     // their own callback-safe Box/Element destruction order.
   }
 }
+
+
+spec("FlexUI M4b6i cross-scope native Widget Element pointer borrows") {
+  it("finds a sibling Tabs page pointer into the exact target subtree") {
+    flexUI::Box box(nullptr);
+    auto* root = box.create("main", "root");
+    auto* sale = box.create("section", "sale");
+    auto* page = box.create("div", "sale::page");
+    auto* sales_tabs = box.create_widget<flexUI::TabsWidget>("tabs", "sales::tabs");
+    auto* sales_label = box.create_widget<flexUI::LabelWidget>(
+        "label", "sales::label", std::string("Sibling"));
+    sale->append(page);
+    root->append(sale);
+    root->append(sales_tabs);
+    root->append(sales_label);
+    box.set_root(root);
+
+    const auto page_handle = box.handle_for(*page);
+    const auto before = box.inspect_subtree_borrowers(sale);
+    check(static_cast<bool>(before));
+    check_equal(before.foreign_widget_element_borrows, std::size_t{0});
+    check_equal(before.unverified_external_widget_hosts, std::size_t{0});
+    auto* tabs = dynamic_cast<flexUI::TabsWidget*>(sales_tabs->widget);
+    check_not_null(tabs);
+    if (!tabs) return;
+
+    tabs->add_tab("Borrowed page", "first", page);
+    const auto borrowed = box.inspect_subtree_borrowers(sale);
+    check(static_cast<bool>(borrowed));
+    check_equal(borrowed.foreign_widget_element_borrows, std::size_t{1});
+    check_equal(borrowed.unverified_external_widget_hosts, std::size_t{0});
+    check_equal(box.resolve_handle(page_handle), page);
+    check_equal(box.get_by_id("sales::tabs"), sales_tabs);
+
+    // The exact sibling page borrow is independent of the Tabs' own scope
+    // and must not be hidden by coincidental scope prefix similarity.
+    const auto other = box.inspect_subtree_borrowers(sales_tabs);
+    check(static_cast<bool>(other));
+    check_equal(other.foreign_widget_element_borrows, std::size_t{0});
+    tabs->clear_tabs();  // Explicitly retire the ONLY borrowed page pointer.
+    const auto released = box.inspect_subtree_borrowers(sale);
+    check(static_cast<bool>(released));
+    check_equal(released.foreign_widget_element_borrows, std::size_t{0});
+    check_equal(box.resolve_handle(page_handle), page);
+    check_equal(box.get_by_id("sales::label"), sales_label);
+  }
+}
+

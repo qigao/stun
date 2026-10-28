@@ -59,6 +59,11 @@ struct BoxSubtreeBorrowSnapshot {
   /// Markdown projection pointers may survive outside the visible subtree.
   std::size_t retained_widget_projection_nodes = 0;
   std::size_t deferred_widget_retirement_nodes = 0;
+  /// Sibling/other-owned Widgets can point INTO this subtree, even when
+  /// its own Widget and Binding counts are zero. A nonzero count is a hard
+  /// deletion blocker; any unaudited external Widget must also fail closed.
+  std::size_t foreign_widget_element_borrows = 0;
+  std::size_t unverified_external_widget_hosts = 0;
   /// These live/stale cache owners must be cleaned in a future physical
   /// detach; neither a current_time check nor a zero-frame snapshot clears.
   std::size_t retained_transition_elements = 0;

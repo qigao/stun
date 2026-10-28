@@ -1318,6 +1318,23 @@ Box::inspect_subtree_borrowers(const Element *subtree_root) const noexcept {
     for (const Element *host : keyed_repeater_hosts_) {
       if (visited.count(host) != 0) ++result.keyed_repeater_hosts;
     }
+
+    // No second external-pointer registry: re-use the exact temporary set
+    // just built from the mounted target subtree. A foreign Widget may keep
+    // borrowed page pointers into it even after its script routes and queue
+    // have drained. NEVER assume such cross-scope borrows are zero.
+    for (const auto& widget : widgets_) {
+      if (!widget || (widget->host_element_ &&
+                      owned_elements.count(widget->host_element_) == 0)) {
+        result.error = BoxSubtreeBorrowErrorCode::InconsistentTree;
+        return result;
+      }
+      if (visited.count(widget->host_element_) != 0) continue;
+      const auto external =
+          widget->inspect_external_element_borrows(visited);
+      if (!external.audited) ++result.unverified_external_widget_hosts;
+      result.foreign_widget_element_borrows += external.borrowed_references;
+    }
     return result;
   } catch (...) {
     result.error = BoxSubtreeBorrowErrorCode::AllocationFailed;
