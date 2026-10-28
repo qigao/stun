@@ -3,7 +3,33 @@
 状态：架构决策已采用，实施与验收按下列工作项推进
 日期：2026-08-31
 
-## 2026-10-28 P4.4 M4b0 编译器来源确定的组件结构所有权账本（Draft）
+## 2026-10-28 P4.4 M4b1 编译来源对 live Box 的只读结构校验（Draft）
+
+当前 [Draft PR #300](https://github.com/qigao/stun/pull/300) 已直接基于 [PR #299](https://github.com/qigao/stun/pull/299) 合并后的 master `12d6dd48`；当前阶段需要自身精确 HEAD 的 Windows/macOS/Linux Sanitizer 和 Public dependency 验收，不能沿用 M4b0 已通过的 CI。
+
+
+`DesktopApplication::inspect_scoped_component_topology(scope)` 在当前
+Box 的 owner-thread 上，按 M4b0 的编译器生成 root-child ordinal、
+preorder parent/child index、匿名/非匿名 ID、tag、Widget 来源逐一查询
+真实挂载节点，验证节点父级/ID 索引及结构子节点数量没有发生外部漂移。
+每次查询只暂借一个有界的本地指针向量，函数退出立即释放，不形成
+第二套可变 runtime owner registry，也不回调 Script/Plugin/Widget。
+
+错误线程、非 Ready/活跃脚本 callback、未声明 scope、丢失节点、
+Widget 身份不匹配、匿名节点位置改变、额外结构子节点均拒绝，
+但其他 scope 的 Box、Widget/Bindings、服务队列不受影响。
+特别是没有脚本事件的匿名 root/Widget 也可校验，不要求制造
+`on:click` handler。reload 将账本与 Box 在一个现有 generation
+事务中共同换代，新候选重新接受校验。
+
+**本检查不是 unmount 许可证**：Widget 内部节点、Binding observers、
+Focus/Capture、动画/布局借用，以及 plugin worker stop/join 都还需要
+各自独立的有界生命周期门禁；对 Widget 内部动态 part 不伪造
+静态编译节点，未来物理卸载必须在这些 owner 证明后执行。
+详见 Issue #298，不能用这个只读检查绕开
+`Box::compiled_program_installed_` 的原有严格拒绝。
+
+## 2026-10-28 P4.4 M4b0 编译器来源确定的组件结构所有权账本（已合并 PR #299）
 
 `compile_scoped_ui_components` 在静态合并阶段、`UiDocumentInstantiator`
 进入 live Box 之前，为每一个唯一 `scope` 构造一份候选内只读结构账本
@@ -27,7 +53,7 @@ focus/capture 与 host Worker join 证明，全部通过后才可进行原地
 `unmount(scope)`，不能用仅有的编译静态路径绕过安全门禁。
 跟踪 Issue #298；当前阶段不执行物理卸载。
 
-## 2026-10-28 P4.4 M4a 作用域服务终态排空只读门禁（Draft）
+## 2026-10-28 P4.4 M4a 作用域服务终态排空只读门禁（已合并 PR #297）
 
 新增 `DesktopApplication::inspect_scoped_service_drain(scope)`，读取唯一
 ScriptController 的精确 scope 事件退休标记与唯一服务队列当前代的

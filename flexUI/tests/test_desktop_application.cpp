@@ -438,6 +438,52 @@ spec("FlexUI desktop scoped service quiescence facade") {
   }
 }
 
+spec("FlexUI scoped live Box topology preflight") {
+  it("resolves eventless anonymous roots and Widget hosts without fake script events") {
+    flexUI::DesktopApplicationBuilder builder(nullptr);
+    const std::string root =
+        "<ui name=\"Topology\"><main id=\"root\">"
+        "<section id=\"host\"><div id=\"base\"/></section>"
+        "<section id=\"sibling\"/></main></ui>";
+    builder.xml_entry(root)
+        .scoped_xml_component(
+            "eventless", "host",
+            "<ui name=\"Panel\"><div>"
+            "<button id=\"action\">Send</button><span>Plain</span>"
+            "</div></ui>");
+    auto built = builder.build();
+    check(static_cast<bool>(built));
+    if (!built) return;
+    auto &app = *built.application;
+    check_null(app.controller());
+    const auto &owners = app.scoped_component_ownership();
+    check(owners.size() == std::size_t{1});
+    if (owners.size() != 1) return;
+    check(owners[0].nodes[0].qualified_id.empty());
+    const auto checked = app.inspect_scoped_component_topology("eventless");
+    check(static_cast<bool>(checked));
+    check(checked.resolved_compiled_nodes == std::size_t{3});
+    check(checked.compiled_widget_hosts == std::size_t{1});
+    check(checked.compiled_event_nodes == std::size_t{0});
+    check(checked.compiled_binding_nodes == std::size_t{0});
+
+    const auto *anonymous = app.box().get_by_id("host");
+    check_not_null(anonymous);
+    if (!anonymous || anonymous->children().size() < 2) return;
+    const auto *root_element = dynamic_cast<const flexUI::Element *>(
+        anonymous->children()[1]);
+    check_not_null(root_element);
+    if (!root_element) return;
+    check(root_element->id().empty());
+    check_not_null(app.box().get_by_id("eventless::action"));
+    check(app.reload({root, "", "", "refreshed-eventless"}));
+    const auto refreshed = app.inspect_scoped_component_topology("eventless");
+    check(static_cast<bool>(refreshed));
+    check(refreshed.resolved_compiled_nodes == std::size_t{3});
+    check(refreshed.compiled_widget_hosts == std::size_t{1});
+  }
+}
+
 spec("FlexUI desktop application publishes complete XML candidates") {
   it("builds typed XML strict CSS and a mounted script controller") {
     auto probe = std::make_shared<ModuleProbe>();
@@ -2284,6 +2330,28 @@ spec("Desktop XML components share one native ScriptController and Effects engin
     check_equal(owners[1].host_id, "right");
     check_equal(owners[1].nodes[0].qualified_id, "costs::action");
     check(owners[1].nodes[0].has_compiled_events);
+    // The live topology view verifies the original Box identities without
+    // retaining pointers in any second runtime state or releasing resources.
+    const auto sales_topology = app.inspect_scoped_component_topology("sales");
+    const auto costs_topology = app.inspect_scoped_component_topology("costs");
+    check(static_cast<bool>(sales_topology));
+    check(static_cast<bool>(costs_topology));
+    check(sales_topology.resolved_compiled_nodes == std::size_t{1});
+    check(costs_topology.resolved_compiled_nodes == std::size_t{1});
+    check(sales_topology.compiled_event_nodes == std::size_t{1});
+    check(costs_topology.compiled_event_nodes == std::size_t{1});
+    check(sales_topology.compiled_widget_hosts == std::size_t{0});
+    const auto unknown_topology = app.inspect_scoped_component_topology("unknown");
+    check(unknown_topology.error.code ==
+          flexUI::DesktopApplicationErrorCode::InvalidConfiguration);
+    flexUI::DesktopApplicationErrorCode wrong_topology_thread =
+        flexUI::DesktopApplicationErrorCode::None;
+    std::thread topology_inspector([&] {
+      wrong_topology_thread =
+          app.inspect_scoped_component_topology("sales").error.code;
+    });
+    topology_inspector.join();
+    check(wrong_topology_thread == flexUI::DesktopApplicationErrorCode::WrongThread);
     auto &box = app.box();
     auto* sales = box.get_by_id("sales::action");
     auto* costs = box.get_by_id("costs::action");
