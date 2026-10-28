@@ -3,6 +3,28 @@
 状态：架构决策已采用，实施与验收按下列工作项推进
 日期：2026-08-31
 
+## 2026-10-28 P4.4 M4a 作用域服务终态排空只读门禁（Draft）
+
+新增 `DesktopApplication::inspect_scoped_service_drain(scope)`，读取唯一
+ScriptController 的精确 scope 事件退休标记与唯一服务队列当前代的
+Reserved/Published/InFlight 租约和 admission tombstone，不复制所有权、
+不提交命令、不消费 mailbox，也不回调 Endpoint。非 owner-thread、非
+Ready/Mounted、未知 scope、原生事件正在冒泡均明确拒绝。
+
+`queue_drained()` 只在「路由已退休、命令准入已关闭、此 scope 三类
+请求租约全部归零」时为 true。即使 Endpoint 已经向 mailbox 发布
+真实 `CANCELLED`，Owner 尚未消费时 `in_flight` 仍必须为 1。
+真实 DSO/DLL worker 以及双 scope 测试验证：`sale` 的终态消费后
+才视为队列排空；`sales` 同时独立保持投递资格且不会被误清除。
+完整 reload 会重置门禁，新 generation 必须重新退休作用域。
+
+**这个只读门禁不是 safe-to-unmount 证明。** 终态入队可能早于 worker
+真正结束和 PluginHost stop/join；Box、Widget、Binding、native
+callback/Observer、capability 和资源租约仍然受各自 owner 约束。
+后续完整 `unmount(scope)` 只有同时具备上述独立生命周期证明后
+才可执行。不能把 pending=0、取消请求已发出或路由已退休当作
+资源已经回收。
+
 ## 2026-10-28 P4.4 M3d M2b 真实动态插件取消/完成/Join 门禁（Draft）
 
 严格 v2 的测试插件 `cancel-watch` 在真正的 DSO/DLL worker 中查询

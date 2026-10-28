@@ -1002,6 +1002,61 @@ DesktopApplication::quiesce_retired_scoped_service_requests(std::string_view sco
   return {quiesced.cancelled_published, quiesced.suppressed_in_flight, {}};
 }
 
+DesktopApplicationScopedServiceDrainSnapshot
+DesktopApplication::inspect_scoped_service_drain(std::string_view scope) const {
+  const auto fail_result = [](DesktopApplicationErrorCode code,
+                              std::string message) {
+    DesktopApplicationScopedServiceDrainSnapshot result;
+    result.error = fail(code, DesktopApplicationStage::ServiceRequests,
+                        std::move(message));
+    return result;
+  };
+  if (!is_owner_thread()) {
+    return fail_result(DesktopApplicationErrorCode::WrongThread,
+                       "scoped service drain inspection requires the owner thread");
+  }
+  if (impl_->state != DesktopApplicationState::Ready) {
+    return fail_result(DesktopApplicationErrorCode::InvalidState,
+                       "scoped service drain inspection requires a ready application");
+  }
+  if (!impl_->active->controller || !impl_->active->event_bridge) {
+    return fail_result(DesktopApplicationErrorCode::InvalidConfiguration,
+                       "scoped service drain inspection requires a mounted script controller");
+  }
+  if (impl_->active->event_bridge->is_dispatching() ||
+      impl_->active->controller->state() != ControllerState::Mounted) {
+    return fail_result(DesktopApplicationErrorCode::InvalidState,
+                       "scoped service drain inspection rejects active native/script callbacks");
+  }
+  const auto defined = std::find_if(
+      impl_->config.scoped_components.begin(),
+      impl_->config.scoped_components.end(),
+      [scope](const DesktopScopedXmlComponent &component) {
+        return std::string_view(component.scope) == scope;
+      });
+  if (defined == impl_->config.scoped_components.end()) {
+    return fail_result(DesktopApplicationErrorCode::InvalidConfiguration,
+                       "scoped service drain inspection requires a declared XML component scope");
+  }
+  auto leases = impl_->service_requests->inspect_scope_leases(scope);
+  if (!leases) {
+    DesktopApplicationScopedServiceDrainSnapshot result;
+    result.error = fail(DesktopApplicationErrorCode::ServiceRequestFailed,
+                        DesktopApplicationStage::ServiceRequests,
+                        leases.error.message);
+    result.error.service_error = std::move(leases.error);
+    return result;
+  }
+  DesktopApplicationScopedServiceDrainSnapshot result;
+  result.event_routes_retired =
+      impl_->active->controller->is_scoped_event_route_retired(scope);
+  result.admission_quiesced = leases.quiesced;
+  result.reserved = leases.reserved;
+  result.published = leases.published;
+  result.in_flight = leases.in_flight;
+  return result;
+}
+
 DesktopApplicationBuilder::DesktopApplicationBuilder(flex::Renderer *renderer)
     : impl_(std::make_unique<Impl>(renderer)) {}
 

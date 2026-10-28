@@ -241,6 +241,14 @@ spec("FlexUI desktop scoped service quiescence facade") {
     check(static_cast<bool>(built));
     if (!built) return;
     auto &app = *built.application;
+    // Zero pending tokens BEFORE route/admission retirement must not be
+    // misrepresented as a completed component lifetime.
+    const auto initial_drain = app.inspect_scoped_service_drain("sale");
+    check(static_cast<bool>(initial_drain));
+    check_false(initial_drain.event_routes_retired);
+    check_false(initial_drain.admission_quiesced);
+    check(initial_drain.pending() == std::size_t{0});
+    check_false(initial_drain.queue_drained());
     auto *left = app.box().get_by_id("sale::action");
     auto *right = app.box().get_by_id("sales::action");
     check_not_null(left);
@@ -268,6 +276,14 @@ spec("FlexUI desktop scoped service quiescence facade") {
     check_false(static_cast<bool>(premature));
     check(premature.error.code == flexUI::DesktopApplicationErrorCode::InvalidState);
     check_equal(app.service_statistics().current_pending, std::size_t{3});
+    const auto before_drain = app.inspect_scoped_service_drain("sale");
+    check(static_cast<bool>(before_drain));
+    check_false(before_drain.event_routes_retired);
+    check_false(before_drain.admission_quiesced);
+    check(before_drain.in_flight == std::size_t{1});
+    check(before_drain.published == std::size_t{1});
+    check(before_drain.pending() == std::size_t{2});
+    check_false(before_drain.queue_drained());
 
     flexUI::DesktopApplicationErrorCode wrong_thread =
         flexUI::DesktopApplicationErrorCode::None;
@@ -276,12 +292,28 @@ spec("FlexUI desktop scoped service quiescence facade") {
     });
     foreign.join();
     check(wrong_thread == flexUI::DesktopApplicationErrorCode::WrongThread);
+    flexUI::DesktopApplicationScopedServiceDrainSnapshot foreign_drain;
+    std::thread foreign_inspector([&] {
+      foreign_drain = app.inspect_scoped_service_drain("sale");
+    });
+    foreign_inspector.join();
+    check(foreign_drain.error.code == flexUI::DesktopApplicationErrorCode::WrongThread);
+    check_false(foreign_drain.queue_drained());
+    const auto missing_drain = app.inspect_scoped_service_drain("other");
+    check(missing_drain.error.code ==
+          flexUI::DesktopApplicationErrorCode::InvalidConfiguration);
     auto unknown = app.quiesce_retired_scoped_service_requests("other");
     check_false(static_cast<bool>(unknown));
     check(unknown.error.code ==
           flexUI::DesktopApplicationErrorCode::InvalidConfiguration);
 
     check(app.retire_scoped_event_handlers("sale"));
+    const auto routes_only = app.inspect_scoped_service_drain("sale");
+    check(static_cast<bool>(routes_only));
+    check(routes_only.event_routes_retired);
+    check_false(routes_only.admission_quiesced);
+    check(routes_only.pending() == std::size_t{2});
+    check_false(routes_only.queue_drained());
     // Even after route retirement, do not allow the queue gate to change in
     // the middle of a different scope's native bubbling dispatch.
     bool native_reentry_refused = false;
@@ -291,6 +323,9 @@ spec("FlexUI desktop scoped service quiescence facade") {
             const auto refused = app.quiesce_retired_scoped_service_requests("sale");
             native_reentry_refused = !static_cast<bool>(refused) &&
                 refused.error.code == flexUI::DesktopApplicationErrorCode::InvalidState;
+            const auto inspect = app.inspect_scoped_service_drain("sale");
+            native_reentry_refused = native_reentry_refused &&
+                inspect.error.code == flexUI::DesktopApplicationErrorCode::InvalidState;
           }
         });
     probe->emit_service_command = false;
@@ -308,6 +343,22 @@ spec("FlexUI desktop scoped service quiescence facade") {
     check(quiesced);
     check_equal(quiesced.cancelled_queued, std::size_t{1});
     check_equal(quiesced.newly_suppressed_in_flight, std::size_t{1});
+    // Cancellation has been REQUESTED, but the worker has not posted/retired
+    // its accepted token. The sibling scope must remain independent.
+    const auto in_flight_drain = app.inspect_scoped_service_drain("sale");
+    check(static_cast<bool>(in_flight_drain));
+    check(in_flight_drain.event_routes_retired);
+    check(in_flight_drain.admission_quiesced);
+    check(in_flight_drain.reserved == std::size_t{0});
+    check(in_flight_drain.published == std::size_t{0});
+    check(in_flight_drain.in_flight == std::size_t{1});
+    check_false(in_flight_drain.queue_drained());
+    const auto sibling_drain = app.inspect_scoped_service_drain("sales");
+    check(static_cast<bool>(sibling_drain));
+    check_false(sibling_drain.event_routes_retired);
+    check_false(sibling_drain.admission_quiesced);
+    check(sibling_drain.published == std::size_t{1});
+    check_false(sibling_drain.queue_drained());
     const auto repeated = app.quiesce_retired_scoped_service_requests("sale");
     check(repeated);
     check_equal(repeated.cancelled_queued, std::size_t{0});
@@ -334,6 +385,11 @@ spec("FlexUI desktop scoped service quiescence facade") {
     live.payload = "active-scope";
     check(app.completion_mailbox().try_post(gone));
     check(app.completion_mailbox().try_post(live));
+    // Posted in the mailbox != consumed by the owner: the original slot
+    // remains InFlight until this application resolves the real record.
+    const auto posted_drain = app.inspect_scoped_service_drain("sale");
+    check(posted_drain.in_flight == std::size_t{1});
+    check_false(posted_drain.queue_drained());
 
     auto suppressed = app.try_dispatch_service_completion();
     check_false(static_cast<bool>(suppressed.error));
@@ -341,6 +397,15 @@ spec("FlexUI desktop scoped service quiescence facade") {
     check_false(suppressed.dispatched);
     check_false(suppressed.completion.has_value());
     check(probe->service_completions.empty());
+    const auto drained_scope = app.inspect_scoped_service_drain("sale");
+    check(static_cast<bool>(drained_scope));
+    check(drained_scope.queue_drained());
+    check(drained_scope.pending() == std::size_t{0});
+    // IMPORTANT: queue_drained here proves only queue identity retirement.
+    // It does not prove an endpoint thread has exited or PluginHost joined.
+    const auto sibling_still_live = app.inspect_scoped_service_drain("sales");
+    check(sibling_still_live.in_flight == std::size_t{1});
+    check_false(sibling_still_live.queue_drained());
     auto dispatched = app.try_dispatch_service_completion();
     check(static_cast<bool>(dispatched));
     check_true(dispatched.dispatched);
@@ -356,6 +421,11 @@ spec("FlexUI desktop scoped service quiescence facade") {
     check(app.reload({root, "", "service-completion-controller", "fresh-scope"}));
     check_equal(app.generation(), generation + 1);
     check_false(app.controller()->is_scoped_event_route_retired("sale"));
+    const auto next_generation_drain = app.inspect_scoped_service_drain("sale");
+    check(static_cast<bool>(next_generation_drain));
+    check_false(next_generation_drain.admission_quiesced);
+    check_false(next_generation_drain.event_routes_retired);
+    check_false(next_generation_drain.queue_drained());
     auto *fresh = app.box().get_by_id("sale::action");
     check_not_null(fresh);
     if (!fresh) return;

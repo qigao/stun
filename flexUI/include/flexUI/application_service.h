@@ -46,8 +46,9 @@ struct ApplicationServiceRequest {
   std::string operation;
   std::string payload;
   /// Per-request, generation-bound cooperative stop request. Native endpoints
-  /// may retain this const lease only while their own work is live. Plugin ABI
-  /// v1 does not transport this signal and must NOT claim cancellation support.
+  /// may retain this const lease only while their own work is live. The sole
+  /// C plugin ABI v2 exposes a token-scoped stop QUERY from PluginHost: no C++
+  /// shared_ptr or native lease pointer crosses a DLL boundary.
   std::shared_ptr<const ApplicationServiceCancellationLease> cancellation{};
 };
 
