@@ -13,6 +13,7 @@ static const flexui_plugin_api_v2 bad_api = {
     0,
     0,
     0,
+    0,
     {0}};
 
 FLEXUI_PLUGIN_EXPORT const flexui_plugin_api_v2 *FLEXUI_PLUGIN_CALL flexui_plugin_get_api_v2(void) {

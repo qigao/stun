@@ -125,6 +125,21 @@ join_instance(flexui_plugin_instance *opaque, uint64_t timeout_ms,
   return FLEXUI_PLUGIN_STATUS_OK;
 }
 
+/* Synchronous echo retains no asynchronous scoped worker. */
+static flexui_plugin_status FLEXUI_PLUGIN_CALL
+join_scope_instance(flexui_plugin_instance *opaque,
+                    flexui_plugin_bytes_view scope, uint64_t timeout_ms,
+                    flexui_plugin_error_buffer *error) {
+  echo_instance *instance = (echo_instance *)opaque;
+  (void)timeout_ms;
+  if (instance == NULL || instance->started == 0 ||
+      instance->stopping != 0 || scope.size == 0 || scope.data == NULL) {
+    write_error(error, "valid active scope required");
+    return FLEXUI_PLUGIN_STATUS_INVALID_STATE;
+  }
+  return FLEXUI_PLUGIN_STATUS_OK;
+}
+
 static void FLEXUI_PLUGIN_CALL
 destroy_instance(flexui_plugin_instance *opaque) {
   free(opaque);
@@ -140,7 +155,7 @@ static const flexui_plugin_service_descriptor_v2 services[] = {
 
 static const flexui_plugin_descriptor_v2 descriptor = {
     sizeof(flexui_plugin_descriptor_v2),
-    0,
+    FLEXUI_PLUGIN_ABI_MINOR,
     FLEXUI_LITERAL_VIEW("example.echo"),
     FLEXUI_LITERAL_VIEW("1.0.0"),
     1,
@@ -160,6 +175,7 @@ static const flexui_plugin_api_v2 api = {
     stop_instance,
     join_instance,
     destroy_instance,
+    join_scope_instance,
     {0}};
 
 FLEXUI_PLUGIN_EXPORT const flexui_plugin_api_v2 *FLEXUI_PLUGIN_CALL
