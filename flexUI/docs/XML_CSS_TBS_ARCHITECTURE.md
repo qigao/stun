@@ -16,6 +16,11 @@
 保留原有 raw mailbox 轮询权，宿主不能擅自吞掉用户的 completion。
 整代 reload 重置来源门禁。
 
+M3b 还将真实 `gcanvas_window_host.cpp` 作为独立 Object 源码目标纳入
+Linux（ASan/UBSan + LSan）与 Windows/macOS Headless 构建矩阵；
+这验证生产 WindowHost 的编译接口，但**不声称**已运行真实 GPU
+窗口或可选 WindowHost 事件循环行为测试。
+
 **仍未实现真实 Service Endpoint 的协作取消、host 资源租约释放及
 完整原地 unmount(scope)。** 此片独立验证队列端排空/消息抑制，不得
 以此作为外部执行已结束的证明。

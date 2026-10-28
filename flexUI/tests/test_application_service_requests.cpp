@@ -432,9 +432,11 @@ spec("FlexUI application service requests") {
     std::thread worker([&] { foreign = created.queue->quiesce_scope_requests("sale"); });
     worker.join();
     check(foreign.error.code == flexUI::ApplicationServiceErrorCode::WrongThread);
-    const auto invalid = created.queue->quiesce_scope_requests("sale::action");
-    check_false(static_cast<bool>(invalid));
-    check(invalid.error.code == flexUI::ApplicationServiceErrorCode::InvalidRequest);
+    for (const char *invalid_scope : {"", "sale::action", "sale.", "2sale"}) {
+      const auto invalid = created.queue->quiesce_scope_requests(invalid_scope);
+      check_false(static_cast<bool>(invalid));
+      check(invalid.error.code == flexUI::ApplicationServiceErrorCode::InvalidRequest);
+    }
     check_equal(created.queue->inspect_scope_leases("sale").total(), std::size_t{3});
 
     check(controller.retire_scoped_event_handlers("sale"));

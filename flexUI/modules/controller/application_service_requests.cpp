@@ -550,9 +550,20 @@ ApplicationServiceScopeQuiesceResult ApplicationServiceRequestQueue::quiesce_sco
                                 "closed service queue cannot quiesce a scope");
     return result;
   }
-  if (scope.empty() || scope.size() > 256 || scope.find(':') != std::string_view::npos) {
+  // Match the compiler's public component-scope grammar exactly, instead
+  // of letting an internal caller create impossible admission tombstones.
+  const auto is_start = [](char ch) noexcept {
+    return (ch >= 'A' && ch <= 'Z') ||
+           (ch >= 'a' && ch <= 'z') || ch == '_';
+  };
+  const auto is_rest = [&](char ch) noexcept {
+    return is_start(ch) || (ch >= '0' && ch <= '9') ||
+           ch == '_' || ch == '-';
+  };
+  if (scope.empty() || scope.size() > 253 || !is_start(scope.front()) ||
+      !std::all_of(scope.begin() + 1, scope.end(), is_rest)) {
     result.error = service_fail(ApplicationServiceErrorCode::InvalidRequest,
-                                "scope quiescence requires a bounded component scope");
+                                "scope quiescence requires a compiler-valid ASCII scope");
     return result;
   }
   if (impl_->is_quiesced(scope)) return result; // Stable and idempotent.

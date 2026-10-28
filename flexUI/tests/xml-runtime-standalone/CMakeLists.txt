@@ -65,6 +65,19 @@ endforeach()
 target_include_directories(test_application_service_requests PRIVATE
     "${STUN_ROOT}/flexUI/modules/controller")
 
+# Compile the EXACT optional production WindowHost source on all three native
+# headless platforms, even when GPU / GLFW presentation targets are disabled.
+# This is a compile-only source/ABI gate, not a GPU/window runtime acceptance.
+# Do not create mocks or a duplicate host implementation.
+add_library(stun_gcanvas_window_host_source_compile OBJECT
+    "${STUN_ROOT}/flexUI/modules/desktop/gcanvas_window_host.cpp")
+target_link_libraries(stun_gcanvas_window_host_source_compile PRIVATE
+    FlexUI::GCanvasApplicationInput)
+target_include_directories(stun_gcanvas_window_host_source_compile PRIVATE
+    "${STUN_ROOT}/flex/render/engines/gcanvas/include")
+add_dependencies(stun_xml_runtime_qualification
+    stun_gcanvas_window_host_source_compile)
+
 # Reuse the production ChartFrame XML/component adapter and its real
 # TinyTest/snapshot suite in the installed-SDK ASan/UBSan and LSan gate.
 # Avoid a chart-specific implementation or mock Box in qualification.
