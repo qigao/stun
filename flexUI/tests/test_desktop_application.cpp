@@ -2272,6 +2272,18 @@ spec("Desktop XML components share one native ScriptController and Effects engin
     check(static_cast<bool>(built));
     if (!built) return;
     auto &app = *built.application;
+    const auto &owners = app.scoped_component_ownership();
+    check_equal(owners.size(), std::size_t{2});
+    if (owners.size() != 2) return;
+    check_equal(owners[0].scope, "sales");
+    check_equal(owners[0].host_id, "left");
+    check_equal(owners[0].nodes.size(), std::size_t{1});
+    check_equal(owners[0].nodes[0].qualified_id, "sales::action");
+    check(owners[0].nodes[0].has_compiled_events);
+    check_equal(owners[1].scope, "costs");
+    check_equal(owners[1].host_id, "right");
+    check_equal(owners[1].nodes[0].qualified_id, "costs::action");
+    check(owners[1].nodes[0].has_compiled_events);
     auto &box = app.box();
     auto* sales = box.get_by_id("sales::action");
     auto* costs = box.get_by_id("costs::action");
@@ -2410,6 +2422,10 @@ spec("Desktop XML components share one native ScriptController and Effects engin
     auto &app = *built.application;
     auto *before = app.box().get_by_id("sales::action");
     check_not_null(before);
+    const auto &before_owners = app.scoped_component_ownership();
+    check_equal(before_owners.size(), std::size_t{2});
+    if (before_owners.size() != 2) return;
+    check_equal(before_owners[0].nodes[0].qualified_id, "sales::action");
     const auto generation = app.generation();
 
     const auto rejected = app.reload(
@@ -2421,6 +2437,9 @@ spec("Desktop XML components share one native ScriptController and Effects engin
     check(rejected.error.ui_error.code ==
           flexUI::UiDocumentErrorCode::MissingComponentHost);
     check(app.generation() == generation);
+    check_equal(app.scoped_component_ownership().size(), std::size_t{2});
+    check_equal(app.scoped_component_ownership()[0].nodes[0].qualified_id,
+                "sales::action");
     check(app.box().get_by_id("sales::action") == before);
     check_not_null(app.box().get_by_id("costs::action"));
     check(app.controller()->state() == flexUI::ControllerState::Mounted);

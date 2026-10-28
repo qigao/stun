@@ -1212,6 +1212,10 @@ UiDocumentCompileResult compile_scoped_ui_components(
     }
   }
   std::unordered_set<std::string> scopes;
+  // Exactly one candidate-local provenance ledger, staged with the combined
+  // compiler definition and returned only after every scope is accepted.
+  std::vector<UiScopedComponentOwnership> scoped_ownership;
+  scoped_ownership.reserve(components.size());
   for (const auto &instance : components) {
     const auto valid_scope = [&] {
       if (instance.scope.empty() ||
@@ -1446,6 +1450,55 @@ UiDocumentCompileResult compile_scoped_ui_components(
       }
       for (auto &child : node->children) nodes.push_back(&child);
     }
+    // Capture exact structural owner provenance BEFORE transferring the
+    // component root to the merged document. Root ordinals resolve even an
+    // anonymous component root. Parent indices resolve every other anonymous
+    // node, including Widget factory hosts, without guessing ID prefixes.
+    UiScopedComponentOwnership ownership;
+    ownership.scope = instance.scope;
+    ownership.host_id = instance.host_id;
+    ownership.root_child_index = host->children.size();
+    ownership.nodes.reserve(added);
+    struct PendingOwnerNode {
+      const UiNodeDefinition *node;
+      std::size_t parent_index;
+      std::size_t child_index;
+    };
+    std::vector<PendingOwnerNode> owner_pending;
+    owner_pending.push_back({&subtree, UiScopedOwnedNode::kNoParent,
+                       ownership.root_child_index});
+    while (!owner_pending.empty()) {
+      const auto next = owner_pending.back();
+      owner_pending.pop_back();
+      const auto *descriptor = registry.descriptor(next.node->tag);
+      if (descriptor == nullptr) {
+        result.error = make_error(UiDocumentErrorCode::UnknownElementTag,
+                                  "scoped provenance contains an unregistered tag");
+        return result;
+      }
+      UiScopedOwnedNode owned;
+      owned.parent_index = next.parent_index;
+      owned.child_index = next.child_index;
+      owned.qualified_id = next.node->id;
+      owned.tag = next.node->tag;
+      owned.widget = descriptor->kind == UiNodeKind::Widget;
+      for (const auto &[key, value] : next.node->properties) {
+        if (key.rfind("on.", 0) == 0) owned.has_compiled_events = true;
+        if (key.rfind("bind.", 0) == 0) owned.has_compiled_bindings = true;
+      }
+      const auto owner_index = ownership.nodes.size();
+      ownership.nodes.push_back(std::move(owned));
+      for (std::size_t i = next.node->children.size(); i > 0; --i) {
+        owner_pending.push_back({&next.node->children[i - 1], owner_index, i - 1});
+      }
+    }
+    if (ownership.nodes.size() != added) {
+      result.error = make_error(
+          UiDocumentErrorCode::InvalidNode,
+          "scoped provenance does not cover every compiled component node");
+      return result;
+    }
+    scoped_ownership.push_back(std::move(ownership));
     host->children.push_back(std::move(subtree));
   }
   result = compile_ui_definition(std::move(merged), application.resources(),
@@ -1454,6 +1507,10 @@ UiDocumentCompileResult compile_scoped_ui_components(
     if (auto error = registry.validate(*result.program, limits)) {
       result.program.reset();
       result.error = std::move(error);
+    } else {
+      // Candidate is now complete. Publish exactly the compiler-derived
+      // ownership ledger; no mutable second controller, Box or ID table.
+      result.scoped_ownership = std::move(scoped_ownership);
     }
   }
   return result;

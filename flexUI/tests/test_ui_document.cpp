@@ -1672,6 +1672,34 @@ spec("Scoped XML components are compiled into one owner/controller program") {
     if (!combined) return;
     check_equal(combined.program->event_bindings().size(), std::size_t{2});
     check_equal(combined.program->bindings().size(), std::size_t{2});
+    // The compiler contributes the ONLY scoped owner provenance. Source
+    // declaration order matches the original host: both component trees can
+    // use the same template IDs but must not share an owning node record.
+    check_equal(combined.scoped_ownership.size(), std::size_t{2});
+    const auto &sales_owner = combined.scoped_ownership[0];
+    const auto &costs_owner = combined.scoped_ownership[1];
+    check_equal(sales_owner.scope, "sales");
+    check_equal(costs_owner.scope, "costs");
+    check_equal(sales_owner.host_id, "left");
+    check_equal(costs_owner.host_id, "right");
+    check_equal(sales_owner.root_child_index, std::size_t{0});
+    check_equal(costs_owner.root_child_index, std::size_t{0});
+    check_equal(sales_owner.nodes.size(), std::size_t{3});
+    check_equal(costs_owner.nodes.size(), std::size_t{3});
+    check_equal(sales_owner.nodes[0].qualified_id, "sales::panel");
+    check(sales_owner.nodes[0].parent_index ==
+          flexUI::UiScopedOwnedNode::kNoParent);
+    check_equal(sales_owner.nodes[1].qualified_id, "sales::action");
+    check_equal(sales_owner.nodes[1].parent_index, std::size_t{0});
+    check_equal(sales_owner.nodes[1].child_index, std::size_t{0});
+    check(sales_owner.nodes[1].widget);
+    check(sales_owner.nodes[1].has_compiled_events);
+    check_false(sales_owner.nodes[1].has_compiled_bindings);
+    check_equal(sales_owner.nodes[2].qualified_id, "sales::caption");
+    check(sales_owner.nodes[2].has_compiled_bindings);
+    check(sales_owner.nodes[2].widget);
+    check_equal(costs_owner.nodes[1].qualified_id, "costs::action");
+    check_equal(costs_owner.nodes[2].qualified_id, "costs::caption");
     check_not_null(combined.program->find_event_binding(
         "sales::action", flexUI::UiEventKind::Click));
     check_not_null(combined.program->find_event_binding(
@@ -1699,6 +1727,64 @@ spec("Scoped XML components are compiled into one owner/controller program") {
     box.update();
     check_equal(box.get_by_id("sales::caption")->text(), "Revenue");
     check_equal(box.get_by_id("costs::caption")->text(), "Revenue");
+  }
+
+  it("records eventless anonymous component roots and Widget owner locations") {
+    const auto app = flexUI::compile_ui_xml(
+        "<ui name=\"OwnerApp\"><main id=\"root\">"
+        "<section id=\"host\"><div id=\"base\"/></section>"
+        "</main></ui>");
+    const auto component = flexUI::compile_ui_xml(
+        "<ui name=\"Anonymous\"><div>"
+        "<button id=\"send\">Send</button><span>Plain</span></div></ui>");
+    check(static_cast<bool>(app));
+    check(static_cast<bool>(component));
+    if (!app || !component) return;
+    const auto registry = flexUI::WidgetRegistry::builtins();
+    const auto compiled = flexUI::compile_scoped_ui_components(
+        *app.program, {{"eventless", "host", component.program}}, registry);
+    check(static_cast<bool>(compiled));
+    if (!compiled) return;
+    check_equal(compiled.scoped_ownership.size(), std::size_t{1});
+    const auto &scope = compiled.scoped_ownership[0];
+    check_equal(scope.scope, "eventless");
+    check_equal(scope.host_id, "host");
+    check_equal(scope.root_child_index, std::size_t{1});
+    check_equal(scope.nodes.size(), std::size_t{3});
+    check(scope.nodes[0].qualified_id.empty());
+    check_equal(scope.nodes[0].tag, "div");
+    check(scope.nodes[0].parent_index == flexUI::UiScopedOwnedNode::kNoParent);
+    check_equal(scope.nodes[0].child_index, std::size_t{1});
+    check_false(scope.nodes[0].has_compiled_events);
+    check_false(scope.nodes[0].has_compiled_bindings);
+    check_false(scope.nodes[0].widget);
+    check_equal(scope.nodes[1].qualified_id, "eventless::send");
+    check_equal(scope.nodes[1].parent_index, std::size_t{0});
+    check_equal(scope.nodes[1].child_index, std::size_t{0});
+    check(scope.nodes[1].widget);
+    check_false(scope.nodes[1].has_compiled_events);
+    check(scope.nodes[2].qualified_id.empty());
+    check_equal(scope.nodes[2].tag, "span");
+    check_equal(scope.nodes[2].parent_index, std::size_t{0});
+    check_equal(scope.nodes[2].child_index, std::size_t{1});
+
+    // Eventless compiled components do not need manufactured script routes.
+    check(compiled.program->event_bindings().empty());
+    flexUI::Box box(nullptr);
+    auto installed = flexUI::UiDocumentInstantiator::instantiate(
+        box, *compiled.program, registry);
+    check(static_cast<bool>(installed));
+    if (!installed) return;
+    auto *host = box.get_by_id("host");
+    check_not_null(host);
+    if (!host || host->children().size() < 2) return;
+    const auto *anonymous = dynamic_cast<flexUI::Element *>(
+        host->children()[scope.root_child_index]);
+    check_not_null(anonymous);
+    if (!anonymous) return;
+    check(anonymous->id().empty());
+    check_equal(anonymous->tag(), scope.nodes[0].tag);
+    check_not_null(box.get_by_id("eventless::send"));
   }
 
   it("charges repeated components against one total node budget before copying") {

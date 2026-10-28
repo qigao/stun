@@ -3,6 +3,30 @@
 状态：架构决策已采用，实施与验收按下列工作项推进
 日期：2026-08-31
 
+## 2026-10-28 P4.4 M4b0 编译器来源确定的组件结构所有权账本（Draft）
+
+`compile_scoped_ui_components` 在静态合并阶段、`UiDocumentInstantiator`
+进入 live Box 之前，为每一个唯一 `scope` 构造一份候选内只读结构账本
+（`UiScopedComponentOwnership`）：明确的 base host ID、当前 host
+内根节点 child ordinal、每个节点的 preorder parent index / child index、
+scope-qualified ID（允许匿名节点无 ID）、tag、是否 Widget，以及是否
+拥有编译后事件或 Binding source。源头只由合并编译器控制，
+不会根据可伪造的脚本运行时事件 ID 猜测子树。
+
+每个节点占一条有界记录，条目总数受原有 `max_nodes` 保护；无需为
+深层匿名节点复制整条路径。只有 `compile_ui_definition` 与 Registry
+全部通过才返回账本；失败的合并不能发布半成品。应用候选构建把
+账本**移动**进唯一的 `PublishedApplicationState`，reload/recompose
+随 Box/Program 一起整体换代，没有第二套可变运行时树。
+
+这是静态编译来源证明，不是可直接释放的 `Element*`、Widget
+租约或独立脚本 Owner。特别是没有事件处理器的匿名根/Widget，也须
+能被追溯，而**不制造假事件路由**。后续 M4b 必须在真实 mounted
+Box 中校验和保留物理资源 Owner、活动脚本/Binding/Widget 句柄、
+focus/capture 与 host Worker join 证明，全部通过后才可进行原地
+`unmount(scope)`，不能用仅有的编译静态路径绕过安全门禁。
+跟踪 Issue #298；当前阶段不执行物理卸载。
+
 ## 2026-10-28 P4.4 M4a 作用域服务终态排空只读门禁（Draft）
 
 新增 `DesktopApplication::inspect_scoped_service_drain(scope)`，读取唯一

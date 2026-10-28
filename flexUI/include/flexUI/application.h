@@ -226,6 +226,12 @@ public:
   Box &box() noexcept;
   const Box &box() const noexcept;
   const CompiledUiProgram &program() const noexcept;
+  /// Compiler-produced structural provenance MOVED with this published
+  /// generation. Exact root ordinals/parent indices include anonymous Widget
+  /// hosts, but are NOT live resource leases or approval to detach subtrees.
+  /// Call on the owner thread, like program().
+  const std::vector<UiScopedComponentOwnership> &
+  scoped_component_ownership() const noexcept;
   ScriptController *controller() noexcept;
   const ScriptController *controller() const noexcept;
   const DesktopApplicationSources &sources() const noexcept;

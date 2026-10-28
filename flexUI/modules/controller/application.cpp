@@ -167,6 +167,7 @@ private:
 struct PublishedApplicationState {
   DesktopApplicationSources sources;
   std::shared_ptr<const CompiledUiProgram> program;
+  std::vector<UiScopedComponentOwnership> scoped_ownership;
   std::unique_ptr<Box> box;
   std::unique_ptr<BoxMutationHost> mutation_host;
   std::unique_ptr<UiMutationEngine> mutation_engine;
@@ -356,6 +357,9 @@ CandidateResult build_candidate(const ApplicationConfig &config, DesktopApplicat
     auto state = std::make_unique<PublishedApplicationState>();
     state->sources = std::move(sources);
     state->program = std::move(compiled.program);
+    // The compiler's one candidate-local ownership ledger moves with its
+    // published Box. No per-scope runtime worker/controller table is created.
+    state->scoped_ownership = std::move(compiled.scoped_ownership);
     state->box = std::make_unique<Box>(config.renderer, config.box_options);
 
     // UI string/boolean/numeric bindings require declared typed inputs at
@@ -549,6 +553,11 @@ const Box &DesktopApplication::box() const noexcept { return *impl_->active->box
 
 const CompiledUiProgram &DesktopApplication::program() const noexcept {
   return *impl_->active->program;
+}
+
+const std::vector<UiScopedComponentOwnership> &
+DesktopApplication::scoped_component_ownership() const noexcept {
+  return impl_->active->scoped_ownership;
 }
 
 ScriptController *DesktopApplication::controller() noexcept {
