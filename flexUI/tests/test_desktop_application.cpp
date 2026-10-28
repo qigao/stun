@@ -736,6 +736,9 @@ spec("FlexUI scoped live Box topology preflight") {
     check(static_cast<bool>(baseline));
     check(baseline.mounted_elements >= std::size_t{3});
     check(baseline.widget_hosts >= std::size_t{1});
+    check_equal(baseline.unverified_widget_hosts, std::size_t{0});
+    check_equal(baseline.native_widget_callback_owners, std::size_t{0});
+    check_equal(baseline.active_widget_local_borrowers, std::size_t{0});
     check(baseline.widget_owned_parts >= std::size_t{1});
     check_equal(baseline.box_owned_elements, baseline.mounted_elements);
     check_equal(baseline.retained_transition_elements, std::size_t{0});

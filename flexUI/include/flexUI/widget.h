@@ -8,6 +8,7 @@
 #define FLEXUI_WIDGET_H
 
 #include <flexUI/types.h>
+#include <cstddef>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -19,6 +20,16 @@ namespace flexUI {
 class Element;
 struct Event;
 class RenderCommandList;
+
+/// Read-only local Widget callback/interaction audit. This does not count
+/// TextValueWidget bidirectional value observers, which are inspected by
+/// the Binding/Widget-owned edit observer boundary separately.
+struct WidgetLocalBorrowSnapshot {
+  // Base/third-party widgets fail closed until their own owners are audited.
+  bool audited = false;
+  std::size_t native_callback_owners = 0;
+  bool interaction_or_callback_active = false;
+};
 
 /**
  * Widget - 所有 UI 组件的基类
@@ -32,6 +43,14 @@ class RenderCommandList;
 class Widget {
 public:
   virtual ~Widget() = default;
+
+  /// Must report every Widget-owned native callback and active interaction
+  /// before its subtree can ever be considered for physical retirement.
+  /// This never invokes callbacks, allocates, or retires an owner. Unsupported
+  /// third-party Widgets are deliberately not treated as callback-free.
+  virtual WidgetLocalBorrowSnapshot inspect_local_borrowers() const noexcept {
+    return {};
+  }
 
   void bind_host_element(Element* elem);
 

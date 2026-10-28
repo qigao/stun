@@ -1209,6 +1209,15 @@ Box::inspect_subtree_borrowers(const Element *subtree_root) const noexcept {
           return result;
         }
         ++result.widget_hosts;
+        const auto widget_owners = element->widget->inspect_local_borrowers();
+        if (!widget_owners.audited) {
+          ++result.unverified_widget_hosts;
+        } else {
+          result.native_widget_callback_owners +=
+              widget_owners.native_callback_owners;
+          if (widget_owners.interaction_or_callback_active)
+            ++result.active_widget_local_borrowers;
+        }
       }
       const auto identity = reinterpret_cast<std::uintptr_t>(element);
       if (transitions_.retains_element(identity))

@@ -393,6 +393,9 @@ spec("UiBindingRuntime projects typed C++ inputs through MIR") {
     check_equal(before.binding_targets, std::size_t{1});
     check_equal(before.value_observers, std::size_t{1});
     check_equal(before.blocked_value_observers, std::size_t{0});
+    check_equal(before.unverified_widget_hosts, std::size_t{0});
+    check_equal(before.native_widget_callback_owners, std::size_t{0});
+    check_equal(before.active_widget_local_borrowers, std::size_t{0});
     check_equal(before.widget_edit_observers, std::size_t{2});
     check_equal(before.unowned_widget_edit_observers, std::size_t{1});
     check_false(before.widget_observer_notifications_active);
@@ -419,6 +422,8 @@ spec("UiBindingRuntime projects typed C++ inputs through MIR") {
     check_equal(sibling.blocked_value_observers, std::size_t{0});
     check_equal(sibling.widget_edit_observers, std::size_t{1});
     check_equal(sibling.unowned_widget_edit_observers, std::size_t{0});
+    check_equal(sibling.unverified_widget_hosts, std::size_t{0});
+    check_equal(sibling.native_widget_callback_owners, std::size_t{0});
 
     // M4b4's observer proof grants NO raw Box retirement of a Widget.
     check_false(box.retire_bound_structural_subtree("sales"));
@@ -436,6 +441,13 @@ spec("UiBindingRuntime projects typed C++ inputs through MIR") {
     check(textarea_frame_visible);
     check(textarea->remove_edit_observer(textarea_witness));
     check_equal(bindings.inputs().string("sales_value"), textarea->text());
+    input->set_change_callback([](const std::string&) {});
+    const auto callback_held = box.inspect_subtree_borrowers(input_element);
+    check(static_cast<bool>(callback_held));
+    check_equal(callback_held.native_widget_callback_owners, std::size_t{1});
+    input->set_change_callback({});
+    const auto callback_released = box.inspect_subtree_borrowers(input_element);
+    check_equal(callback_released.native_widget_callback_owners, std::size_t{0});
     check(bindings.targets().unbind(sales.id));
   }
 

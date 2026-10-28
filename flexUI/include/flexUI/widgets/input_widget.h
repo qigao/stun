@@ -87,6 +87,12 @@ public:
   TextValueObserverId add_edit_observer(EditObserver observer) override;
   bool remove_edit_observer(TextValueObserverId id) override;
   bool inspect_edit_observers(TextValueObserverSnapshot& out) const noexcept override;
+  WidgetLocalBorrowSnapshot inspect_local_borrowers() const noexcept override {
+    // Bidirectional edit observer count is reported by the separate
+    // TextValueWidget boundary; this accounts for the native change handler.
+    return {true, change_callback_ ? std::size_t{1} : std::size_t{0},
+            notifying_edit_observers_depth_ != 0 || is_dragging_ || is_composing_};
+  }
 
   const std::string &placeholder() const { return placeholder_; }
   void set_placeholder(const std::string &text) {

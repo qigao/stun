@@ -738,3 +738,22 @@ The eventual physical transaction must stage/commit disposal of all owner
 stores without a callback, avoid allocating during commit, and prove Widget,
 Binding, Controller, external endpoint and script resource retirement
 independently. No `unmount(scope)` has been implemented. #302 remains Draft.
+
+## 2026-10-28 P4.4 M4b6b — audit Widget-local callbacks and active lifetimes (Draft #302)
+
+`Widget::inspect_local_borrowers()` returns **unaudited** by default.
+The one Box owner scan now tracks unsupported Widget host count, native
+Widget callback count and live Widget-local interaction/callback frames.
+The first explicit built-in audits cover Button (loading/ripple/scale work),
+Label (no native callback), Input and TextArea (native change callback,
+IME/dragging and observer notification depth). Input/TextArea bidirectional
+edit observers remain separately counted through the Binding-owned
+`ValueTarget` and `TextValueWidget` snapshots. No duplicated subscriber
+table, no callback invocation and no retirement action is performed.
+
+A third-party Widget lacking this audit remains an explicit blocker; a zero
+count for these four builtins is NOT enough to physically delete any compiled
+component. The future commit must still prove ALL live owner types,
+preallocate full resource disposal, retire callbacks/observers and detach
+Widget parts before destroying their host Element. `unmount(scope)` is absent
+and #302 remains Draft.

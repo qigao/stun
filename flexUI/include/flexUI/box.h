@@ -51,6 +51,11 @@ struct BoxSubtreeBorrowSnapshot {
   /// Real dynamically created Widget-owned internal Element parts.
   std::size_t widget_owned_parts = 0;
   std::size_t widget_hosts = 0;
+  /// No other Widget class is presumed safe: unknown third-party owners
+  /// are counted independently and must fail a future detach preflight.
+  std::size_t unverified_widget_hosts = 0;
+  std::size_t native_widget_callback_owners = 0;
+  std::size_t active_widget_local_borrowers = 0;
   /// These live/stale cache owners must be cleaned in a future physical
   /// detach; neither a current_time check nor a zero-frame snapshot clears.
   std::size_t retained_transition_elements = 0;

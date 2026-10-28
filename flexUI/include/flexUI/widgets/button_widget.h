@@ -62,6 +62,12 @@ public:
                                 float available_height, float& out_width,
                                 float& out_height) const override;
     const char* type_name() const override { return "ButtonWidget"; }
+    WidgetLocalBorrowSnapshot inspect_local_borrowers() const noexcept override {
+      // Button native click closures are Element-owned and scanned by Box.
+      // Ripple/spinner/scale timelines are retained Widget-internal activity.
+      return {true, 0, loading_ || !ripples_.empty() ||
+                         current_scale_ != target_scale_};
+    }
     bool paints_host_box() const override { return true; }
     bool paints_part_box(std::string_view part_name) const override;
     bool emit_part_render_commands(const Element& host, const Element& part,
