@@ -2428,3 +2428,86 @@ spec("FlexUI M4b6i cross-scope native Widget Element pointer borrows") {
   }
 }
 
+
+
+spec("FlexUI M4b6l foreign native callback closure ownership") {
+  it("blocks a target scope when a sibling Element callback may capture its child") {
+    flexUI::Box box(nullptr);
+    auto* root = box.create("main", "root");
+    auto* sale = box.create("section", "sale");
+    auto* page = box.create("div", "sale::page");
+    auto* sales = box.create("section", "sales");
+    auto* button = box.create("button", "sales::button");
+    sale->append(page);
+    sales->append(button);
+    root->append(sale);
+    root->append(sales);
+    box.set_root(root);
+    const auto page_handle = box.handle_for(*page);
+    const auto sibling_handle = box.handle_for(*button);
+
+    const auto initial = box.inspect_subtree_borrowers(sale);
+    check(static_cast<bool>(initial));
+    check_equal(initial.foreign_native_click_callbacks, std::size_t{0});
+    check_equal(initial.opaque_global_event_callback_owners, std::size_t{0});
+    check_equal(initial.native_click_callbacks, std::size_t{0});
+
+    page->on_click([] {});
+    button->on_click([page] { (void)page; });
+    const auto borrowed = box.inspect_subtree_borrowers(sale);
+    check(static_cast<bool>(borrowed));
+    check_equal(borrowed.native_click_callbacks, std::size_t{1});
+    check_equal(borrowed.foreign_native_click_callbacks, std::size_t{1});
+    check_equal(borrowed.opaque_global_event_callback_owners, std::size_t{0});
+    const auto sibling = box.inspect_subtree_borrowers(sales);
+    check(static_cast<bool>(sibling));
+    check_equal(sibling.native_click_callbacks, std::size_t{1});
+    check_equal(sibling.foreign_native_click_callbacks, std::size_t{1});
+
+    // Explicitly disarming only the target-local handler does NOT retire
+    // the sibling's opaque capture. Neither callback was invoked.
+    page->on_click({});
+    const auto still_borrowed = box.inspect_subtree_borrowers(sale);
+    check(static_cast<bool>(still_borrowed));
+    check_equal(still_borrowed.native_click_callbacks, std::size_t{0});
+    check_equal(still_borrowed.foreign_native_click_callbacks, std::size_t{1});
+    button->on_click({});
+    const auto released = box.inspect_subtree_borrowers(sale);
+    check(static_cast<bool>(released));
+    check_equal(released.foreign_native_click_callbacks, std::size_t{0});
+    check_equal(box.resolve_handle(page_handle), page);
+    check_equal(box.resolve_handle(sibling_handle), button);
+  }
+
+  it("accounts for public and framework Box-wide closures independently") {
+    flexUI::Box box(nullptr);
+    auto* root = box.create("main", "root");
+    auto* sale = box.create("div", "sale");
+    auto* sales = box.create("div", "sales");
+    root->append(sale);
+    root->append(sales);
+    box.set_root(root);
+    const auto right = box.handle_for(*sales);
+    box.set_event_callback([sale](flexUI::Element&, const flexUI::Event&) {
+      (void)sale;
+    });
+    auto public_only = box.inspect_subtree_borrowers(sale);
+    check(static_cast<bool>(public_only));
+    check_equal(public_only.opaque_global_event_callback_owners, std::size_t{1});
+    box.set_framework_event_callback([sale](flexUI::Element&, const flexUI::Event&) {
+      (void)sale;
+    });
+    auto both = box.inspect_subtree_borrowers(sale);
+    check(static_cast<bool>(both));
+    check_equal(both.opaque_global_event_callback_owners, std::size_t{2});
+    check_equal(both.foreign_native_click_callbacks, std::size_t{0});
+    box.set_event_callback({});
+    const auto one = box.inspect_subtree_borrowers(sale);
+    check_equal(one.opaque_global_event_callback_owners, std::size_t{1});
+    box.set_framework_event_callback({});
+    const auto none = box.inspect_subtree_borrowers(sale);
+    check(static_cast<bool>(none));
+    check_equal(none.opaque_global_event_callback_owners, std::size_t{0});
+    check_equal(box.resolve_handle(right), sales);
+  }
+}

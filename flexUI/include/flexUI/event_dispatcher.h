@@ -53,6 +53,16 @@ public:
   void detach_subtree(Element *root);
   bool is_dispatching() const noexcept { return dispatch_depth_ != 0; }
 
+  /// Read-only number of registered opaque Box-wide callback closures.
+  /// Either callback may capture Element* into ANY subtree: a scoped Box
+  /// inspection must never assume it is safe because target-local event
+  /// routes and Widget callbacks have retired. No closure is inspected,
+  /// copied or invoked and this is not a callback-retirement operation.
+  std::size_t opaque_global_callback_owners() const noexcept {
+    return (callback_ ? std::size_t{1} : std::size_t{0}) +
+           (framework_callback_ ? std::size_t{1} : std::size_t{0});
+  }
+
   // 全局事件回调
   void set_event_callback(EventCallback cb) { callback_ = cb; }
 

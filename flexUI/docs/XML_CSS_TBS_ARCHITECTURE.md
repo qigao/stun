@@ -934,3 +934,25 @@ clears the direct page link while retaining a native closure, requires
 zero *known* pages but one unverified foreign Widget, then clears the
 closure and requires both counts zero. This prevents a false unmount
 admission certificate from an opaque callback capture graph.
+
+## 2026-10-28 M4b6l — native Element/Box-wide callback captures across scopes
+
+A sibling Element's native on_click closure may capture an Element* inside
+the requested scope, even after all target-local handlers have retired.
+The one Box subtree snapshot now counts ALL foreign Element click closures
+as `foreign_native_click_callbacks`, including detached still-Box-owned
+staged nodes, and independently counts opaque user/framework-wide
+EventDispatcher closures as `opaque_global_event_callback_owners`.
+Neither count introspects, copies or invokes a callback, and there is no
+persistent subscription index or false inference that a scoped Controller
+route retirement clears global callback captures.
+
+Native tests create exact `sale` / `sales` sibling Elements, retain a
+native closure capturing the doomed child, and prove target-local callback
+clear does not retire the foreign closure. Separate public/framework-wide
+closure tests verify that both owners count independently, can be removed
+without executing them, and preserve sibling Box handles. These diagnostic
+counts are nonzero blockers for any future physical unmount. A framework
+callback may remain application-installed even when its routes are retired;
+that scenario still needs independent proof and must not be silently
+treated as safe. #302 stays Draft / unmerged; no `unmount(scope)`.

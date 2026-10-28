@@ -80,6 +80,12 @@ struct BoxSubtreeBorrowSnapshot {
   bool binding_mutation_active = false;
   bool invalid_binding_ownership = false;
   std::size_t native_click_callbacks = 0;
+  /// Native Element::on_click() closures OUTSIDE the requested subtree.
+  /// They may capture raw pointers INTO it; they cannot be introspected.
+  std::size_t foreign_native_click_callbacks = 0;
+  /// Public/framework-wide Box event closures can borrow ANY Element.
+  /// Separate from compiled ScriptController's scoped route retirement.
+  std::size_t opaque_global_event_callback_owners = 0;
   std::size_t active_widget_hosts = 0;
   std::size_t keyed_repeater_hosts = 0;
   bool native_event_dispatching = false;

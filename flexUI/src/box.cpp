@@ -1329,6 +1329,17 @@ Box::inspect_subtree_borrowers(const Element *subtree_root) const noexcept {
       if (visited.count(host) != 0) ++result.keyed_repeater_hosts;
     }
 
+    // The one Box owns ALL Element::on_click() closures, including on
+    // siblings and detached staged nodes. A closure attached to "sales"
+    // may capture a raw "sale" Element even though it isn't in the target
+    // tree. Count all opaque external closures without invoking any.
+    for (const auto &owner : elements_) {
+      if (visited.count(owner.get()) == 0 && owner->click_callback())
+        ++result.foreign_native_click_callbacks;
+    }
+    result.opaque_global_event_callback_owners =
+        events_.opaque_global_callback_owners();
+
     // No second external-pointer registry: re-use the exact temporary set
     // just built from the mounted target subtree. A foreign Widget may keep
     // borrowed page pointers into it even after its script routes and queue
