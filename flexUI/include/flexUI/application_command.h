@@ -43,6 +43,7 @@ enum class ApplicationCommandErrorCode {
   QueueFull,
   QueueReserveFailed,
   InternalInvariant,
+  ScopeQuiesced,
 };
 
 struct ApplicationCommandError {

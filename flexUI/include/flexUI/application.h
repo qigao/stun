@@ -226,8 +226,9 @@ public:
   /// optional `on_service_completion` export. This and raw completion polling
   /// share one authoritative mailbox consumer and must not be mixed.
   /// @return `Ready` with an owning completion and `dispatched == false` when
-  ///         no script handler exists; `Empty`/`Closed` without a callback;
-  ///         or a nested service/controller error.
+  ///         no script handler exists; `Suppressed` with no script callback for
+  ///         an in-flight request whose scoped origin was quiesced;
+  ///         `Empty`/`Closed` without a callback; or a nested error.
   DesktopApplicationCompletionDispatchResult try_dispatch_service_completion();
 
   /// Owner-thread snapshot of bounded request-table counters.

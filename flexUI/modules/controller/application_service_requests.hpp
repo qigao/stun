@@ -31,10 +31,23 @@ struct ApplicationServiceScopeLeases {
   std::size_t reserved = 0;
   std::size_t published = 0;
   std::size_t in_flight = 0;
+  bool quiesced = false;
   ApplicationServiceError error;
 
   explicit operator bool() const noexcept { return !static_cast<bool>(error); }
   std::size_t total() const noexcept { return reserved + published + in_flight; }
+};
+
+/// Quiesces exactly one trusted compiled-handler scope within this queue
+/// generation. Published, unsubmitted commands are cancelled; in-flight host
+/// commands remain owned until their result arrives, but cannot call script.
+/// This is NOT cancellation of a running service endpoint or safe unmount.
+struct ApplicationServiceScopeQuiesceResult {
+  std::size_t cancelled_published = 0;
+  std::size_t suppressed_in_flight = 0;
+  ApplicationServiceError error;
+
+  explicit operator bool() const noexcept { return !static_cast<bool>(error); }
 };
 
 struct ApplicationServiceRequestQueueCreateResult;
@@ -64,6 +77,10 @@ public:
   ApplicationServiceCompletionResult resolve_completion(ApplicationCompletion completion);
   /// Origin-scoped leases are retained through in-flight host execution.
   ApplicationServiceScopeLeases inspect_scope_leases(std::string_view scope) const;
+  /// A pending Prepared command reservation for the same scope is a hard
+  /// rejection. The staged scope gate and queue edits otherwise publish
+  /// without further allocation; unrelated FIFO entries retain their order.
+  ApplicationServiceScopeQuiesceResult quiesce_scope_requests(std::string_view scope);
 
   /// Validates the fallible part before the mailbox generation changes.
   ApplicationServiceControlResult validate_generation_reset(std::uint64_t next_generation) const;

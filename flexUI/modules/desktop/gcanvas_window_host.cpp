@@ -308,11 +308,12 @@ struct GCanvasWindowHost::Impl {
   }
 
   GCanvasWindowHostResult drain_service_completions() {
+    // Always consume accepted completion tokens, including scoped tombstones,
+    // even when the optional script completion export is absent. The window
+    // host owns this mailbox consumer; leaving it unread leaks queue slots.
     ScriptController *active_controller = application->controller();
-    if (active_controller == nullptr ||
-        !active_controller->has_service_completion_handler()) {
-      return {};
-    }
+    if (active_controller == nullptr) return {};
+    const bool has_script_handler = active_controller->has_service_completion_handler();
 
     std::size_t consumed = 0;
     while (consumed < config.max_service_completions_per_pump) {
@@ -332,10 +333,20 @@ struct GCanvasWindowHost::Impl {
                      GCanvasWindowHostStage::ServiceCompletion,
                      "ready desktop application exposed a closed completion mailbox")};
       }
-      if (!dispatched.completion.has_value() || !dispatched.dispatched) {
+      if (dispatched.status == ApplicationServicePollStatus::Suppressed) {
+        // A real worker finished, but its quiesced scope is no longer allowed
+        // to receive callbacks. Count the consumed record and continue so a
+        // following active-scope completion is not stranded behind it.
+        ++consumed;
+        continue;
+      }
+      if (dispatched.status != ApplicationServicePollStatus::Ready ||
+          !dispatched.completion.has_value() ||
+          (has_script_handler && !dispatched.dispatched) ||
+          (!has_script_handler && dispatched.dispatched)) {
         return {fail(GCanvasWindowHostErrorCode::InvalidState,
                      GCanvasWindowHostStage::ServiceCompletion,
-                     "scripted completion dispatch violated its ready-state contract")};
+                     "service completion dispatch violated its ready-state contract")};
       }
       ++consumed;
       if (application->state() != DesktopApplicationState::Ready) {

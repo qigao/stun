@@ -378,6 +378,135 @@ spec("FlexUI application service requests") {
           flexUI::ApplicationServiceErrorCode::InvalidRequest);
   }
 
+  it("quiesces queued scope commands and suppresses real in-flight completions") {
+    flexUI::ApplicationServiceRequestLimits limits;
+    limits.capacity = 4;
+    auto created = registered_queue(30, limits);
+    check(created);
+    if (!created) return;
+    flexUI::ApplicationCommandEngine engine(*created.queue);
+    const auto root = flexUI::compile_ui_xml(
+        "<ui name=\"App\"><main id=\"root\">"
+        "<section id=\"sale_host\"/><section id=\"sales_host\"/></main></ui>");
+    const auto panel = flexUI::compile_ui_xml(
+        "<ui name=\"Panel\" xmlns:on=\"urn:flexui:event\">"
+        "<button id=\"action\" on:click=\"issue_request\">Go</button></ui>");
+    check(static_cast<bool>(root));
+    check(static_cast<bool>(panel));
+    if (!root || !panel) return;
+    const auto combined = flexUI::compile_scoped_ui_components(
+        *root.program,
+        {{"sale", "sale_host", panel.program},
+         {"sales", "sales_host", panel.program}},
+        flexUI::WidgetRegistry::builtins());
+    check(static_cast<bool>(combined));
+    if (!combined) return;
+    flexUI::ScriptController controller(flexUI::ControllerEffects{nullptr, &engine});
+    check(controller.load(std::make_unique<ScopedServiceModule>(), combined.program));
+    check(controller.mount());
+    const auto dispatch_scope = [&](std::string scope) {
+      flexUI::ScriptEventSnapshot event;
+      event.event = flexUI::UiEventKind::Click;
+      event.target = {std::move(scope) + "::action", 1};
+      event.current_target = event.target;
+      return controller.dispatch(event);
+    };
+    check(dispatch_scope("sale")); // token 1, later in flight
+    check(dispatch_scope("sales")); // token 2, completed to open a ring slot
+    check(dispatch_scope("sale")); // token 3, queued and cancellable
+    check(dispatch_scope("sales")); // token 4, must remain in FIFO
+    auto first = created.queue->try_receive_request();
+    auto second = created.queue->try_receive_request();
+    check(first);
+    check(second);
+    if (!first || !second) return;
+    check_equal(first.request->token.id, std::uint64_t{1});
+    check_equal(second.request->token.id, std::uint64_t{2});
+    check(created.queue->resolve_completion(completion(second.request->token)));
+    check(dispatch_scope("sale")); // token 5, published after ring wrap
+    const auto before = created.queue->inspect_scope_leases("sale");
+    check_equal(before.published, std::size_t{2});
+    check_equal(before.in_flight, std::size_t{1});
+
+    flexUI::ApplicationServiceScopeQuiesceResult foreign;
+    std::thread worker([&] { foreign = created.queue->quiesce_scope_requests("sale"); });
+    worker.join();
+    check(foreign.error.code == flexUI::ApplicationServiceErrorCode::WrongThread);
+    const auto invalid = created.queue->quiesce_scope_requests("sale::action");
+    check_false(static_cast<bool>(invalid));
+    check(invalid.error.code == flexUI::ApplicationServiceErrorCode::InvalidRequest);
+    check_equal(created.queue->inspect_scope_leases("sale").total(), std::size_t{3});
+
+    check(controller.retire_scoped_event_handlers("sale"));
+    const auto quiesced = created.queue->quiesce_scope_requests("sale");
+    check(quiesced);
+    check_equal(quiesced.cancelled_published, std::size_t{2});
+    check_equal(quiesced.suppressed_in_flight, std::size_t{1});
+    const auto repeated = created.queue->quiesce_scope_requests("sale");
+    check(repeated);
+    check_equal(repeated.cancelled_published, std::size_t{0});
+    check_equal(repeated.suppressed_in_flight, std::size_t{0});
+    const auto sale = created.queue->inspect_scope_leases("sale");
+    check(sale.quiesced);
+    check_equal(sale.published, std::size_t{0});
+    check_equal(sale.in_flight, std::size_t{1});
+    check_equal(created.queue->inspect_scope_leases("sales").published, std::size_t{1});
+    check_equal(created.queue->statistics().current_pending, std::size_t{2});
+    check_equal(created.queue->statistics().cancelled, std::uint64_t{2});
+    check(dispatch_scope("sale")); // retired route cannot produce new command
+    check_equal(created.queue->statistics().current_pending, std::size_t{2});
+
+    auto sibling = created.queue->try_receive_request();
+    check(sibling);
+    if (!sibling) return;
+    check_equal(sibling.request->token.id, std::uint64_t{4});
+    check(created.queue->try_receive_request().status ==
+          flexUI::ApplicationServicePollStatus::Empty);
+    auto suppressed = created.queue->resolve_completion(completion(first.request->token));
+    check_false(static_cast<bool>(suppressed));
+    check_false(static_cast<bool>(suppressed.error));
+    check(suppressed.status == flexUI::ApplicationServicePollStatus::Suppressed);
+    check_false(suppressed.completion.has_value());
+    check_equal(created.queue->inspect_scope_leases("sale").total(), std::size_t{0});
+    auto delivered = created.queue->resolve_completion(completion(sibling.request->token));
+    check(delivered);
+    check_equal(delivered.completion->script_request_id, std::uint64_t{1003});
+    check_equal(created.queue->statistics().suppressed_completions, std::uint64_t{1});
+    check_equal(created.queue->statistics().current_pending, std::size_t{0});
+    check_equal(created.queue->statistics().completed, std::uint64_t{3});
+
+    // A new application generation must clear the scoped admission tombstone.
+    created.queue->reset_generation(31);
+    check_false(created.queue->inspect_scope_leases("sale").quiesced);
+    check(controller.unmount());
+    check(controller.load(std::make_unique<ScopedServiceModule>(), combined.program));
+    check(controller.mount());
+    check(dispatch_scope("sale"));
+    check_equal(created.queue->inspect_scope_leases("sale").published, std::size_t{1});
+  }
+
+  it("rejects new commands from a quiesced scope but preserves global commands") {
+    auto created = registered_queue(40);
+    check(created);
+    if (!created) return;
+    flexUI::ApplicationCommandEngine engine(*created.queue);
+    auto quiesced = created.queue->quiesce_scope_requests("sale");
+    check(quiesced);
+    check(created.queue->inspect_scope_leases("sale").quiesced);
+    auto global = engine.reserve(batch_with({command(9001)}));
+    check(global);
+    if (!global) return;
+    check_equal(created.queue->inspect_scope_leases("sale").total(), std::size_t{0});
+    global.prepared->publish();
+    auto queued = created.queue->try_receive_request();
+    check(queued);
+    if (!queued) return;
+    check_equal(queued.request->script_request_id, std::uint64_t{9001});
+    auto normal = created.queue->resolve_completion(completion(queued.request->token));
+    check(normal);
+    check_equal(normal.completion->script_request_id, std::uint64_t{9001});
+  }
+
   it("restricts request control and consumption to the owner thread") {
     auto created = registered_queue(10);
     check(created);
