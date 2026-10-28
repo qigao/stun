@@ -1151,10 +1151,17 @@ Box::inspect_subtree_borrowers(const Element *subtree_root) const noexcept {
     // dereference an already-retired raw UiElement pointer (ASan UAF).
     // Stage exactly one temporary owner-membership set, not another runtime
     // ownership registry. Allocation failure cannot change the live Box.
-    std::unordered_set<const Element *> owned_elements;
+    // Key by Node* (the actual type of Group::children()) and keep its
+    // verified Element* in the same temporary index. For children, address
+    // membership must precede RTTI/parent access: dynamic_cast on a stale
+    // Node* could read freed vtable memory. The Box's unique_ptr vector
+    // remains the ONLY lifetime owner; this index dies with inspection.
+    std::unordered_map<const flex::Node*, const Element*> owned_elements;
     owned_elements.reserve(elements_.size());
     for (const auto &owner : elements_) {
-      if (!owner || !owned_elements.insert(owner.get()).second) {
+      if (!owner ||
+          !owned_elements.emplace(static_cast<const flex::Node*>(owner.get()),
+                                  owner.get()).second) {
         result.error = BoxSubtreeBorrowErrorCode::InconsistentTree;
         return result;
       }
@@ -1296,12 +1303,15 @@ Box::inspect_subtree_borrowers(const Element *subtree_root) const noexcept {
         result.local_interaction_state = true;
 
       for (const auto *child : element->children()) {
-        const auto *owner = dynamic_cast<const Element *>(child);
-        if (!owner || owner->parent_elem() != element) {
+        const auto owned_child = owned_elements.find(child);
+        // Do NOT RTTI-cast or access parent on an address not owned by Box.
+        // A foreign or stale child remains an opaque Node pointer here.
+        if (owned_child == owned_elements.end() ||
+            owned_child->second->parent_elem() != element) {
           result.error = BoxSubtreeBorrowErrorCode::InconsistentTree;
           return result;
         }
-        pending.push_back(owner);
+        pending.push_back(owned_child->second);
       }
     }
     result.focused_descendant =

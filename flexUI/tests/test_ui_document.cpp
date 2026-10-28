@@ -2066,6 +2066,16 @@ spec("FlexUI M4b6f exact Box Element ownership membership") {
     const auto recovered = box.inspect_subtree_borrowers(container);
     check(static_cast<bool>(recovered));
     check_equal(recovered.box_owned_elements, std::size_t{1});
+
+    // A valid native sibling is resolved through the EXACT same temporary
+    // Node*/Element* membership map, including its parent pointer.
+    auto *box_owned_child = box.create("span", "container::owned");
+    container->append(box_owned_child);
+    const auto owned = box.inspect_subtree_borrowers(container);
+    check(static_cast<bool>(owned));
+    check_equal(owned.mounted_elements, std::size_t{2});
+    check_equal(owned.box_owned_elements, std::size_t{2});
+    check_equal(box.get_by_id("container::owned"), box_owned_child);
   }
 }
 

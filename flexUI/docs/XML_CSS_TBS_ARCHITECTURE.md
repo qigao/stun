@@ -907,3 +907,18 @@ The method never follows a potentially stale pointer, mutates a Widget,
 allocates or installs a second owner registry. Other Widget subclasses
 remain **unverified for cross-subtree pointers** until separately audited:
 this new evidence is a deletion blocker, NOT `unmount(scope)`.
+
+## 2026-10-28 M4b6j — validate child Node addresses before RTTI
+
+Group child links are Node*; a broken/dangling child link can be rejected
+without reading its vtable. The Box read-only owner preflight now stages
+one temporary `Node* -> Element*` map derived exclusively from its
+`unique_ptr<Element>` owner vector, authenticates the root/ancestor and
+every child address against that map, then reads the verified Element's
+parent. It never calls `dynamic_cast` on an unverified child or dereferences
+a stale child pointer. This is an ephemeral index, NOT a second runtime
+owner or a physical unmount transaction.
+
+The native foreign-child regression still tests refusal before mutation;
+it now also verifies that a valid Box-owned child is accepted by the
+same audited branch. #302 stays Draft and does not grant unmount.
