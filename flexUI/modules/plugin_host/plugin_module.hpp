@@ -59,9 +59,10 @@ private:
     ApplicationRequestToken token;
     std::uint64_t script_request_id = 0;
     IApplicationServiceCompletionSink *sink = nullptr;
+    std::shared_ptr<const ApplicationServiceCancellationLease> cancellation;
   };
 
-  PluginModule(NativePluginLibrary library, const flexui_plugin_api_v1 *api,
+  PluginModule(NativePluginLibrary library, const flexui_plugin_api_v2 *api,
                flexui_plugin_instance *instance, std::string plugin_id,
                std::string plugin_version,
                std::uint32_t required_host_minor,
@@ -70,17 +71,26 @@ private:
 
   static flexui_plugin_status FLEXUI_PLUGIN_CALL
   post_completion_callback(void *host_context,
-                           const flexui_plugin_completion_v1 *completion,
+                           const flexui_plugin_completion_v2 *completion,
                            flexui_plugin_error_buffer *error) noexcept;
-  flexui_plugin_status post_completion(const flexui_plugin_completion_v1 *completion,
+  flexui_plugin_status post_completion(const flexui_plugin_completion_v2 *completion,
                                        flexui_plugin_error_buffer *error) noexcept;
+  static flexui_plugin_status FLEXUI_PLUGIN_CALL
+  cancel_requested_callback(void *host_context, std::uint64_t token_id,
+                            std::uint64_t token_generation,
+                            std::uint32_t *out_requested,
+                            flexui_plugin_error_buffer *error) noexcept;
+  flexui_plugin_status cancel_requested(std::uint64_t token_id,
+                                        std::uint64_t token_generation,
+                                        std::uint32_t *out_requested,
+                                        flexui_plugin_error_buffer *error) noexcept;
   void destroy_created() noexcept;
   void abandon_live_library() noexcept;
 
   NativePluginLibrary library_;
-  const flexui_plugin_api_v1 *api_ = nullptr;
+  const flexui_plugin_api_v2 *api_ = nullptr;
   flexui_plugin_instance *instance_ = nullptr;
-  flexui_host_api_v1 host_api_{};
+  flexui_host_api_v2 host_api_{};
   std::string plugin_id_;
   std::string plugin_version_;
   std::uint32_t required_host_minor_ = 0;

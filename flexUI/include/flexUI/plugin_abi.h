@@ -19,9 +19,9 @@
 #endif
 #endif
 
-#define FLEXUI_PLUGIN_ABI_MAJOR UINT32_C(1)
+#define FLEXUI_PLUGIN_ABI_MAJOR UINT32_C(2)
 #define FLEXUI_PLUGIN_ABI_MINOR UINT32_C(0)
-#define FLEXUI_PLUGIN_ENTRY_SYMBOL_V1 "flexui_plugin_get_api_v1"
+#define FLEXUI_PLUGIN_ENTRY_SYMBOL_V2 "flexui_plugin_get_api_v2"
 #define FLEXUI_PLUGIN_TIMEOUT_INFINITE UINT64_MAX
 
 typedef uint32_t flexui_plugin_status;
@@ -68,35 +68,35 @@ typedef struct flexui_plugin_error_buffer {
   uint64_t reserved[4];
 } flexui_plugin_error_buffer;
 
-typedef struct flexui_plugin_operation_descriptor_v1 {
+typedef struct flexui_plugin_operation_descriptor_v2 {
   uint32_t struct_size;
   uint32_t reserved0;
   flexui_plugin_bytes_view name;
   uint64_t max_payload_bytes;
   uint64_t reserved[4];
-} flexui_plugin_operation_descriptor_v1;
+} flexui_plugin_operation_descriptor_v2;
 
-typedef struct flexui_plugin_service_descriptor_v1 {
+typedef struct flexui_plugin_service_descriptor_v2 {
   uint32_t struct_size;
   uint32_t operation_count;
   flexui_plugin_bytes_view capability;
-  const flexui_plugin_operation_descriptor_v1 *operations;
+  const flexui_plugin_operation_descriptor_v2 *operations;
   uint64_t reserved[4];
-} flexui_plugin_service_descriptor_v1;
+} flexui_plugin_service_descriptor_v2;
 
 /* Descriptor storage must remain valid until the plugin library is unloaded. */
-typedef struct flexui_plugin_descriptor_v1 {
+typedef struct flexui_plugin_descriptor_v2 {
   uint32_t struct_size;
   uint32_t required_host_minor;
   flexui_plugin_bytes_view plugin_id;
   flexui_plugin_bytes_view plugin_version;
   uint32_t service_count;
   uint32_t reserved0;
-  const flexui_plugin_service_descriptor_v1 *services;
+  const flexui_plugin_service_descriptor_v2 *services;
   uint64_t reserved[8];
-} flexui_plugin_descriptor_v1;
+} flexui_plugin_descriptor_v2;
 
-typedef struct flexui_plugin_request_v1 {
+typedef struct flexui_plugin_request_v2 {
   uint32_t struct_size;
   uint32_t reserved0;
   uint64_t token_id;
@@ -106,9 +106,9 @@ typedef struct flexui_plugin_request_v1 {
   flexui_plugin_bytes_view operation;
   flexui_plugin_bytes_view payload;
   uint64_t reserved[4];
-} flexui_plugin_request_v1;
+} flexui_plugin_request_v2;
 
-typedef struct flexui_plugin_completion_v1 {
+typedef struct flexui_plugin_completion_v2 {
   uint32_t struct_size;
   flexui_plugin_completion_status status;
   uint64_t token_id;
@@ -117,7 +117,7 @@ typedef struct flexui_plugin_completion_v1 {
   flexui_plugin_bytes_view error_code;
   flexui_plugin_bytes_view error_message;
   uint64_t reserved[4];
-} flexui_plugin_completion_v1;
+} flexui_plugin_completion_v2;
 
 typedef void flexui_plugin_instance;
 
@@ -127,62 +127,73 @@ typedef void flexui_plugin_instance;
  * the same token. All completion views are borrowed only for this call.
  */
 typedef flexui_plugin_status(FLEXUI_PLUGIN_CALL *
-                                flexui_plugin_post_completion_v1_fn)(
-    void *host_context, const flexui_plugin_completion_v1 *completion,
+                                flexui_plugin_post_completion_v2_fn)(
+    void *host_context, const flexui_plugin_completion_v2 *completion,
     flexui_plugin_error_buffer *error);
 
-typedef struct flexui_host_api_v1 {
+/* Exact-token, worker-side cooperative stop query. Query does not allocate,
+ * block on worker termination, or publish a terminal result. On OK, out is
+ * exactly 0 or 1. STALE means unknown/retired token. REJECTED means the
+ * request has no native cancellation lease; no v1 compatibility path exists.
+ */
+typedef flexui_plugin_status(FLEXUI_PLUGIN_CALL *
+                                flexui_plugin_cancel_requested_v2_fn)(
+    void *host_context, uint64_t token_id, uint64_t token_generation,
+    uint32_t *out_requested, flexui_plugin_error_buffer *error);
+
+typedef struct flexui_host_api_v2 {
   uint32_t struct_size;
   uint32_t abi_major;
   uint32_t abi_minor;
   uint32_t reserved0;
   void *host_context;
-  flexui_plugin_post_completion_v1_fn post_completion;
+  flexui_plugin_post_completion_v2_fn post_completion;
+  flexui_plugin_cancel_requested_v2_fn cancel_requested;
   uint64_t reserved[8];
-} flexui_host_api_v1;
+} flexui_host_api_v2;
 
-typedef flexui_plugin_status(FLEXUI_PLUGIN_CALL *flexui_plugin_create_v1_fn)(
-    const flexui_host_api_v1 *host, flexui_plugin_instance **out_instance,
+typedef flexui_plugin_status(FLEXUI_PLUGIN_CALL *flexui_plugin_create_v2_fn)(
+    const flexui_host_api_v2 *host, flexui_plugin_instance **out_instance,
     flexui_plugin_error_buffer *error);
-typedef flexui_plugin_status(FLEXUI_PLUGIN_CALL *flexui_plugin_start_v1_fn)(
+typedef flexui_plugin_status(FLEXUI_PLUGIN_CALL *flexui_plugin_start_v2_fn)(
     flexui_plugin_instance *instance, flexui_plugin_error_buffer *error);
 /* A successful submit means the plugin copied every request byte it retains. */
-typedef flexui_plugin_status(FLEXUI_PLUGIN_CALL *flexui_plugin_submit_v1_fn)(
-    flexui_plugin_instance *instance, const flexui_plugin_request_v1 *request,
+typedef flexui_plugin_status(FLEXUI_PLUGIN_CALL *flexui_plugin_submit_v2_fn)(
+    flexui_plugin_instance *instance, const flexui_plugin_request_v2 *request,
     flexui_plugin_error_buffer *error);
-typedef flexui_plugin_status(FLEXUI_PLUGIN_CALL *flexui_plugin_stop_v1_fn)(
+typedef flexui_plugin_status(FLEXUI_PLUGIN_CALL *flexui_plugin_stop_v2_fn)(
     flexui_plugin_instance *instance, flexui_plugin_error_buffer *error);
-typedef flexui_plugin_status(FLEXUI_PLUGIN_CALL *flexui_plugin_join_v1_fn)(
+typedef flexui_plugin_status(FLEXUI_PLUGIN_CALL *flexui_plugin_join_v2_fn)(
     flexui_plugin_instance *instance, uint64_t timeout_ms,
     flexui_plugin_error_buffer *error);
 /* destroy is no-fail and is valid only after join succeeds or create unwind. */
-typedef void(FLEXUI_PLUGIN_CALL *flexui_plugin_destroy_v1_fn)(
+typedef void(FLEXUI_PLUGIN_CALL *flexui_plugin_destroy_v2_fn)(
     flexui_plugin_instance *instance);
 
-typedef struct flexui_plugin_api_v1 {
+typedef struct flexui_plugin_api_v2 {
   uint32_t struct_size;
   uint32_t abi_major;
   uint32_t abi_minor;
   uint32_t reserved0;
-  const flexui_plugin_descriptor_v1 *descriptor;
-  flexui_plugin_create_v1_fn create;
-  flexui_plugin_start_v1_fn start;
-  flexui_plugin_submit_v1_fn submit;
-  flexui_plugin_stop_v1_fn stop;
-  flexui_plugin_join_v1_fn join;
-  flexui_plugin_destroy_v1_fn destroy;
+  const flexui_plugin_descriptor_v2 *descriptor;
+  flexui_plugin_create_v2_fn create;
+  flexui_plugin_start_v2_fn start;
+  flexui_plugin_submit_v2_fn submit;
+  flexui_plugin_stop_v2_fn stop;
+  flexui_plugin_join_v2_fn join;
+  flexui_plugin_destroy_v2_fn destroy;
   uint64_t reserved[8];
-} flexui_plugin_api_v1;
+} flexui_plugin_api_v2;
 
-typedef const flexui_plugin_api_v1 *(FLEXUI_PLUGIN_CALL *
-                                         flexui_plugin_get_api_v1_fn)(void);
+typedef const flexui_plugin_api_v2 *(FLEXUI_PLUGIN_CALL *
+                                         flexui_plugin_get_api_v2_fn)(void);
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-FLEXUI_PLUGIN_EXPORT const flexui_plugin_api_v1 *FLEXUI_PLUGIN_CALL
-flexui_plugin_get_api_v1(void);
+FLEXUI_PLUGIN_EXPORT const flexui_plugin_api_v2 *FLEXUI_PLUGIN_CALL
+flexui_plugin_get_api_v2(void);
 
 #ifdef __cplusplus
 }

@@ -66,6 +66,35 @@ endforeach()
 # This exact production Controller/service boundary now includes the registry,
 # bounded MPSC mailbox, and owner-thread dispatcher; all run with ASan/UBSan
 # and a separate LSan build, plus Windows/macOS headless native CTest.
+# C11 PluginSDK remains installable without plugin runtime dependencies.
+# Require the ONE current ABI v2 header, its exact entry-point spelling and
+# the actual PluginModule bridge source to compile on all native CI hosts.
+add_executable(test_plugin_abi "${STUN_ROOT}/flexUI/tests/test_plugin_abi.c")
+target_link_libraries(test_plugin_abi PRIVATE FlexUI::PluginSDK Salts::TinyTest)
+set_target_properties(test_plugin_abi PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON)
+add_test(NAME test_plugin_abi COMMAND test_plugin_abi)
+set_tests_properties(test_plugin_abi PROPERTIES TIMEOUT 120)
+add_dependencies(stun_xml_runtime_qualification test_plugin_abi)
+
+add_library(stun_plugin_module_v2_compile OBJECT
+    "${STUN_ROOT}/flexUI/modules/plugin_host/plugin_module.cpp")
+target_link_libraries(stun_plugin_module_v2_compile PRIVATE
+    FlexUI::Services FlexUI::PluginSDK Salts::Core)
+target_include_directories(stun_plugin_module_v2_compile PRIVATE
+    "${STUN_ROOT}/flexUI/modules/plugin_host")
+# Match the real PluginHost's Windows definition set; unlike the actual
+# production target, this source-only object gate has no inherited defines.
+if(WIN32)
+  target_compile_definitions(stun_plugin_module_v2_compile PRIVATE
+      NOMINMAX WIN32_LEAN_AND_MEAN)
+endif()
+add_dependencies(stun_xml_runtime_qualification stun_plugin_module_v2_compile)
+
+add_library(stun_plugin_v2_fixture_compile OBJECT
+    "${STUN_ROOT}/flexUI/tests/plugin_test_echo.cpp")
+target_link_libraries(stun_plugin_v2_fixture_compile PRIVATE FlexUI::PluginSDK)
+add_dependencies(stun_xml_runtime_qualification stun_plugin_v2_fixture_compile)
+
 # Exercise the real private service queue against published FlexUI providers.
 target_include_directories(test_application_service_requests PRIVATE
     "${STUN_ROOT}/flexUI/modules/controller")

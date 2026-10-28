@@ -186,7 +186,7 @@ std::string copy_completion_view(flexui_plugin_bytes_view view) {
                      static_cast<std::size_t>(view.size));
 }
 
-bool completion_strings_fit(const flexui_plugin_completion_v1 &completion,
+bool completion_strings_fit(const flexui_plugin_completion_v2 &completion,
                             std::size_t limit) noexcept {
   const auto bounded_limit = static_cast<std::uint64_t>(limit);
   if (completion.payload.size > bounded_limit ||
@@ -197,7 +197,7 @@ bool completion_strings_fit(const flexui_plugin_completion_v1 &completion,
   return completion.error_message.size <= bounded_limit - first_total;
 }
 
-bool valid_completion_shape(const flexui_plugin_completion_v1 &completion) noexcept {
+bool valid_completion_shape(const flexui_plugin_completion_v2 &completion) noexcept {
   switch (completion.status) {
   case FLEXUI_PLUGIN_COMPLETION_SUCCEEDED:
     return completion.error_code.size == 0 && completion.error_message.size == 0;
@@ -213,7 +213,7 @@ bool valid_completion_shape(const flexui_plugin_completion_v1 &completion) noexc
 } // namespace
 
 PluginModule::PluginModule(NativePluginLibrary library,
-                           const flexui_plugin_api_v1 *api,
+                           const flexui_plugin_api_v2 *api,
                            flexui_plugin_instance *instance,
                            std::string plugin_id, std::string plugin_version,
                            std::uint32_t required_host_minor,
@@ -230,6 +230,7 @@ PluginModule::PluginModule(NativePluginLibrary library,
   host_api_.abi_minor = FLEXUI_PLUGIN_ABI_MINOR;
   host_api_.host_context = this;
   host_api_.post_completion = &PluginModule::post_completion_callback;
+  host_api_.cancel_requested = &PluginModule::cancel_requested_callback;
   statistics_.plugin_count = 1;
 }
 
@@ -254,15 +255,15 @@ PluginModule::load(const std::filesystem::path &absolute_path,
     }
 
     void *entry_address =
-        library.symbol(FLEXUI_PLUGIN_ENTRY_SYMBOL_V1, message);
+        library.symbol(FLEXUI_PLUGIN_ENTRY_SYMBOL_V2, message);
     if (entry_address == nullptr) {
       return {{}, host_error(PluginHostErrorCode::EntryPointMissing, "resolve",
                              library.path(), std::move(message))};
     }
-    auto entry = reinterpret_cast<flexui_plugin_get_api_v1_fn>(entry_address);
-    const flexui_plugin_api_v1 *api = entry();
+    auto entry = reinterpret_cast<flexui_plugin_get_api_v2_fn>(entry_address);
+    const flexui_plugin_api_v2 *api = entry();
     if (api == nullptr ||
-        api->struct_size < field_end(&flexui_plugin_api_v1::destroy) ||
+        api->struct_size < field_end(&flexui_plugin_api_v2::destroy) ||
         api->abi_major != FLEXUI_PLUGIN_ABI_MAJOR ||
         api->descriptor == nullptr || api->create == nullptr ||
         api->start == nullptr || api->submit == nullptr || api->stop == nullptr ||
@@ -274,7 +275,7 @@ PluginModule::load(const std::filesystem::path &absolute_path,
 
     const auto *descriptor = api->descriptor;
     if (descriptor->struct_size <
-            field_end(&flexui_plugin_descriptor_v1::services) ||
+            field_end(&flexui_plugin_descriptor_v2::services) ||
         descriptor->required_host_minor > FLEXUI_PLUGIN_ABI_MINOR ||
         descriptor->service_count == 0 ||
         descriptor->service_count > limits.registry.max_services ||
@@ -307,7 +308,7 @@ PluginModule::load(const std::filesystem::path &absolute_path,
          service_index < descriptor->service_count; ++service_index) {
       const auto &source_service = descriptor->services[service_index];
       if (source_service.struct_size <
-              field_end(&flexui_plugin_service_descriptor_v1::operations) ||
+              field_end(&flexui_plugin_service_descriptor_v2::operations) ||
           source_service.operation_count == 0 ||
           source_service.operation_count >
               limits.registry.max_operations_per_service ||
@@ -331,7 +332,7 @@ PluginModule::load(const std::filesystem::path &absolute_path,
            operation_index < source_service.operation_count; ++operation_index) {
         const auto &source_operation = source_service.operations[operation_index];
         if (source_operation.struct_size <
-                field_end(&flexui_plugin_operation_descriptor_v1::max_payload_bytes) ||
+                field_end(&flexui_plugin_operation_descriptor_v2::max_payload_bytes) ||
             source_operation.max_payload_bytes == 0 ||
             source_operation.max_payload_bytes > limits.registry.max_payload_bytes ||
             source_operation.max_payload_bytes >
@@ -437,6 +438,7 @@ ApplicationServiceSubmitResult PluginModule::try_submit(
     free_slot->token = request.token;
     free_slot->script_request_id = request.script_request_id;
     free_slot->sink = &completion_sink;
+    free_slot->cancellation = request.cancellation;
     ++active_submit_calls_;
     ++statistics_.submitted;
     ++statistics_.current_in_flight;
@@ -445,7 +447,7 @@ ApplicationServiceSubmitResult PluginModule::try_submit(
                  statistics_.current_in_flight);
   }
 
-  flexui_plugin_request_v1 abi_request{};
+  flexui_plugin_request_v2 abi_request{};
   abi_request.struct_size = sizeof(abi_request);
   abi_request.token_id = request.token.id;
   abi_request.token_generation = request.token.generation;
@@ -666,7 +668,7 @@ bool PluginModule::stopped() const noexcept {
 }
 
 flexui_plugin_status FLEXUI_PLUGIN_CALL PluginModule::post_completion_callback(
-    void *host_context, const flexui_plugin_completion_v1 *completion,
+    void *host_context, const flexui_plugin_completion_v2 *completion,
     flexui_plugin_error_buffer *error) noexcept {
   if (host_context == nullptr) {
     write_abi_error(error, "host context is required");
@@ -676,13 +678,66 @@ flexui_plugin_status FLEXUI_PLUGIN_CALL PluginModule::post_completion_callback(
                                                                     error);
 }
 
+flexui_plugin_status FLEXUI_PLUGIN_CALL
+PluginModule::cancel_requested_callback(void *host_context,
+                                        std::uint64_t token_id,
+                                        std::uint64_t token_generation,
+                                        std::uint32_t *out_requested,
+                                        flexui_plugin_error_buffer *error) noexcept {
+  if (host_context == nullptr) return FLEXUI_PLUGIN_STATUS_INVALID_ARGUMENT;
+  return static_cast<PluginModule *>(host_context)->cancel_requested(
+      token_id, token_generation, out_requested, error);
+}
+
+flexui_plugin_status PluginModule::cancel_requested(
+    std::uint64_t token_id, std::uint64_t token_generation,
+    std::uint32_t *out_requested,
+    flexui_plugin_error_buffer *error) noexcept {
+  if (out_requested == nullptr || token_id == 0 || token_generation == 0) {
+    write_abi_error(error, "cancel query requires an exact nonzero token and output");
+    return FLEXUI_PLUGIN_STATUS_INVALID_ARGUMENT;
+  }
+  *out_requested = 0;
+  try {
+    std::shared_ptr<const ApplicationServiceCancellationLease> lease;
+    {
+      std::lock_guard<std::mutex> lock(slots_mutex_);
+      const auto found = std::find_if(slots_.begin(), slots_.end(),
+          [token_id, token_generation](const Slot &slot) {
+            return slot.state != SlotState::Free &&
+                   slot.token.id == token_id &&
+                   slot.token.generation == token_generation;
+          });
+      if (found == slots_.end()) {
+        write_abi_error(error, "cancel query token is stale or unknown");
+        return FLEXUI_PLUGIN_STATUS_STALE;
+      }
+      if (found->state == SlotState::Posting) {
+        write_abi_error(error, "cancel query races terminal publication");
+        return FLEXUI_PLUGIN_STATUS_BUSY;
+      }
+      lease = found->cancellation;
+    }
+    if (!lease || lease->token().id != token_id ||
+        lease->token().generation != token_generation) {
+      write_abi_error(error, "request has no exact-token cancellation lease");
+      return FLEXUI_PLUGIN_STATUS_REJECTED;
+    }
+    *out_requested = lease->requested() ? 1u : 0u;
+    return FLEXUI_PLUGIN_STATUS_OK;
+  } catch (...) {
+    write_abi_error(error, "cancel query encountered an unexpected error");
+    return FLEXUI_PLUGIN_STATUS_INTERNAL;
+  }
+}
+
 flexui_plugin_status PluginModule::post_completion(
-    const flexui_plugin_completion_v1 *completion,
+    const flexui_plugin_completion_v2 *completion,
     flexui_plugin_error_buffer *error) noexcept {
   try {
     if (completion == nullptr ||
         completion->struct_size <
-            field_end(&flexui_plugin_completion_v1::error_message) ||
+            field_end(&flexui_plugin_completion_v2::error_message) ||
         completion->token_id == 0 || completion->token_generation == 0 ||
         !valid_completion_shape(*completion) ||
         !valid_completion_view(completion->payload,

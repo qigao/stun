@@ -3,13 +3,16 @@
 #include <stddef.h>
 #include <stdio.h>
 
-_Static_assert(FLEXUI_PLUGIN_ABI_MAJOR == 1, "the consumer uses ABI v1");
+_Static_assert(FLEXUI_PLUGIN_ABI_MAJOR == 2, "the consumer uses ABI v2");
 _Static_assert(sizeof(flexui_plugin_status) == sizeof(uint32_t),
                "plugin status is a 32-bit ABI value");
-_Static_assert(offsetof(flexui_host_api_v1, struct_size) == 0,
+_Static_assert(offsetof(flexui_host_api_v2, struct_size) == 0,
                "host API begins with its struct size");
-_Static_assert(offsetof(flexui_plugin_api_v1, struct_size) == 0,
+_Static_assert(offsetof(flexui_plugin_api_v2, struct_size) == 0,
                "plugin API begins with its struct size");
+_Static_assert(offsetof(flexui_host_api_v2, cancel_requested) >
+                   offsetof(flexui_host_api_v2, post_completion),
+               "plugin v2 host publishes an exact-token stop query");
 
 int main(void) {
   puts("PluginSDK installed C header consumer passed");
