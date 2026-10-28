@@ -855,3 +855,19 @@ throwing callback still present, repeated attempts cannot clear that
 count or publish extra projections. Once the callback is removed,
 a successful update clears only the pending owners, while the newly
 published projection continues to be reported as retained.
+
+## 2026-10-28 M4b6c SelectWidget native frame regression fix
+
+Cross-platform `test_ui_document` failed its final Select audit because the
+test opened and closed the dropdown without calling `Widget::update`.
+`set_expanded(true)` only establishes the target height: the actual
+`dropdown_height_` stays zero until `update_dropdown_animation` runs.
+Therefore an immediate close with no frame has no retained animation.
+
+The test now advances a real native Widget frame while open, closes with
+a nonzero current dropdown height, verifies the borrower remains live until
+a second frame completes the collapse, then explicitly verifies that an
+open/close pair with zero intervening frames does NOT falsely report active
+borrowers. The production SelectWidget state machine and its conservative
+`inspect_local_borrowers()` contract remain unchanged. This fixes the
+test's faulty timing assumption without weakening the physical unmount gate.

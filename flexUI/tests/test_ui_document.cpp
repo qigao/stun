@@ -2128,6 +2128,11 @@ spec("FlexUI M4b6c built-in Widget owner audits") {
     check_equal(accordion.inspect_local_borrowers().native_callback_owners, std::size_t{1});
 
     select.set_expanded(true);
+    // A pending open target alone is live, but no dropdown height is
+    // retained until the native Widget update actually advances a frame.
+    check(select.inspect_local_borrowers().interaction_or_callback_active);
+    flexUI::Element select_host;
+    select.update(16.0f, select_host);
     dropdown.open();
     flexUI::Element foreign_page;
     tabs.add_tab("First", "first", &foreign_page);
@@ -2143,8 +2148,20 @@ spec("FlexUI M4b6c built-in Widget owner audits") {
     dropdown.close();
     check_false(dropdown.inspect_local_borrowers().interaction_or_callback_active);
     select.set_expanded(false);
-    // An overlay can still retain animation height after it closes.
+    // A REAL opening frame has already produced nonzero current height.
+    // Closing changes only the target; the still-unwinding animation is
+    // a live Widget-local borrower even though the overlay is closed.
+    check_false(select.is_expanded());
     check(select.inspect_local_borrowers().interaction_or_callback_active);
+    select.update(200.0f, select_host);
+    check_false(select.inspect_local_borrowers().interaction_or_callback_active);
+
+    // Separate zero-frame case: opening and closing synchronously without
+    // ANY update never creates retained animation height. Do not invent a
+    // worker/animation borrower when both heights are genuinely zero.
+    select.set_expanded(true);
+    select.set_expanded(false);
+    check_false(select.inspect_local_borrowers().interaction_or_callback_active);
   }
 
   it("reports only live scoped native Widget ownership in the one Box") {
