@@ -3,7 +3,27 @@
 状态：架构决策已采用，实施与验收按下列工作项推进
 日期：2026-08-31
 
-## 2026-10-28 P4.4 M3d M0 服务端取消前置 Native 门禁（Draft，Issue #292）
+## 2026-10-28 P4.4 M3d M1 原生服务请求只读协作取消租约（Draft）
+
+在生产 `ApplicationServiceRequest` 中增加由唯一
+`ApplicationServiceRequestQueue` 创建的 exact-token/generation
+`ApplicationServiceCancellationLease`（由服务端只读共享持有）；
+`requested()` 跨线程原子读取，只有队列拥有信号写权限。
+所有租约分配在 Reservation 私有 staging 内完成，失败不修改活动 Slot。
+InFlight 作用域静默退出只写停止请求标志而**不释放 token**、
+**不制造 Cancelled 完成消息**。整代 reset/close 同样对仍存活租约
+发出协作停止信号；正常完成并不伪装成取消。
+
+Native C++ Endpoint 可以自主观察该标志、停止自己持有的工作后，
+用原始 token 经同一 ApplicationCompletionMailbox 发布真实终态，
+再由 Owner 消费并释放请求表槽位。测试验证异步端点、兄弟作用域、
+实际 Cancelled/Succeeded、越代关闭、跨线程可见性和所有权。
+这只是**原生 C++ 服务端的协作信号传输契约**；
+`flexui_plugin_api_v1` 尚不传输 lease，插件不能据此宣称取消支持，
+插件 ABI 变更与全部服务资源/Join 生命周期仍在 Issue #292。
+不允许用本地 Suppressed 状态代替真实 worker 完成。
+
+## 2026-10-28 P4.4 M3d M0 服务端取消前置 Native 门禁（已合并 PR #293）
 
 将已有真实生产 `ApplicationServiceRegistry`、
 `ApplicationCompletionMailbox` 与 `ApplicationServiceDispatcher` 的
@@ -19,7 +39,7 @@ InFlight 请求仍需真实端点的精确 token 协作取消与终态证明；
 队列 `Suppressed` 作为 worker 已停止的证据。契约单独记录在 #292，
 `unmount(scope)` 继续由 #275 跟踪。
 
-## 2026-10-28 P4.4 M3c 应用层安全准入门禁（Draft PR #291，基于已合并 #290）
+## 2026-10-28 P4.4 M3c 应用层安全准入门禁（已合并 PR #291）
 
 单个 DesktopApplication 可调用
 `quiesce_retired_scoped_service_requests(scope)`，但**只能在**
