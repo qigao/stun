@@ -1,0 +1,253 @@
+name: Stun native GUI screenshot E2E
+
+# One Linux software-OpenGL runner only for actual desktop-editor changes.
+# This is a genuine visible-window test, NOT hidden --smoke or Tk fixtures.
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled]
+    paths:
+      - '.github/workflows/gui-native-e2e.yml'
+      - '.github/scripts/gui_native_e2e.py'
+      - '.github/scripts/gui_runtime/**'
+      - 'flexUI/examples/desktop_editor/**'
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: read
+  packages: read
+
+concurrency:
+  group: stun-real-gui-${github.event.pull_request.number || github.ref}
+  cancel-in-progress: true
+
+jobs:
+  screenshot:
+    name: GUI visible screenshot / Linux X11
+    if: github.event.action != 'labeled' || github.event.label.name == 'ci/full'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 70
+    env:
+      GH_TOKEN: ${github.token}
+      GITHUB_TOKEN: ${github.token}
+      LIBGL_ALWAYS_SOFTWARE: '1'
+      GALLIUM_DRIVER: llvmpipe
+      VCPKG_TARGET_TRIPLET: x64-linux
+      VCPKG_DISABLE_METRICS: '1'
+    steps:
+      - name: Resolve immutable Actions source HEAD
+        id: source
+        shell: bash
+        run: |
+          set -euo pipefail
+          sha="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" --jq '.head_sha')"
+          [[ "$sha" =~ ^[0-9a-f]{40}$ ]]
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@v4
+        with:
+          ref: ${steps.source.outputs.sha}
+          persist-credentials: false
+
+      - name: Assert immutable checkout
+        run: test "$(git rev-parse HEAD)" = "${steps.source.outputs.sha}"
+
+      - name: Use verified isolated ccache for the native GUI
+        uses: ./.github/actions/setup-ccache
+        with:
+          profile: native-gui-linux
+          source_sha: ${steps.source.outputs.sha}
+
+      - name: Install native desktop driver and Python screenshot prerequisites
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            cmake ninja-build g++ gcc pkg-config unzip xz-utils \
+            libgl1-mesa-dev libegl1-mesa-dev libfreetype-dev libstb-dev \
+            xvfb xauth python3-xlib python3-pil tesseract-ocr
+
+      - name: Resolve pinned and current published native SDK versions
+        id: releases
+        shell: bash
+        run: |
+          set -euo pipefail
+          choose_tag() {
+            local repo="$1" pattern="$2"
+            gh api "repos/$repo/releases?per_page=30" --jq '.[] | select(.draft == false) | [.tag_name,.published_at] | @tsv' \
+              | awk -F '\t' -v pat="$pattern" '$1 ~ pat {print $0}' \
+              | sort -t "$(printf '\t')" -k2,2r | head -1 | cut -f1
+          }
+          salts="$(choose_tag qigao/salts '^v2[.]3[.]0(-|$)')"
+          utils="$(choose_tag qigao/salts-utils '^v4[.]3[.]0(-|$)')"
+          chttp="$(choose_tag qigao/chttp '^v2[.]1[.]0(-|$)')"
+          test -n "$salts" && test -n "$utils" && test -n "$chttp"
+          echo "salts=$salts" >> "$GITHUB_OUTPUT"
+          echo "utils=$utils" >> "$GITHUB_OUTPUT"
+          echo "chttp=$chttp" >> "$GITHUB_OUTPUT"
+          # Stable released TurboScript Host ABI v1; never guess a master build.
+          echo "turboscript=v3.0.10" >> "$GITHUB_OUTPUT"
+
+      - name: Download and SHA256-verify official native SDK archives via curl
+        shell: bash
+        env:
+          SALTS_RELEASE: ${steps.releases.outputs.salts}
+          UTILS_RELEASE: ${steps.releases.outputs.utils}
+          CHTTP_RELEASE: ${steps.releases.outputs.chttp}
+          TURBOSCRIPT_RELEASE: ${steps.releases.outputs.turboscript}
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/stun-gui/packages"
+          fetch_release_asset() {
+            local repo="$1" tag="$2" asset="$3" destination="$4" expected actual
+            expected="$(gh api "repos/$repo/releases/tags/$tag" \
+              | jq -er --arg name "$asset" \
+                  '[.assets[] | select(.name==$name) | .digest] |
+                    if length==1 then .[0] else error("missing unique SDK digest") end')"
+            [[ "$expected" =~ ^sha256:[0-9a-f]{64}$ ]]
+            curl --fail --silent --show-error --location --retry 3 \
+              --proto '=https' --proto-redir '=https' \
+              --connect-timeout 15 --max-time 300 \
+              "https://github.com/$repo/releases/download/$tag/$asset" \
+              --output "$destination.part"
+            actual="$(sha256sum "$destination.part" | awk '{print $1}')"
+            test "$actual" = "${expected#sha256:}"
+            mv "$destination.part" "$destination"
+          }
+          salted="${SALTS_RELEASE#v}"
+          utilv="${UTILS_RELEASE#v}"
+          chttpv="${CHTTP_RELEASE#v}"
+          turboscriptv="${TURBOSCRIPT_RELEASE#v}"
+          fetch_release_asset qigao/salts "$SALTS_RELEASE" "Salts.Native.$salted.nupkg" \
+            "$RUNNER_TEMP/stun-gui/packages/salts.nupkg"
+          fetch_release_asset qigao/salts-utils "$UTILS_RELEASE" "SaltsUtils.Native.$utilv.nupkg" \
+            "$RUNNER_TEMP/stun-gui/packages/utils.nupkg"
+          fetch_release_asset qigao/chttp "$CHTTP_RELEASE" "CHttp.Native.$chttpv.nupkg" \
+            "$RUNNER_TEMP/stun-gui/packages/chttp.nupkg"
+          fetch_release_asset qigao/TurboScript "$TURBOSCRIPT_RELEASE" "TurboScript.Native.$turboscriptv.nupkg" \
+            "$RUNNER_TEMP/stun-gui/packages/turboscript.nupkg"
+          for package in salts utils chttp turboscript; do
+            unzip -q "$RUNNER_TEMP/stun-gui/packages/$package.nupkg" \
+              -d "$RUNNER_TEMP/stun-gui/$package"
+            test -d "$RUNNER_TEMP/stun-gui/$package/sdk/linux-x64"
+          done
+          echo "SALTS_ROOT=$RUNNER_TEMP/stun-gui/salts/sdk/linux-x64" >> "$GITHUB_ENV"
+          echo "SALTS_UTILS_ROOT=$RUNNER_TEMP/stun-gui/utils/sdk/linux-x64" >> "$GITHUB_ENV"
+          echo "CHTTP_ROOT=$RUNNER_TEMP/stun-gui/chttp/sdk/linux-x64" >> "$GITHUB_ENV"
+          echo "TURBOSCRIPT_ROOT=$RUNNER_TEMP/stun-gui/turboscript/sdk/linux-x64" >> "$GITHUB_ENV"
+
+      - name: Checkout pinned vcpkg baseline
+        uses: actions/checkout@v4
+        with:
+          repository: microsoft/vcpkg
+          ref: b1b19307e2d2ec1eefbdb7ea069de7d4bcd31f01
+          path: .ci/vcpkg
+          persist-credentials: false
+
+      - name: Restore cached native third-party ports
+        uses: actions/cache@v4
+        with:
+          path: ${runner.temp}/stun-gui-vcpkg-cache
+          key: stun-gui-vcpkg-v1-linux-x64-b1b19307
+
+      - name: Build pinned real GLFW / OpenGL / CSS dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "VCPKG_DEFAULT_BINARY_CACHE=$RUNNER_TEMP/stun-gui-vcpkg-cache" >> "$GITHUB_ENV"
+          mkdir -p "$RUNNER_TEMP/stun-gui-vcpkg-cache"
+          .ci/vcpkg/bootstrap-vcpkg.sh -disableMetrics
+          .ci/vcpkg/vcpkg install --classic --triplet x64-linux \
+            nlohmann-json pugixml freetype stb zlib glfw3 glad plutosvg
+
+      - name: Cache actual Lexbor / Box2D / Tree-sitter source builds
+        id: xml_deps
+        uses: actions/cache@v4
+        with:
+          path: ${runner.temp}/stun-gui-xml-deps
+          key: stun-gui-xml-v1-linux-x64-${hashFiles('flexUI/tests/xml-runtime-deps/CMakeLists.txt')}
+
+      - name: Build canonical XML source dependencies when needed
+        if: steps.xml_deps.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          cmake -S flexUI/tests/xml-runtime-deps -B build/stun-gui-xml-deps -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_LIBDIR=lib \
+            -DCMAKE_TOOLCHAIN_FILE="$GITHUB_WORKSPACE/.ci/vcpkg/scripts/buildsystems/vcpkg.cmake" \
+            -DVCPKG_TARGET_TRIPLET=x64-linux -DVCPKG_MANIFEST_MODE=OFF \
+            -DCMAKE_INSTALL_PREFIX="$RUNNER_TEMP/stun-gui-xml-deps"
+          cmake --build build/stun-gui-xml-deps --parallel 2
+          cmake --install build/stun-gui-xml-deps
+
+      - uses: actions/checkout@v4
+        with:
+          repository: skvadrik/re2c
+          ref: '4.5.1'
+          path: .ci/re2c
+          persist-credentials: false
+
+      - name: Build exact native re2c parser generator
+        shell: bash
+        run: |
+          set -euo pipefail
+          cmake -S .ci/re2c -B build/stun-gui-re2c -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release -DRE2C_BUILD_RE2D=OFF \
+            -DRE2C_BUILD_RE2GO=OFF -DRE2C_BUILD_RE2HS=OFF
+          cmake --build build/stun-gui-re2c --target re2c --parallel 2
+          re2c_path="$(find build/stun-gui-re2c -type f -name re2c -print -quit)"
+          test -x "$re2c_path"
+          echo "STUN_GUI_RE2C=$GITHUB_WORKSPACE/$re2c_path" >> "$GITHUB_ENV"
+
+      - name: Configure actual Stun FlexUI Desktop Editor GPU application
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f "$TURBOSCRIPT_ROOT/lib/cmake/TurboScript/TurboScriptConfig.cmake"
+          cmake -S .github/scripts/gui_runtime -B build/stun-gui -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_TOOLCHAIN_FILE="$GITHUB_WORKSPACE/.ci/vcpkg/scripts/buildsystems/vcpkg.cmake" \
+            -DVCPKG_TARGET_TRIPLET=x64-linux -DVCPKG_MANIFEST_MODE=OFF \
+            "-DCMAKE_PREFIX_PATH=$SALTS_ROOT;$SALTS_UTILS_ROOT;$CHTTP_ROOT;$TURBOSCRIPT_ROOT;$RUNNER_TEMP/stun-gui-xml-deps" \
+            -DRE2C_EXECUTABLE="$STUN_GUI_RE2C" \
+            -DSTB_INCLUDE_DIRS="$GITHUB_WORKSPACE/.ci/vcpkg/installed/x64-linux/include"
+
+      - name: Build the actual production GUI and document service plugin
+        shell: bash
+        run: |
+          set -euo pipefail
+          cmake --build build/stun-gui --target flexui_desktop_editor --parallel 2
+          test -x build/stun-gui/bin/flexui_desktop_editor
+          test -f build/stun-gui/bin/desktop_editor_assets/editor.xml
+          test -f build/stun-gui/bin/desktop_editor_assets/editor.css
+          test -f build/stun-gui/bin/desktop_editor_assets/editor.tbs
+
+      - name: Capture actual Stun GUI window and real mouse Save interaction
+        shell: bash
+        run: |
+          set -euo pipefail
+          export LD_LIBRARY_PATH="$SALTS_ROOT/lib:$SALTS_UTILS_ROOT/lib:$CHTTP_ROOT/lib:$TURBOSCRIPT_ROOT/lib:${LD_LIBRARY_PATH:-}"
+          xvfb-run -a -s '-screen 0 1280x900x24 -nolisten tcp' \
+            /usr/bin/python3 .github/scripts/gui_native_e2e.py \
+              --exe build/stun-gui/bin/flexui_desktop_editor \
+              --source-sha "${steps.source.outputs.sha}" \
+              --out build/stun-gui/gui-e2e
+
+      - name: Preserve exact-head actual GUI screenshot evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: stun-visible-gui-${steps.source.outputs.sha}
+          retention-days: 3
+          if-no-files-found: warn
+          path: |
+            build/stun-gui/gui-e2e/*.png
+            build/stun-gui/gui-e2e/evidence.json
+            build/stun-gui/gui-e2e/application.log
+            build/stun-gui/CMakeFiles/CMakeConfigureLog.yaml
+
+      - name: Report real compiler cache statistics
+        if: always()
+        shell: bash
+        run: bash .github/scripts/report-ccache.sh native-gui-linux

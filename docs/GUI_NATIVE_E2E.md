@@ -77,3 +77,28 @@ An uncertain OCR result is a failure, not an automatic pass.
 
 Next: integrate the **real Stun binary** with this script in a GPU-enabled
 build workflow, without adding a GitHub App, Ruleset or redundant CI matrix.
+
+
+## M1 native GUI build / actual-screen CI
+
+The path-scoped workflow .github/workflows/gui-native-e2e.yml now targets
+the real production flexui_desktop_editor through the minimal
+.github/scripts/gui_runtime CMake composition (same repository-owned
+production sources). It downloads SHA256-verified published native SDK
+archives via curl, restores a pinned vcpkg compiler/dependency baseline,
+uses verified ccache, builds the real OpenGL/GLFW GUI, then runs the
+Python screenshot/XTest command above under Mesa llvmpipe/Xvfb.
+
+The exact job name is "GUI visible screenshot / Linux X11", selected
+by the trusted exact-head acceptance matrix for changes to the desktop
+editor, the script or GUI build workflow. A CI success requires that
+the actual window opened, rendered blue Save, reacted to mouse input and
+closed correctly. Native source/UI tests are not replaced.
+
+The workflow is intentionally one Linux GPU-software window runner,
+not a Windows/macOS matrix and not a new HTTP provider. Initial rollout
+is strict: if the installed TurboScript/gCanvas dependencies or real
+GUI are unavailable, the job must fail and remain Draft rather than
+substitute hidden --smoke, fake Tk pixels or static XML assertions.
+Screenshot artifacts are retained for 3 days; negative cases must
+retain the failure reason even when the app failed to open a window.

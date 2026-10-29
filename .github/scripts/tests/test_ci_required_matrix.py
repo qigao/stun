@@ -17,6 +17,21 @@ def matrix(*changed):
 
 
 class RequirementTests(unittest.TestCase):
+    def test_real_gui_gate_requires_native_window_job(self):
+        for path in (
+            "flexUI/examples/desktop_editor/editor.xml",
+            ".github/scripts/gui_native_e2e.py",
+            ".github/scripts/gui_runtime/CMakeLists.txt",
+            ".github/workflows/gui-native-e2e.yml",
+        ):
+            with self.subTest(path=path):
+                result = matrix(path)
+                self.assertIn(".github/workflows/gui-native-e2e.yml", result)
+                self.assertEqual(
+                    result[".github/workflows/gui-native-e2e.yml"],
+                    ["GUI visible screenshot / Linux X11"])
+                self.assertIn(policy.RUNTIME, result)
+
     def test_documentation_only_avoids_native_matrix(self):
         result = matrix("docs/CI_SCOPE.md", "README.md")
         self.assertEqual(result, {policy.PUBLIC: [policy.PARSER]})
