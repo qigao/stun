@@ -55,6 +55,28 @@ class GuiPixelTests(unittest.TestCase):
         with self.assertRaises(gui.VisualFailure):
             gui.detect_button(button_frame(x=20, y=25))
 
+    def test_rendered_save_bounds_match_the_independent_layout(self):
+        box = gui.detect_button(button_frame(x=721, y=25, width=134, height=34))
+        layout = gui.button_layout(box)
+        self.assertTrue(layout["matches"])
+        self.assertEqual(layout["edge_deltas"], [1, 1, -1, -1])
+
+    def test_detectable_but_wrong_position_or_size_is_rejected(self):
+        # These pass blue-control discovery, but must not pass product layout.
+        for frame in (button_frame(x=641, y=25, width=134, height=34),
+                      button_frame(x=550, y=70, width=200, height=60)):
+            with self.subTest(frame=frame):
+                self.assertFalse(gui.button_layout(gui.detect_button(frame))["matches"])
+
+    def test_layout_tolerance_is_bounded_on_each_edge(self):
+        for edge in range(4):
+            for sign in (-1, 1):
+                box = list(gui.EXPECTED_SAVE_BOX)
+                box[edge] += sign * gui.SAVE_LAYOUT_TOLERANCE
+                self.assertTrue(gui.button_layout(box)["matches"])
+                box[edge] += sign
+                self.assertFalse(gui.button_layout(box)["matches"])
+
     def test_tiny_blue_noise_is_not_a_button(self):
         with self.assertRaises(gui.VisualFailure):
             gui.detect_button(button_frame(width=8, height=8))

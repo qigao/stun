@@ -20,6 +20,11 @@ import time
 
 WIDTH, HEIGHT = 928, 608
 TITLE = "FlexUI Desktop Editor"
+# Independent client-space contract: 24px shell padding, 680px title,
+# 16px gap and a 136x36 Save control. Never derive the oracle from the
+# runtime assets under test; a broken asset must not redefine correctness.
+EXPECTED_SAVE_BOX = (720, 24, 856, 60)
+SAVE_LAYOUT_TOLERANCE = 4
 
 
 class VisualFailure(RuntimeError):
@@ -60,6 +65,20 @@ def detect_button(frame):
         raise VisualFailure(
             f"real Save button not visible: {n} blue pixels, {bw}x{bh} bbox")
     return xmin, ymin, xmax + 1, ymax + 1
+
+
+def button_layout(box):
+    """Compare rendered bounds with the fixed Linux editor layout contract."""
+    if len(box) != 4 or not all(type(value) is int for value in box):
+        raise VisualFailure("invalid rendered Save bounds", code="layout_mismatch")
+    deltas = [actual - expected for actual, expected in zip(box, EXPECTED_SAVE_BOX)]
+    return {
+        "expected_box": list(EXPECTED_SAVE_BOX),
+        "observed_box": list(box),
+        "edge_deltas": deltas,
+        "tolerance_pixels": SAVE_LAYOUT_TOLERANCE,
+        "matches": all(abs(delta) <= SAVE_LAYOUT_TOLERANCE for delta in deltas),
+    }
 
 
 def count_changed(a, b, bounds, threshold=26):
@@ -275,8 +294,10 @@ def run(args):
             # necessarily rendered. Wait for actual pixels, not a fixed sleep.
             ready_deadline = min(deadline, time.monotonic() + 6.0)
             ready, last_initial_error = False, "no frame captured"
+            last_initial_code = "initial_state_not_reached"
             initial_samples, initial_stddev = 0, 0.0
             while time.monotonic() < ready_deadline:
+                last_initial_code = "initial_state_not_reached"
                 if process.poll() is not None:
                     raise VisualFailure(
                         f"app exited before rendered Save: {process.returncode}")
@@ -298,6 +319,7 @@ def run(args):
                 roi = (max(0, box[0] - 5), max(0, box[1] - 3),
                        min(width, box[2] + 5), min(height, box[3] + 3))
                 metadata["save_button_box"] = list(box)
+                metadata["save_button_layout"] = button_layout(box)
                 if args.ocr_initial:
                     try:
                         metadata["initial_ocr"] = button_ocr(
@@ -310,12 +332,19 @@ def run(args):
                         metadata["initial_ocr_observed"] = exc.words
                         time.sleep(.08)
                         continue
+                if not metadata["save_button_layout"]["matches"]:
+                    last_initial_code = "layout_mismatch"
+                    last_initial_error = (
+                        f"rendered Save bounds {list(box)} differ from required "
+                        f"{list(EXPECTED_SAVE_BOX)} beyond {SAVE_LAYOUT_TOLERANCE}px")
+                    time.sleep(.08)
+                    continue
                 ready = True
                 break
             if not ready:
                 raise VisualFailure(
                     "initial GUI state not reached: " + last_initial_error,
-                    code="initial_state_not_reached")
+                    code=last_initial_code)
             center = ((box[0] + box[2]) // 2, (box[1] + box[3]) // 2)
             mouse(disp, target, *center)
             time.sleep(.20)

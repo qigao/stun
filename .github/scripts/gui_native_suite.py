@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Qualify the real Desktop Editor and require two visible application failures.
+"""Qualify the real Desktop Editor and require three visible application failures.
 
-All three cases use the same native executable and document-service plugin.
-Only isolated copies of XML/TurboScript assets receive the deliberate defects.
+All four cases use the same native executable and document-service plugin.
+Only isolated copies of XML/CSS/TurboScript assets receive the deliberate defects.
 """
 from __future__ import annotations
 
@@ -27,11 +27,16 @@ SCENARIOS = (
     {"name": "negative-pending", "asset": "editor.tbs",
      "old": "text: value.payload", "new": 'text: "Saving..."',
      "failure_code": "completion_not_reached", "observed_word": "Saving",
-     "observation": "after_ocr_observed", "mouse": True},
+     "observation": "after_ocr_observed", "forbidden_word": "Saved", "mouse": True},
     {"name": "negative-initial-label", "asset": "editor.xml",
      "old": ">Save</button>", "new": ">Broken</button>",
      "failure_code": "initial_state_not_reached", "observed_word": "Broken",
-     "observation": "initial_ocr_observed", "mouse": False},
+     "observation": "initial_ocr_observed", "forbidden_word": "Save", "mouse": False},
+    {"name": "negative-layout", "asset": "editor.css",
+     "old": "width: 680px;", "new": "width: 600px;",
+     "failure_code": "layout_mismatch", "observed_word": "Save",
+     "observation": "initial_ocr_observed", "forbidden_word": "Saved", "mouse": False,
+     "layout_offset": [-80, 0, -80, 0]},
 )
 
 
@@ -79,12 +84,49 @@ def validate_common(evidence, identity, source_sha):
     require(isinstance(rect, list) and len(rect) == 4 and
             abs(rect[2] - gui.WIDTH) <= 8 and abs(rect[3] - gui.HEIGHT) <= 8,
             "wrong native window geometry")
-    require(isinstance(evidence.get("save_button_box"), list) and
-            len(evidence["save_button_box"]) == 4, "rendered button was not identified")
+    box = evidence.get("save_button_box")
+    require(isinstance(box, list) and len(box) == 4 and
+            all(type(value) is int for value in box), "rendered button was not identified")
+    require(0 <= box[0] < box[2] <= rect[2] and 0 <= box[1] < box[3] <= rect[3],
+            "rendered button geometry is outside the native window")
+    layout = gui.button_layout(box)
+    require(evidence.get("save_button_layout") == layout,
+            "layout diagnosis does not match the observed button geometry")
+    return layout
+
+
+def validate_positive(evidence, identity, source_sha, minimum_changed):
+    layout = validate_common(evidence, identity, source_sha)
+    require(evidence.get("result") == "PASS" and layout["matches"] is True,
+            "normal GUI did not satisfy the expected button layout")
+    require(evidence.get("real_mouse_event") is True and evidence.get("exit_code") == 0 and
+            evidence.get("changed_button_pixels", 0) >= minimum_changed and
+            contains_word(evidence.get("initial_ocr"), "Save") and
+            contains_word(evidence.get("after_ocr"), "Saved"),
+            "normal GUI lacks complete Save-to-Saved evidence")
+    require(evidence.get("cleanup_mode") == "wm_delete_window" and
+            evidence.get("cleanup_exit_code") == 0 and "cleanup_error" not in evidence,
+            "normal GUI did not close cleanly through its native window")
 
 
 def validate_negative(evidence, scenario, identity, source_sha, minimum_changed):
-    validate_common(evidence, identity, source_sha)
+    layout = validate_common(evidence, identity, source_sha)
+    offset = scenario.get("layout_offset")
+    if offset is None:
+        require(layout["matches"] is True, "text negative scenario has an unrelated layout defect")
+    else:
+        require(layout["matches"] is False, "deliberately shifted button kept the normal layout")
+        require(all(abs(actual - expected) <= gui.SAVE_LAYOUT_TOLERANCE
+                    for actual, expected in zip(layout["edge_deltas"], offset)),
+                "layout negative did not move the button by the expected offset")
+        box, expected = layout["observed_box"], layout["expected_box"]
+        require(abs((box[2] - box[0]) - (expected[2] - expected[0])) <=
+                gui.SAVE_LAYOUT_TOLERANCE and
+                abs((box[3] - box[1]) - (expected[3] - expected[1])) <=
+                gui.SAVE_LAYOUT_TOLERANCE,
+                "layout negative unexpectedly changed the button size")
+        require(contains_word(evidence.get("initial_ocr"), "Save"),
+                "layout negative did not render the unchanged Save label")
     require(evidence.get("result") == "FAIL", "deliberately broken GUI was accepted")
     require(evidence.get("failure_code") == scenario["failure_code"],
             "GUI failed in the wrong phase")
@@ -97,8 +139,8 @@ def validate_negative(evidence, scenario, identity, source_sha, minimum_changed)
             "broken GUI did not close cleanly through its native window")
     observed = evidence.get(scenario["observation"])
     require(contains_word(observed, scenario["observed_word"]),
-            "the deliberately wrong label was not actually recognized")
-    require(not contains_word(observed, "Saved" if scenario["mouse"] else "Save"),
+            "the expected visible negative-state label was not actually recognized")
+    require(not contains_word(observed, scenario["forbidden_word"]),
             "negative OCR observation also claims the required success state")
     if scenario["mouse"]:
         require(contains_word(evidence.get("initial_ocr"), "Save"),
@@ -114,6 +156,8 @@ def verify_negative_screenshots(directory, evidence, scenario, minimum_changed):
     require(list(gui.detect_button(before)) == evidence["save_button_box"],
             "negative screenshot does not contain the observed button")
     box = evidence["save_button_box"]
+    require(gui.button_layout(box) == evidence["save_button_layout"],
+            "retained screenshot disagrees with the layout diagnosis")
     roi = (max(0, box[0] - 5), max(0, box[1] - 3),
            min(before.width, box[2] + 5), min(before.height, box[3] + 3))
     observed_frame = before
@@ -127,7 +171,7 @@ def verify_negative_screenshots(directory, evidence, scenario, minimum_changed):
         observed_frame = after
     # Recompute the crop from retained native screenshots, not just a failure
     # string, JSON word list or potentially stale standalone OCR crop.
-    return gui.button_ocr(observed_frame, box, directory / "verified_wrong_label_ocr.png",
+    return gui.button_ocr(observed_frame, box, directory / "verified_visible_label_ocr.png",
                           scenario["observed_word"])
 
 
@@ -186,13 +230,9 @@ def run_suite(args):
         summary["original_runtime_sha256"] = identity
         positive, rejected = execute_driver(args, exe, out)
         require(not rejected and positive.get("result") == "PASS", "normal real GUI did not pass")
-        validate_common(positive, identity, args.source_sha)
-        require(positive.get("real_mouse_event") is True and positive.get("exit_code") == 0 and
-                positive.get("changed_button_pixels", 0) >= args.minimum_changed and
-                contains_word(positive.get("initial_ocr"), "Save") and
-                contains_word(positive.get("after_ocr"), "Saved"),
-                "normal GUI lacks complete Save-to-Saved evidence")
+        validate_positive(positive, identity, args.source_sha, args.minimum_changed)
         summary["positive_result"] = "PASS"
+        summary["positive_button_layout"] = positive["save_button_layout"]
         require(runtime_identity(exe) == identity, "positive run changed original runtime files")
         with tempfile.TemporaryDirectory(prefix="stun-gui-negative-") as temporary:
             for scenario in SCENARIOS:
@@ -207,10 +247,11 @@ def run_suite(args):
                 record["driver_result"] = evidence.get("result")
                 record["failure_code"] = evidence.get("failure_code")
                 record["error"] = evidence.get("error")
+                record["save_button_layout"] = evidence.get("save_button_layout")
                 require(rejected, "deliberately broken GUI did not raise a visual failure")
                 validate_negative(evidence, scenario, identity, args.source_sha,
                                   args.minimum_changed)
-                record["verified_wrong_label_ocr"] = verify_negative_screenshots(
+                record["verified_visible_label_ocr"] = verify_negative_screenshots(
                     evidence_dir, evidence, scenario, args.minimum_changed)
                 require(runtime_identity(copied) == mutated, "negative run changed its runtime files")
                 require(runtime_identity(exe) == identity, "negative run changed original runtime files")
@@ -234,7 +275,7 @@ def run_suite(args):
                                         encoding="utf-8")
         if integrity_error is not None:
             raise integrity_error
-    print("GUI SUITE PASS", args.source_sha, "normal GUI and two expected visible failures")
+    print("GUI SUITE PASS", args.source_sha, "normal GUI and three expected visible failures")
     return summary
 
 

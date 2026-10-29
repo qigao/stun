@@ -22,23 +22,55 @@ def words(text):
 
 
 def negative_evidence(scenario):
+    box = [721, 25, 855, 59]
+    if "layout_offset" in scenario:
+        box = [edge + offset for edge, offset in zip(box, scenario["layout_offset"])]
     return {
         "source_sha": SHA, "binary_sha256": IDENTITY["binary"], "result": "FAIL",
         "visible_window": True, "window_rect": [0, 0, 928, 608],
-        "save_button_box": [721, 25, 855, 59],
+        "save_button_box": box, "save_button_layout": suite.gui.button_layout(box),
         "failure_code": scenario["failure_code"], "application_alive_on_failure": True,
         "real_mouse_event": scenario["mouse"], "cleanup_mode": "wm_delete_window",
         "cleanup_exit_code": 0, "changed_button_pixels": 996,
-        "initial_ocr": words("Save") if scenario["mouse"] else [],
+        "initial_ocr": words("Save") if scenario["mouse"] or "layout_offset" in scenario else [],
         scenario["observation"]: words(scenario["observed_word"]),
     }
+
+
+def positive_evidence():
+    evidence = negative_evidence(suite.SCENARIOS[0])
+    evidence.pop("failure_code")
+    evidence.pop("application_alive_on_failure")
+    evidence.update(result="PASS", exit_code=0, after_ocr=words("Saved"),
+                    after_ocr_observed=words("Saved"))
+    return evidence
+
+
+class PositiveAdmissionTests(unittest.TestCase):
+    def test_normal_geometry_with_actual_save_evidence_is_accepted(self):
+        suite.validate_positive(positive_evidence(), IDENTITY, SHA, 38)
+
+    def test_loose_detector_location_and_size_are_not_a_valid_layout(self):
+        for box in ([641, 25, 775, 59], [550, 70, 750, 130]):
+            with self.subTest(box=box):
+                evidence = positive_evidence()
+                evidence.update(save_button_box=box,
+                                save_button_layout=suite.gui.button_layout(box))
+                with self.assertRaisesRegex(suite.SuiteFailure, "expected button layout"):
+                    suite.validate_positive(evidence, IDENTITY, SHA, 38)
+
+    def test_unchanged_success_words_do_not_hide_a_forged_layout(self):
+        evidence = positive_evidence()
+        evidence["save_button_box"] = [641, 25, 775, 59]
+        with self.assertRaisesRegex(suite.SuiteFailure, "layout diagnosis"):
+            suite.validate_positive(evidence, IDENTITY, SHA, 38)
 
 
 class NegativeAdmissionTests(unittest.TestCase):
     def validate(self, evidence, scenario):
         suite.validate_negative(evidence, scenario, IDENTITY, SHA, 38)
 
-    def test_both_precisely_observed_failures_are_accepted(self):
+    def test_all_precisely_observed_failures_are_accepted(self):
         for scenario in suite.SCENARIOS:
             with self.subTest(scenario=scenario["name"]):
                 self.validate(negative_evidence(scenario), scenario)
@@ -94,9 +126,56 @@ class NegativeAdmissionTests(unittest.TestCase):
     def test_conflicting_success_observation_is_not_expected_failure(self):
         for scenario in suite.SCENARIOS:
             evidence = negative_evidence(scenario)
-            evidence[scenario["observation"]] += words("Saved" if scenario["mouse"] else "Save")
+            evidence[scenario["observation"]] += words(scenario["forbidden_word"])
             with self.subTest(scenario=scenario["name"]), self.assertRaises(suite.SuiteFailure):
                 self.validate(evidence, scenario)
+
+    def test_layout_diagnosis_must_match_independently_recomputed_edges(self):
+        for scenario in suite.SCENARIOS:
+            original = negative_evidence(scenario)["save_button_layout"]
+            diagnostics = (
+                None,
+                dict(original, matches=not original["matches"]),
+                dict(original, tolerance_pixels=999),
+                dict(original, edge_deltas=[0, 0, 0, 0]),
+                dict(original, expected_box=[0, 0, 134, 34]),
+                dict(original, observed_box=[641, 26, 775, 59]),
+            )
+            for report in diagnostics:
+                with self.subTest(scenario=scenario["name"], report=report):
+                    evidence = negative_evidence(scenario)
+                    evidence["save_button_layout"] = report
+                    with self.assertRaisesRegex(suite.SuiteFailure, "layout diagnosis"):
+                        self.validate(evidence, scenario)
+
+    def test_text_negatives_require_the_original_button_geometry(self):
+        for scenario in suite.SCENARIOS[:2]:
+            for box in ([641, 25, 775, 59], [550, 70, 750, 130]):
+                with self.subTest(scenario=scenario["name"], box=box):
+                    evidence = negative_evidence(scenario)
+                    evidence.update(save_button_box=box,
+                                    save_button_layout=suite.gui.button_layout(box))
+                    with self.assertRaisesRegex(suite.SuiteFailure, "unrelated layout defect"):
+                        self.validate(evidence, scenario)
+
+    def test_layout_negative_rejects_normal_wrong_direction_and_changed_size(self):
+        scenario = suite.SCENARIOS[2]
+        for box in ([721, 25, 855, 59], [761, 25, 895, 59],
+                    [641, 65, 775, 99], [681, 25, 815, 59],
+                    [636, 25, 780, 59]):
+            with self.subTest(box=box):
+                evidence = negative_evidence(scenario)
+                evidence.update(save_button_box=box,
+                                save_button_layout=suite.gui.button_layout(box))
+                with self.assertRaises(suite.SuiteFailure):
+                    self.validate(evidence, scenario)
+
+    def test_layout_negative_requires_successful_initial_save_ocr(self):
+        scenario = suite.SCENARIOS[2]
+        evidence = negative_evidence(scenario)
+        evidence["initial_ocr"] = []
+        with self.assertRaisesRegex(suite.SuiteFailure, "unchanged Save label"):
+            self.validate(evidence, scenario)
 
     def test_nonvisual_exception_is_not_swallowed(self):
         args = SimpleNamespace(source_sha=SHA, timeout=12, minimum_changed=38)
@@ -116,7 +195,8 @@ class IsolationTests(unittest.TestCase):
         assets.mkdir()
         (assets / "editor.xml").write_text('<button id="save">Save</button>\n', encoding="utf-8")
         (assets / "editor.tbs").write_text('map {text: value.payload}\n', encoding="utf-8")
-        (assets / "editor.css").write_text('#save { color: white; }\n', encoding="utf-8")
+        (assets / "editor.css").write_text(
+            '#title { width: 680px; }\n#save { color: white; }\n', encoding="utf-8")
         return exe
 
     def test_only_target_asset_changes_and_runtime_is_copied(self):

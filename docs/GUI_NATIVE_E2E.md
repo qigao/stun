@@ -17,7 +17,7 @@ valid screenshot/visual E2E evidence.
 The C++ example defines a 928x608 client window. Its deployed CSS gives
 Save a blue background (#2563eb, hover #3b82f6). TurboScript changes
 text from Save to Saving... and ultimately the document-service result.
-The button centers its label and keeps the long service result on one
+The initial Save label is centered. The long service result stays on one
 line with an ellipsis, so completion text cannot cover the document.
 
 ## Run the real native executable (Linux)
@@ -60,8 +60,9 @@ Evidence files:
 - application.log: actual native process stderr/stdout
 - evidence.json: exact source HEAD, native binary SHA256, PID, window ID,
   client rectangle, mouse action, changed pixel count, result/failure
-  and OCR observations. A failed interaction retains the last actual
-  post-click frame and OCR error for diagnosis.
+  and OCR observations. Save layout evidence includes expected/observed
+  bounds, each edge's delta and the allowed tolerance. A failed interaction
+  retains the last actual post-click frame and OCR error for diagnosis.
 
 The critical screenshot comparison is **hover vs. after real mouse click**,
 not initial vs. hovered: a hover color is not proof of a click handler.
@@ -70,6 +71,25 @@ from an unverified fixed coordinate. The native GUI workflow requires
 both changed pixels and the whole OCR word Saved. Saving, Unsaved and
 service error text cannot satisfy that completion requirement. An
 uncertain OCR result is a failure, not an automatic pass.
+
+### Independent Save geometry oracle
+
+For the fixed 928x608 Linux editor, the required Save outer bounds in
+client coordinates are `(720, 24, 856, 60)`: 24px shell padding, a 680px
+title, a 16px gap and a 136x36 button. The actual blue-pixel bounds must
+match all four edges within 4px, allowing border antialiasing and pixel
+rounding. Discovering a blue control somewhere in the search region is
+insufficient.
+
+These expected bounds are an independent test contract; they are never
+read from the runtime assets being qualified. After recognizing Save,
+the driver waits within the initial-frame deadline for matching geometry
+and reports `layout_mismatch` if it does not appear. It sends no Save
+click to an incorrectly placed control. Click coordinates still come
+from the detected pixels once the geometry qualifies.
+
+This is one control's layout contract at the fixed test viewport, not
+a full-screen golden or qualification of other DPI/viewport settings.
 
 ## Evidence boundaries
 
@@ -90,19 +110,23 @@ uncertain OCR result is a failure, not an automatic pass.
 - Pin DPI, fonts and driver when introducing native visual goldens;
   do not assume identical pixels across Linux/macOS/Windows.
   Retain actual screenshots and diffs as bounded-lifetime CI artifacts.
+- Keyboard focus traversal/activation and visible-window resize remain
+  separate follow-up scenarios; native key routing or hidden-window tests
+  alone do not qualify those real GUI interactions.
 
 ## Real application negative cases
 
 The CI entry point is `.github/scripts/gui_native_suite.py`. It runs the
-successful application first, then two isolated asset variants, sequentially
+successful application first, then three isolated asset variants, sequentially
 on the same display and runner:
 
 | Scenario | Isolated asset change | Required visible failure |
 | --- | --- | --- |
 | Initial label | Change the Save button label to `Broken` in copied XML | A rendered blue button with OCR `Broken`; the driver rejects the initial state before clicking |
 | Pending completion | Change the successful completion's displayed text to `Saving...` in copied TurboScript | Initial `Save`, a real click and changed pixels, then OCR `Saving`; the driver rejects the missing `Saved` completion |
+| Misplaced control | Change the copied title width from 680px to 600px | Actual `Save` text and the same button size, but a detected position 80px too far left; the driver rejects the layout before clicking |
 
-Both variants execute copies of the same native executable and document
+All variants execute copies of the same native executable and document
 service plugin. Their SHA256 identities must match the successful baseline.
 Each mutation must have exactly one source anchor and change only the named
 asset; the original application and assets must retain their hashes. The
@@ -125,7 +149,7 @@ process or forced cleanup fail the suite.
 The positive evidence remains at the output root. Each negative case keeps
 its own screenshots, application log and `evidence.json` with `result: FAIL`.
 The separate `suite.json` records whether those required failures were
-actually observed. It reports PASS only after the positive and both real
+actually observed. It reports PASS only after the positive and all three real
 negative cases qualify; it never rewrites failed driver evidence as success.
 
 ## M1 native GUI build / actual-screen CI
@@ -145,7 +169,7 @@ The exact job name is "GUI visible screenshot / Linux X11", selected
 by the trusted exact-head acceptance matrix for changes to the desktop
 editor, the script or GUI build workflow. A CI success requires that
 the actual window opened, rendered blue Save, reacted to mouse input,
-displayed the Saved completion and closed correctly, and that both wrong
+displayed the Saved completion and closed correctly, and that all three wrong
 visible states were rejected for their expected reason. Native source/UI
 tests are not replaced.
 
