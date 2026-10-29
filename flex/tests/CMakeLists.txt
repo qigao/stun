@@ -22,6 +22,12 @@ target_link_libraries(test_render PRIVATE flex_render Salts::TinyTest)
 set_target_properties(test_render PROPERTIES FOLDER "flex/tests")
 add_test(NAME test_render COMMAND test_render)
 
+add_executable(test_effect_admission test_effect_admission.cpp)
+target_link_libraries(test_effect_admission
+                     PRIVATE Flex::Render Salts::TinyTest Threads::Threads)
+set_target_properties(test_effect_admission PROPERTIES FOLDER "flex/tests")
+add_test(NAME test_effect_admission COMMAND test_effect_admission)
+
 if(TARGET flex_render_engine_gcanvas)
   add_executable(test_gcanvas_renderer test_gcanvas_renderer.cpp)
   target_link_libraries(

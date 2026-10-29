@@ -76,6 +76,19 @@ foreach(test IN ITEMS test_tailwind_native test_tailwind_native_style
   add_dependencies(stun_xml_runtime_qualification ${test})
 endforeach()
 
+# Compile the same backend-neutral admission implementation without a renderer
+# or GPU dependency; backend execution support still needs its own acceptance.
+add_executable(test_effect_admission
+  "${STUN_ROOT}/flex/tests/test_effect_admission.cpp"
+  "${STUN_ROOT}/flex/modules/render/effect_admission.cpp"
+  "${STUN_ROOT}/flex/modules/render/effect_budget.cpp")
+target_include_directories(test_effect_admission PRIVATE "${STUN_ROOT}/flex/include")
+target_compile_features(test_effect_admission PRIVATE cxx_std_17)
+target_link_libraries(test_effect_admission PRIVATE Salts::TinyTest Threads::Threads)
+add_test(NAME test_effect_admission COMMAND test_effect_admission)
+set_tests_properties(test_effect_admission PROPERTIES TIMEOUT 120)
+add_dependencies(stun_xml_runtime_qualification test_effect_admission)
+
 foreach(test IN ITEMS test_ui_content_models test_ui_xml_admission test_ui_xml
     test_ui_document test_widget_registry test_desktop_application
     test_script_controller test_application_service_requests
