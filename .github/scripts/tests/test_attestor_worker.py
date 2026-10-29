@@ -27,8 +27,8 @@ def signed_admitted_event(event=None):
     # These records simulate the OUTPUT of the already-tested signed M0
     # admission module, not a raw unsigned HTTP payload accepted in production.
     event = copy.deepcopy(event or pr_target())
-    event["repository"] = {"full_name": REPO, "id": REPO_ID}
-    event["installation"] = {"id": APP_INSTALLATION}
+    event.setdefault("repository", {"full_name": REPO, "id": REPO_ID})
+    event.setdefault("installation", {"id": APP_INSTALLATION})
     if event["_event_name"] == "workflow_run":
         event["workflow_run"].setdefault(
             "path", ".github/workflows/runtime-conformance.yml"
