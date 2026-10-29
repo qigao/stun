@@ -25,7 +25,7 @@ static_assert(!std::is_move_constructible_v<tw::NativeProgram>,
 static_assert(!std::is_move_assignable_v<tw::NativeProgram>,
               "NativeProgram must not be replaced through move assignment");
 
-bool near(float actual, float expected) {
+bool native_float_near(float actual, float expected) {
   return std::isfinite(actual) && std::fabs(actual - expected) <= 0.000001f;
 }
 
@@ -60,15 +60,17 @@ const tw::NativeRule* winner(const tw::NativeProgram& program, Property property
 bool has_float(const tw::NativeRule* rule, Property property, float expected) {
   if (!rule || rule->declaration.property != property) return false;
   const auto* value = std::get_if<float>(&rule->declaration.value);
-  return value && near(*value, expected);
+  return value && native_float_near(*value, expected);
 }
 
 bool has_color(const tw::NativeRule* rule, Property property,
                const flex::Color& expected) {
   if (!rule || rule->declaration.property != property) return false;
   const auto* value = std::get_if<flex::Color>(&rule->declaration.value);
-  return value && near(value->r, expected.r) && near(value->g, expected.g) &&
-         near(value->b, expected.b) && near(value->a, expected.a);
+  return value && native_float_near(value->r, expected.r) &&
+         native_float_near(value->g, expected.g) &&
+         native_float_near(value->b, expected.b) &&
+         native_float_near(value->a, expected.a);
 }
 
 tw::NativeTheme theme_fixture() {
