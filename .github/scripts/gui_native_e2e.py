@@ -26,6 +26,10 @@ class VisualFailure(RuntimeError):
     pass
 
 
+class OcrMismatch(VisualFailure):
+    """A readable frame has not reached the required visible state yet."""
+
+
 def is_button_blue(rgb):
     r, g, b = rgb[:3]
     return (10 <= r <= 145 and 40 <= g <= 198 and
@@ -107,9 +111,9 @@ def find_titled_windows(disp, title):
 def window_rect(disp, window):
     root = disp.screen().root
     geometry = window.get_geometry()
-    # Translate window client origin (0, 0) into root-screen coordinates.
-    # Reversing source and destination would yield a negative screen origin.
-    pos = window.translate_coords(root, 0, 0)
+    # python-xlib's receiver is the destination, its argument the source:
+    # Window.translate_coords(self, src_window, src_x, src_y).
+    pos = root.translate_coords(window, 0, 0)
     return int(pos.x), int(pos.y), int(geometry.width), int(geometry.height)
 
 
@@ -174,38 +178,54 @@ def local_ocr(path, expected):
                 "text": fields[11].strip(), "confidence": conf,
                 "box": [int(fields[i]) for i in (6, 7, 8, 9)]
             })
-    found = "".join(re.findall(r"\w+", " ".join(x["text"] for x in words))).lower()
-    wanted = "".join(re.findall(r"\w+", expected)).lower()
-    if wanted not in found:
-        raise VisualFailure(f"visible OCR {found!r} did not contain {wanted!r}")
+    found = re.findall(r"\w+", " ".join(x["text"] for x in words).lower())
+    wanted = re.findall(r"\w+", expected.lower())
+    # Compare whole words: "Unsaved" must never satisfy the "Saved" gate.
+    if not wanted or not any(found[i:i + len(wanted)] == wanted
+                             for i in range(len(found) - len(wanted) + 1)):
+        raise OcrMismatch(f"visible OCR {found!r} did not contain words {wanted!r}")
     return words
 
 
+def button_ocr(frame, roi, path, expected):
+    from PIL import ImageOps
+    box = (max(0, roi[0] - 12), max(0, roi[1] - 9),
+           min(frame.width, roi[2] + 30), min(frame.height, roi[3] + 10))
+    crop = frame.crop(box)
+    crop = ImageOps.expand(crop.resize((crop.width * 3, crop.height * 3)),
+                           border=20, fill="white")
+    crop.save(path)
+    return local_ocr(path, expected)
+
+
 def run(args):
-    try:
-        from Xlib import display, X
-        from PIL import ImageStat, ImageOps
-    except ImportError as error:
-        raise VisualFailure("python3-xlib and Pillow required for real GUI") from error
-    if not os.environ.get("DISPLAY"):
-        raise VisualFailure("real DISPLAY required; use xvfb-run or desktop X11")
-    if not re.fullmatch("[0-9a-f]{40}", args.source_sha):
-        raise VisualFailure("exact 40-character source HEAD required")
-    exe = Path(args.exe).resolve(strict=True)
-    if not exe.is_file() or not os.access(exe, os.X_OK):
-        raise VisualFailure("native GUI executable missing or not executable")
     out = Path(args.out).resolve()
     out.mkdir(parents=True, exist_ok=True)
     metadata = {
-        "source_sha": args.source_sha, "binary": str(exe),
-        "binary_sha256": sha256_file(exe), "title": TITLE,
-        "display": os.environ["DISPLAY"], "visible_window": False,
+        "source_sha": args.source_sha, "binary": str(Path(args.exe).resolve()),
+        "title": TITLE, "display": os.environ.get("DISPLAY", ""),
+        "visible_window": False,
         "real_mouse_event": False, "result": "FAIL"
     }
     start = time.monotonic()
-    disp = display.Display()
-    process = None
+    disp, process = None, None
     try:
+        try:
+            from Xlib import display, X
+            from PIL import ImageStat
+        except ImportError as error:
+            raise VisualFailure("python3-xlib and Pillow required for real GUI") from error
+        if not os.environ.get("DISPLAY"):
+            raise VisualFailure("real DISPLAY required; use xvfb-run or desktop X11")
+        if not re.fullmatch("[0-9a-f]{40}", args.source_sha):
+            raise VisualFailure("exact 40-character source HEAD required")
+        if args.timeout <= 0 or args.minimum_changed < 1:
+            raise VisualFailure("timeout and minimum changed pixels must be positive")
+        exe = Path(args.exe).resolve(strict=True)
+        if not exe.is_file() or not os.access(exe, os.X_OK):
+            raise VisualFailure("native GUI executable missing or not executable")
+        metadata["binary_sha256"] = sha256_file(exe)
+        disp = display.Display()
         prior = [w.id for w in find_titled_windows(disp, TITLE)]
         if prior:
             raise VisualFailure("existing same-title GUI makes window ownership ambiguous")
@@ -239,35 +259,46 @@ def run(args):
                 raise VisualFailure("window PID belongs to another process")
             metadata.update(visible_window=True, window_id=hex(target.id),
                             window_rect=[x, y, width, height])
-            # A mapped X11 window is not proof that its first GPU frame
-            # has been presented. Observe real framebuffer pixels for a
-            # bounded startup interval; never invent an expected image,
-            # swap renderers, or accept a permanently blank window.
+            # GLFW maps the window before XML/controller initialization has
+            # necessarily rendered. Wait for actual pixels, not a fixed sleep.
             ready_deadline = min(deadline, time.monotonic() + 6.0)
-            initial_samples = 0
-            initial_stddev = 0.0
-            while True:
+            ready, last_initial_error = False, "no frame captured"
+            initial_samples, initial_stddev = 0, 0.0
+            while time.monotonic() < ready_deadline:
                 if process.poll() is not None:
                     raise VisualFailure(
-                        f"GUI exited before first rendered frame: {process.returncode}")
+                        f"app exited before rendered Save: {process.returncode}")
                 before = capture(disp, target)
+                before.save(out / "before.png")
                 initial_samples += 1
                 variation = max(ImageStat.Stat(before).stddev)
                 initial_stddev = max(initial_stddev, variation)
-                if variation >= 8:
-                    break
-                if time.monotonic() >= ready_deadline:
-                    before.save(out / "before.png")
-                    metadata["initial_frame_samples"] = initial_samples
-                    metadata["initial_max_stddev"] = round(initial_stddev, 4)
-                    raise VisualFailure(
-                        "real GUI remained blank after bounded first-frame"
-                        f" sampling ({initial_samples} screenshots)")
-                time.sleep(.10)
-            metadata["initial_frame_samples"] = initial_samples
-            metadata["initial_max_stddev"] = round(initial_stddev, 4)
-            before.save(out / "before.png")
-            box = detect_button(before)
+                metadata["initial_frame_samples"] = initial_samples
+                metadata["initial_max_stddev"] = round(initial_stddev, 4)
+                try:
+                    if variation < 8:
+                        raise VisualFailure("real GUI screenshot is blank")
+                    box = detect_button(before)
+                except VisualFailure as exc:
+                    last_initial_error = str(exc)
+                    time.sleep(.08)
+                    continue
+                roi = (max(0, box[0] - 5), max(0, box[1] - 3),
+                       min(width, box[2] + 5), min(height, box[3] + 3))
+                if args.ocr_initial:
+                    try:
+                        metadata["initial_ocr"] = button_ocr(
+                            before, roi, out / "before_button_ocr.png",
+                            args.ocr_initial)
+                    except OcrMismatch as exc:
+                        last_initial_error = str(exc)
+                        metadata["initial_ocr_last_mismatch"] = str(exc)
+                        time.sleep(.08)
+                        continue
+                ready = True
+                break
+            if not ready:
+                raise VisualFailure("initial GUI state not reached: " + last_initial_error)
             metadata["save_button_box"] = list(box)
             center = ((box[0] + box[2]) // 2, (box[1] + box[3]) // 2)
             mouse(disp, target, *center)
@@ -276,39 +307,42 @@ def run(args):
             hovered.save(out / "hover.png")
             mouse(disp, target, *center, click=True)
             metadata["real_mouse_event"] = True
-            roi = (max(0, box[0] - 5), max(0, box[1] - 3),
-                   min(width, box[2] + 5), min(height, box[3] + 3))
-            post = None
+            post, matched_since, matching_frames = None, None, 0
             while time.monotonic() < deadline:
+                if process.poll() is not None:
+                    raise VisualFailure(
+                        f"app exited before Save completed: {process.returncode}")
                 frame = capture(disp, target)
-                if count_changed(hovered, frame, roi) >= args.minimum_changed:
-                    time.sleep(.22)
-                    candidate = capture(disp, target)
-                    if count_changed(hovered, candidate, roi) >= args.minimum_changed:
-                        post = candidate
-                        metadata["changed_button_pixels"] = count_changed(
-                            hovered, post, roi)
+                # Keep the latest frame even on a timeout or failed Save.
+                frame.save(out / "after.png")
+                changed = count_changed(hovered, frame, roi)
+                metadata["changed_button_pixels"] = changed
+                matched = changed >= args.minimum_changed
+                if matched and args.ocr_after:
+                    try:
+                        metadata["after_ocr"] = button_ocr(
+                            frame, roi, out / "after_button_ocr.png", args.ocr_after)
+                    except OcrMismatch as exc:
+                        metadata["after_ocr_last_mismatch"] = str(exc)
+                        matched = False
+                if matched:
+                    matching_frames += 1
+                    if matched_since is None:
+                        matched_since = time.monotonic()
+                    if matching_frames >= 2 and time.monotonic() - matched_since >= .22:
+                        post = frame
                         break
+                else:
+                    matched_since, matching_frames = None, 0
                 time.sleep(.08)
             if post is None:
+                if args.ocr_after:
+                    raise VisualFailure(
+                        "real Save click did not reach stable visible completion: " +
+                        metadata.get("after_ocr_last_mismatch", "no qualifying pixel change"))
                 raise VisualFailure(
                     "real Save click did not change visible button beyond hover")
             post.save(out / "after.png")
-            if args.ocr_initial or args.ocr_after:
-                box_ocr = (max(0, roi[0] - 12), max(0, roi[1] - 9),
-                           min(width, roi[2] + 30), min(height, roi[3] + 10))
-                for label, frame in (("before", before), ("after", post)):
-                    crop = frame.crop(box_ocr)
-                    crop = ImageOps.expand(
-                        crop.resize((crop.width * 3, crop.height * 3)),
-                        border=20, fill="white")
-                    crop.save(out / (label + "_button_ocr.png"))
-                if args.ocr_initial:
-                    metadata["initial_ocr"] = local_ocr(
-                        out / "before_button_ocr.png", args.ocr_initial)
-                if args.ocr_after:
-                    metadata["after_ocr"] = local_ocr(
-                        out / "after_button_ocr.png", args.ocr_after)
             request_close(disp, target)
             try:
                 code = process.wait(timeout=5)
@@ -329,7 +363,8 @@ def run(args):
             except subprocess.TimeoutExpired:
                 process.kill()
                 process.wait()
-        disp.close()
+        if disp is not None:
+            disp.close()
         (out / "evidence.json").write_text(
             json.dumps(metadata, indent=2, sort_keys=True) + "\n",
             encoding="utf-8")

@@ -27,6 +27,10 @@
 #save {
   width: 136px;
   height: 36px;
+  text-align: center;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  overflow: hidden;
   background-color: #2563eb;
   color: #ffffff;
   border-radius: 8px;

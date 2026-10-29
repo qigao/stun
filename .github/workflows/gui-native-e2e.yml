@@ -8,6 +8,7 @@ on:
     paths:
       - '.github/workflows/gui-native-e2e.yml'
       - '.github/scripts/gui_native_e2e.py'
+      - '.github/scripts/tests/test_gui_native_e2e.py'
       - '.github/scripts/gui_runtime/**'
       - 'flexUI/examples/desktop_editor/**'
   workflow_dispatch:
@@ -70,24 +71,22 @@ jobs:
             libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev \
             xvfb xauth python3-xlib python3-pil tesseract-ocr
 
-      - name: Resolve pinned and current published native SDK versions
+      - name: Verify screenshot coordinates and mouse delivery on real X11
+        env:
+          STUN_GUI_X11_TESTS: '1'
+        run: |
+          xvfb-run -a -s '-screen 0 1280x900x24 -nolisten tcp' \
+            /usr/bin/python3 .github/scripts/tests/test_gui_native_e2e.py
+
+      - name: Select pinned published native SDK versions
         id: releases
         shell: bash
         run: |
           set -euo pipefail
-          choose_tag() {
-            local repo="$1" pattern="$2"
-            gh api "repos/$repo/releases?per_page=30" --jq '.[] | select(.draft == false) | [.tag_name,.published_at] | @tsv' \
-              | awk -F '\t' -v pat="$pattern" '$1 ~ pat {print $0}' \
-              | sort -t "$(printf '\t')" -k2,2r | head -1 | cut -f1
-          }
-          salts="$(choose_tag qigao/salts '^v2[.]3[.]0(-|$)')"
-          utils="$(choose_tag qigao/salts-utils '^v4[.]3[.]0(-|$)')"
-          chttp="$(choose_tag qigao/chttp '^v2[.]1[.]0(-|$)')"
-          test -n "$salts" && test -n "$utils" && test -n "$chttp"
-          echo "salts=$salts" >> "$GITHUB_OUTPUT"
-          echo "utils=$utils" >> "$GITHUB_OUTPUT"
-          echo "chttp=$chttp" >> "$GITHUB_OUTPUT"
+          # Reproduce the same native dependency graph for each source HEAD.
+          echo "salts=v2.3.0-rc.17" >> "$GITHUB_OUTPUT"
+          echo "utils=v4.3.0-rc.11" >> "$GITHUB_OUTPUT"
+          echo "chttp=v2.1.0-rc.6" >> "$GITHUB_OUTPUT"
           # Stable released TurboScript Host ABI v1; never guess a master build.
           echo "turboscript=v3.0.10" >> "$GITHUB_OUTPUT"
 
@@ -148,10 +147,13 @@ jobs:
           persist-credentials: false
 
       - name: Restore cached native third-party ports
-        uses: actions/cache@v4
+        id: native_ports
+        uses: actions/cache/restore@v4
         with:
           path: ${{ runner.temp }}/stun-gui-vcpkg-cache
-          key: stun-gui-vcpkg-v1-linux-x64-b1b19307
+          key: stun-gui-vcpkg-v2-linux-x64-b1b19307-vulkan-headers
+          restore-keys: |
+            stun-gui-vcpkg-v1-linux-x64-b1b19307
 
       - name: Build pinned real GLFW / OpenGL / CSS dependencies
         shell: bash
@@ -164,9 +166,16 @@ jobs:
           .ci/vcpkg/vcpkg install --classic --triplet x64-linux \
             nlohmann-json pugixml freetype stb zlib glfw3 glad plutosvg vulkan-headers
 
+      - name: Save completed dependency builds before GUI qualification
+        if: steps.native_ports.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ runner.temp }}/stun-gui-vcpkg-cache
+          key: ${{ steps.native_ports.outputs.cache-primary-key }}
+
       - name: Cache actual Lexbor / Box2D / Tree-sitter source builds
         id: xml_deps
-        uses: actions/cache@v4
+        uses: actions/cache/restore@v4
         with:
           path: ${{ runner.temp }}/stun-gui-xml-deps
           key: stun-gui-xml-v1-linux-x64-${{ hashFiles('flexUI/tests/xml-runtime-deps/CMakeLists.txt') }}
@@ -183,6 +192,13 @@ jobs:
             -DCMAKE_INSTALL_PREFIX="$RUNNER_TEMP/stun-gui-xml-deps"
           cmake --build build/stun-gui-xml-deps --parallel 2
           cmake --install build/stun-gui-xml-deps
+
+      - name: Save completed XML dependencies before GUI qualification
+        if: steps.xml_deps.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ runner.temp }}/stun-gui-xml-deps
+          key: ${{ steps.xml_deps.outputs.cache-primary-key }}
 
       - uses: actions/checkout@v4
         with:
@@ -235,7 +251,8 @@ jobs:
             /usr/bin/python3 .github/scripts/gui_native_e2e.py \
               --exe build/stun-gui/bin/flexui_desktop_editor \
               --source-sha "${{ steps.source.outputs.sha }}" \
-              --out build/stun-gui/gui-e2e
+              --out build/stun-gui/gui-e2e \
+              --ocr-initial Save --ocr-after Saved
 
       - name: Preserve exact-head actual GUI screenshot evidence
         if: always()
@@ -254,3 +271,10 @@ jobs:
         if: always() && steps.verified_cache.outcome == 'success'
         shell: bash
         run: bash .github/scripts/report-ccache.sh native-gui-linux
+
+      - name: Retain completed compiler work after a failed GUI qualification
+        if: failure() && steps.verified_cache.outcome == 'success'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ runner.temp }}/stun-ccache/native-gui-linux
+          key: stun-ccache-v1-4.14.2-native-gui-linux-${{ runner.os }}-${{ runner.arch }}-${{ steps.source.outputs.sha }}

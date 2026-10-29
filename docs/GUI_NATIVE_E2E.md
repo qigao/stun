@@ -17,12 +17,15 @@ valid screenshot/visual E2E evidence.
 The C++ example defines a 928x608 client window. Its deployed CSS gives
 Save a blue background (#2563eb, hover #3b82f6). TurboScript changes
 text from Save to Saving... and ultimately the document-service result.
+The button centers its label and keeps the long service result on one
+line with an ellipsis, so completion text cannot cover the document.
 
 ## Run the real native executable (Linux)
 
 Prerequisites: working real OpenGL/GLFW build, xvfb-run, XTest,
-python3-xlib and Pillow. Optional local OCR uses tesseract-ocr; core
-tests use no Baidu OCR, network, secrets or HTTP requests.
+python3-xlib, Pillow and tesseract-ocr. Product qualification requires
+local OCR of the initial Save and completed Saved states. The screenshot
+driver uses no Baidu OCR, network, secrets or HTTP requests.
 
 ~~~sh
 # Install only if not already present:
@@ -35,13 +38,16 @@ xvfb-run -a -s '-screen 0 1280x900x24 -nolisten tcp' \
   python3 .github/scripts/gui_native_e2e.py \
     --exe build/bin/flexui_desktop_editor \
     --source-sha "$(git rev-parse HEAD)" \
-    --out build/gui-e2e
+    --out build/gui-e2e \
+    --ocr-initial Save --ocr-after Saved
 ~~~
 
 This refuses missing binaries, no X11 display, missing or ambiguous
 visible windows, wrong dimensions, blank frames, absent/misplaced blue
-Save button, missing native Save-click visual change, nonzero exit,
-or failure to close via WM_DELETE_WINDOW.
+Save button, missing native Save-click visual change or completed Saved
+text, nonzero exit, or failure to close via WM_DELETE_WINDOW. First-frame
+rendering and native completion use bounded observation of the real
+screen; merely finding an X11 window or displaying Saving is insufficient.
 
 Evidence files:
 
@@ -50,14 +56,16 @@ Evidence files:
 - application.log: actual native process stderr/stdout
 - evidence.json: exact source HEAD, native binary SHA256, PID, window ID,
   client rectangle, mouse action, changed pixel count, result/failure
-  and optional OCR observations.
+  and OCR observations. A failed interaction retains the last actual
+  post-click frame and OCR error for diagnosis.
 
 The critical screenshot comparison is **hover vs. after real mouse click**,
 not initial vs. hovered: a hover color is not proof of a click handler.
 The button coordinates come from actual rendered blue pixels, never
-from an unverified fixed coordinate. OCR is optional and supplements the
-pixel check. Use --ocr-initial Save --ocr-after Saved when enabled.
-An uncertain OCR result is a failure, not an automatic pass.
+from an unverified fixed coordinate. The native GUI workflow requires
+both changed pixels and the whole OCR word Saved. Saving, Unsaved and
+service error text cannot satisfy that completion requirement. An
+uncertain OCR result is a failure, not an automatic pass.
 
 ## Evidence boundaries
 
@@ -65,6 +73,10 @@ An uncertain OCR result is a failure, not an automatic pass.
   with deterministic frames **without a GUI**. These run in the
   existing Public Dependency parser job without new runner.
   A green unit test is NOT a successful native GUI E2E.
+- The same test file also runs native X11 coordinate/capture/mouse
+  regressions when STUN_GUI_X11_TESTS=1. These create an off-origin X11
+  window and exercise the real python-xlib API. They verify the driver,
+  and do not replace the subsequent Stun application run.
 - A local Xvfb/Tk window validated the X11 screenshot/XTest transport:
   a responding test button passed, while an inert one failed.
   This is a harness self-test only, not a Stun renderer result.
@@ -75,10 +87,6 @@ An uncertain OCR result is a failure, not an automatic pass.
   do not assume identical pixels across Linux/macOS/Windows.
   Retain actual screenshots and diffs as bounded-lifetime CI artifacts.
 
-Next: integrate the **real Stun binary** with this script in a GPU-enabled
-build workflow, without adding a GitHub App, Ruleset or redundant CI matrix.
-
-
 ## M1 native GUI build / actual-screen CI
 
 The path-scoped workflow .github/workflows/gui-native-e2e.yml now targets
@@ -87,13 +95,17 @@ the real production flexui_desktop_editor through the minimal
 production sources). It downloads SHA256-verified published native SDK
 archives via curl, restores a pinned vcpkg compiler/dependency baseline,
 uses verified ccache, builds the real OpenGL/GLFW GUI, then runs the
-Python screenshot/XTest command above under Mesa llvmpipe/Xvfb.
+Python screenshot/XTest/OCR command above under Mesa llvmpipe/Xvfb.
+The restored vcpkg cache is exported in the installing shell. Completed
+dependency builds and compiler results are retained even when a later
+GUI qualification fails, without changing that failure into success.
 
 The exact job name is "GUI visible screenshot / Linux X11", selected
 by the trusted exact-head acceptance matrix for changes to the desktop
 editor, the script or GUI build workflow. A CI success requires that
-the actual window opened, rendered blue Save, reacted to mouse input and
-closed correctly. Native source/UI tests are not replaced.
+the actual window opened, rendered blue Save, reacted to mouse input,
+displayed the Saved completion and closed correctly. Native source/UI
+tests are not replaced.
 
 The workflow is intentionally one Linux GPU-software window runner,
 not a Windows/macOS matrix and not a new HTTP provider. Initial rollout
