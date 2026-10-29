@@ -434,6 +434,44 @@ identity, trusted external policy deployment, installation tokens, actual
 HTTPS ingress and `Stun attested acceptance` dual-status migration remain
 open in [Issue #322](https://github.com/qigao/stun/issues/322).
 
+## Explicit operator quarantine of orphaned attestor claims (Issue #322, M4)
+
+`.github/scripts/attestor_inbox.py` retains its bounded single-owner
+SQLite WAL work queue and deliberate **no automatic retry** policy. After a
+process crash leaves a record in `claimed`, the only supported change is
+a separately authorized operator's **irreversible terminal failure**:
+`inbox.quarantine_claim(digest, claimed_owner, operator=..., reason=...,
+evidence_ref=...)`. It uses the same `BEGIN IMMEDIATE` transaction to
+atomically verify that the exact claim still belongs to that owner, mark
+it `failed` and append a `operator_quarantine` audit entry. Wrong owner,
+repeat action, missing operator/evidence or a completed/failed claim are
+rejected. The audit table refuses UPDATE/DELETE in ordinary SQLite DML,
+and an injected audit INSERT fault rolls back the entire quarantine,
+preserving the old claim. Existing version-1 inboxes receive only an
+additive version-2 schema upgrade; unknown versions still fail closed.
+
+**This API is not an authentication mechanism.** The external attestor
+service must restrict database access, authenticate a distinct operator,
+and require an incident reference after checking the live GitHub PR,
+current exact HEAD, last `ci/full` admission and any status that might
+already have been posted before a crash. This operation never requeues or
+replays the old webhook. Following quarantine, a different already-pending
+event may be processed after normal live revalidation. Recovery from
+`failed` to `pending`, automatic leases, automatic retry, status
+republication and silent deletion are intentionally unsupported.
+
+The eight additional deterministic SQLite tests run inside the already
+required Public Dependency parser job, including two-connection
+arbitration, reopen persistence, duplicate quarantine rejection and
+audit-write failure rollback. No extra native runner, worker daemon,
+private key, App identity or external deployment is created. This
+operator path must remain separate from public HTTP ingress.
+
+The active master Ruleset continues to require the old
+`Stun required acceptance` context from shared GitHub Actions; exclusive
+dedicated-App issuance and live dual-context migration remain Open in
+[Issue #322](https://github.com/qigao/stun/issues/322).
+
 ## Maintenance
 
 - Add new files/paths to both the top-level trigger and

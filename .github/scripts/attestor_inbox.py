@@ -5,6 +5,8 @@ This is a library, not a network listener, retry daemon or deployed service.
 The external service must provision a private directory, verify webhooks
 before enqueue, and provide its own securely stored GitHub App credentials.
 There is deliberately NO automatic retry/lease reclaim after a worker crash.
+A distinct authenticated operator may explicitly mark the orphaned claim
+terminal FAILED with an append-only audit record; it is NEVER requeued.
 """
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -59,7 +61,7 @@ class DurableWebhookInbox:
             if mode.lower() != "wal":
                 raise InboxError("WAL durability is required")
             version = self.conn.execute("PRAGMA user_version").fetchone()[0]
-            if version not in (0, 1):
+            if version not in (0, 1, 2):
                 raise InboxError("unsupported inbox schema; no fallback")
             self.conn.execute("""CREATE TABLE IF NOT EXISTS work (
                 seq INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -76,8 +78,28 @@ class DurableWebhookInbox:
                 digest TEXT NOT NULL REFERENCES work(digest),
                 created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
             )""")
-            if version == 0:
-                self.conn.execute("PRAGMA user_version=1")
+            # An operator may explicitly terminalize a crash-abandoned
+            # claim, but cannot reset it to pending or auto-retry it.
+            # Version 2 is an additive, idempotent migration from v1.
+            self.conn.execute("""CREATE TABLE IF NOT EXISTS operator_quarantine (
+                seq INTEGER PRIMARY KEY AUTOINCREMENT,
+                digest TEXT NOT NULL REFERENCES work(digest),
+                claimed_owner TEXT NOT NULL,
+                operator TEXT NOT NULL,
+                reason TEXT NOT NULL,
+                evidence_ref TEXT NOT NULL,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )""")
+            self.conn.execute("""CREATE TRIGGER IF NOT EXISTS no_quarantine_update
+                BEFORE UPDATE ON operator_quarantine
+                BEGIN SELECT RAISE(ABORT, 'quarantine audit is append-only'); END
+            """)
+            self.conn.execute("""CREATE TRIGGER IF NOT EXISTS no_quarantine_delete
+                BEFORE DELETE ON operator_quarantine
+                BEGIN SELECT RAISE(ABORT, 'quarantine audit is append-only'); END
+            """)
+            if version != 2:
+                self.conn.execute("PRAGMA user_version=2")
         except Exception:
             self.conn.close()
             raise
@@ -192,6 +214,61 @@ class DurableWebhookInbox:
             )
             if cursor.rowcount != 1:
                 raise InboxError("worker does not own the claimed envelope")
+
+    def quarantine_claim(self, digest, claimed_owner, *,
+                         operator, reason, evidence_ref):
+        """Irreversibly fail an operator-reviewed orphaned claim, no retry.
+
+        This method does NOT authenticate the caller: the external deployment
+        must restrict it to its separate, audited operator identity. The
+        evidence reference must point to an independently inspected live
+        status/CI record; the API does not trust arbitrary webhook evidence.
+        """
+        if (not isinstance(digest, str) or DIGEST.fullmatch(digest) is None or
+                not isinstance(claimed_owner, str) or
+                not claimed_owner.strip() or len(claimed_owner) > 128 or
+                not isinstance(operator, str) or
+                not operator.strip() or len(operator) > 128 or
+                operator == claimed_owner or
+                not isinstance(reason, str) or
+                not (16 <= len(reason.strip()) <= 512) or
+                not isinstance(evidence_ref, str) or
+                not (6 <= len(evidence_ref.strip()) <= 256)):
+            raise InboxError("explicit bounded operator/claim/reason/evidence required")
+        with self._transaction():
+            record = self.conn.execute(
+                "SELECT state,owner FROM work WHERE digest=?", (digest,)
+            ).fetchone()
+            if record is None or record != ("claimed", claimed_owner):
+                raise InboxError("claim no longer belongs to expected owner")
+            updated = self.conn.execute(
+                "UPDATE work SET state='failed' WHERE digest=? "
+                "AND state='claimed' AND owner=?", (digest, claimed_owner)
+            )
+            if updated.rowcount != 1:
+                raise InboxError("lost terminal-claim arbitration")
+            self.conn.execute(
+                "INSERT INTO operator_quarantine("
+                "digest,claimed_owner,operator,reason,evidence_ref)"
+                " VALUES (?,?,?,?,?)",
+                (digest, claimed_owner, operator, reason.strip(),
+                 evidence_ref.strip())
+            )
+        return True
+
+    def quarantine_log(self, digest):
+        """Read the retained append-only operator record for a work digest."""
+        if not isinstance(digest, str) or DIGEST.fullmatch(digest) is None:
+            raise InboxError("invalid quarantine digest")
+        rows = self.conn.execute(
+            "SELECT digest,claimed_owner,operator,reason,evidence_ref,created_at "
+            "FROM operator_quarantine WHERE digest=? ORDER BY seq", (digest,)
+        ).fetchall()
+        return [
+            {"digest": row[0], "claimed_owner": row[1], "operator": row[2],
+             "reason": row[3], "evidence_ref": row[4], "created_at": row[5]}
+            for row in rows
+        ]
 
     def summary(self):
         counts = dict(self.conn.execute(

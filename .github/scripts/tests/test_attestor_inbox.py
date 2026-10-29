@@ -111,6 +111,154 @@ class InboxTests(unittest.TestCase):
         self.assertEqual(selected.digest, digest(later))
         self.assertNotEqual(selected.digest, item.digest)
 
+    def test_operator_quarantine_unblocks_queue_without_requeue(self):
+        other_event = {**EVENT, "source": "next"}
+        self.inbox.enqueue(D1, digest(), EVENT)
+        self.inbox.enqueue(D2, digest(other_event), other_event)
+        owned = self.inbox.claim_next("crashed-worker")
+        self.assertIsNone(self.inbox.claim_next("next-worker"))
+        self.assertTrue(self.inbox.quarantine_claim(
+            owned.digest, "crashed-worker", operator="human-operator",
+            reason="Worker crashed before terminal confirmation",
+            evidence_ref="incident:GH-2026-10-29-001"
+        ))
+        self.assertEqual(self.inbox.summary()["failed"], 1)
+        self.assertEqual(self.inbox.summary()["claimed"], 0)
+        next_owned = self.inbox.claim_next("next-worker")
+        self.assertEqual(next_owned.digest, digest(other_event))
+        self.assertNotEqual(next_owned.digest, owned.digest)
+        log = self.inbox.quarantine_log(owned.digest)
+        self.assertEqual(len(log), 1)
+        self.assertEqual(log[0]["operator"], "human-operator")
+        self.assertEqual(log[0]["claimed_owner"], "crashed-worker")
+        self.assertEqual(log[0]["evidence_ref"], "incident:GH-2026-10-29-001")
+
+    def test_quarantine_wrong_owner_does_not_change_claim(self):
+        self.inbox.enqueue(D1, digest(), EVENT)
+        work = self.inbox.claim_next("owner-one")
+        with self.assertRaises(InboxError):
+            self.inbox.quarantine_claim(
+                work.digest, "owner-two", operator="operator",
+                reason="Reviewed crash with external evidence",
+                evidence_ref="incident:wrong-owner"
+            )
+        self.assertEqual(self.inbox.summary()["claimed"], 1)
+        self.assertEqual(self.inbox.quarantine_log(work.digest), [])
+
+    def test_quarantine_requires_distinct_audited_operator(self):
+        self.inbox.enqueue(D1, digest(), EVENT)
+        work = self.inbox.claim_next("worker-one")
+        for operator, reason, evidence in (
+            ("", "Reviewed crash with external evidence", "incident:operator"),
+            ("worker-one", "Reviewed crash with external evidence", "incident:operator"),
+            ("operator", "short", "incident:operator"),
+            ("operator", "Reviewed crash with external evidence", ""),
+            ("operator", "Reviewed crash with external evidence", "x" * 300),
+        ):
+            with self.subTest(operator=operator, evidence=evidence), self.assertRaises(InboxError):
+                self.inbox.quarantine_claim(
+                    work.digest, "worker-one", operator=operator,
+                    reason=reason, evidence_ref=evidence
+                )
+        self.assertEqual(self.inbox.summary()["claimed"], 1)
+
+    def test_quarantine_is_irreversible_and_double_call_rejected(self):
+        self.inbox.enqueue(D1, digest(), EVENT)
+        work = self.inbox.claim_next("worker")
+        self.inbox.quarantine_claim(
+            work.digest, "worker", operator="operator",
+            reason="Reviewed lost process and current GitHub evidence",
+            evidence_ref="incident:no-replay"
+        )
+        with self.assertRaises(InboxError):
+            self.inbox.quarantine_claim(
+                work.digest, "worker", operator="operator",
+                reason="Reviewed lost process and current GitHub evidence",
+                evidence_ref="incident:no-replay"
+            )
+        with self.assertRaises(InboxError):
+            self.inbox.complete(work.digest, "worker", successful=True)
+        self.assertIsNone(self.inbox.claim_next("other"))
+        self.assertEqual(self.inbox.summary()["failed"], 1)
+
+    def test_quarantine_audit_is_durable_and_append_only(self):
+        self.inbox.enqueue(D1, digest(), EVENT)
+        work = self.inbox.claim_next("worker")
+        self.inbox.quarantine_claim(
+            work.digest, "worker", operator="operator",
+            reason="Reviewed immutable CI and last successful status",
+            evidence_ref="incident:independent-check"
+        )
+        other = DurableWebhookInbox(self.path, max_events=3, max_deliveries=5)
+        try:
+            self.assertEqual(len(other.quarantine_log(work.digest)), 1)
+            with self.assertRaises(sqlite3.IntegrityError):
+                other.conn.execute("DELETE FROM operator_quarantine")
+            with self.assertRaises(sqlite3.IntegrityError):
+                other.conn.execute(
+                    "UPDATE operator_quarantine SET operator='tamper'"
+                )
+            self.assertEqual(len(other.quarantine_log(work.digest)), 1)
+        finally:
+            other.close()
+
+    def test_quarantine_sql_fault_rolls_back_claim_and_audit(self):
+        self.inbox.enqueue(D1, digest(), EVENT)
+        work = self.inbox.claim_next("crashed-worker")
+        self.inbox.conn.execute("""
+            CREATE TRIGGER audit_insert_fault BEFORE INSERT ON operator_quarantine
+            BEGIN SELECT RAISE(ABORT,'audit write fault'); END
+        """)
+        with self.assertRaises(sqlite3.IntegrityError):
+            self.inbox.quarantine_claim(
+                work.digest, "crashed-worker", operator="operator",
+                reason="Reviewed process crash and CI evidence",
+                evidence_ref="incident:audit-fault"
+            )
+        self.assertEqual(self.inbox.summary()["claimed"], 1)
+        self.assertEqual(self.inbox.summary()["failed"], 0)
+        self.assertEqual(self.inbox.quarantine_log(work.digest), [])
+        self.inbox.conn.execute("DROP TRIGGER audit_insert_fault")
+        self.assertTrue(self.inbox.quarantine_claim(
+            work.digest, "crashed-worker", operator="operator",
+            reason="Reviewed process crash and CI evidence",
+            evidence_ref="incident:audit-fault"
+        ))
+
+    def test_quarantine_across_connections_has_one_winner(self):
+        self.inbox.enqueue(D1, digest(), EVENT)
+        work = self.inbox.claim_next("worker")
+        other = DurableWebhookInbox(self.path, max_events=3, max_deliveries=5)
+        try:
+            self.assertTrue(other.quarantine_claim(
+                work.digest, "worker", operator="operator-one",
+                reason="Reviewed stale claim after process exit",
+                evidence_ref="incident:one-winner"
+            ))
+            with self.assertRaises(InboxError):
+                self.inbox.quarantine_claim(
+                    work.digest, "worker", operator="operator-two",
+                    reason="Reviewed stale claim after process exit",
+                    evidence_ref="incident:second"
+                )
+            self.assertEqual(len(other.quarantine_log(work.digest)), 1)
+        finally:
+            other.close()
+
+    def test_additive_schema_v1_to_v2_is_durable(self):
+        self.inbox.conn.execute("PRAGMA user_version=1")
+        reopened = DurableWebhookInbox(self.path, max_events=3, max_deliveries=5)
+        try:
+            self.assertEqual(
+                reopened.conn.execute("PRAGMA user_version").fetchone()[0], 2
+            )
+            self.assertEqual(reopened.summary()["pending"], 0)
+            self.assertEqual(reopened.conn.execute(
+                "SELECT COUNT(*) FROM operator_quarantine"
+            ).fetchone()[0], 0)
+        finally:
+            reopened.close()
+
     def test_wrong_owner_and_double_complete_rejected(self):
         self.inbox.enqueue(D1, digest(), EVENT)
         item = self.inbox.claim_next("owner-1")
