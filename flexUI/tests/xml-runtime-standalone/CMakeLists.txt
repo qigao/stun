@@ -52,6 +52,30 @@ add_subdirectory("${STUN_ROOT}/shared/layout" graphlayout)
 
 set(BUILD_TESTING ON)
 add_custom_target(stun_xml_runtime_qualification)
+
+# Reuse the production compiler targets and style bridge. Keeping these tests
+# independent of FlexUI::Core makes accidental CSS/runtime dependencies visible.
+add_executable(test_tailwind_native
+  "${STUN_ROOT}/flexUI/tests/test_tailwind_native.cpp")
+target_link_libraries(test_tailwind_native
+  PRIVATE FlexUI::TailwindNative Salts::TinyTest)
+add_executable(test_tailwind_native_style
+  "${STUN_ROOT}/flexUI/tests/test_tailwind_native_style.cpp"
+  "${STUN_ROOT}/flexUI/src/tailwind_style_apply.cpp"
+  "${STUN_ROOT}/flexUI/src/style_property_registry.cpp")
+target_link_libraries(test_tailwind_native_style
+  PRIVATE FlexUI::TailwindNative Salts::Core Salts::CMeta Salts::TinyTest)
+add_executable(test_tailwindcss_module
+  "${STUN_ROOT}/flexUI/tests/test_tailwindcss_module.cpp")
+target_link_libraries(test_tailwindcss_module
+  PRIVATE FlexUI::TailwindCSS Salts::TinyTest)
+foreach(test IN ITEMS test_tailwind_native test_tailwind_native_style
+                      test_tailwindcss_module)
+  add_test(NAME ${test} COMMAND ${test})
+  set_tests_properties(${test} PROPERTIES TIMEOUT 120)
+  add_dependencies(stun_xml_runtime_qualification ${test})
+endforeach()
+
 foreach(test IN ITEMS test_ui_content_models test_ui_xml_admission test_ui_xml
     test_ui_document test_widget_registry test_desktop_application
     test_script_controller test_application_service_requests

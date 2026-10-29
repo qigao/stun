@@ -1,6 +1,7 @@
 #pragma once
 
 #include <flexUI/computed_style.h>
+#include <flexUI/style_property_id.h>
 
 #include <cmeta/cmeta.h>
 
@@ -13,34 +14,6 @@ class Element;
 }
 
 namespace flexUI::detail {
-
-enum class StylePropertyId : std::uint16_t {
-    Unknown = 0,
-    Opacity,
-    BackgroundColor,
-    TextColor,
-    BorderColor,
-    FontSize,
-    TransformX,
-    TransformY,
-    TransformScale,
-    TransformScaleX,
-    TransformScaleY,
-    TransformRotate,
-    OutlineWidth,
-    OutlineOffset,
-    OutlineColor,
-    RingWidth,
-    RingOffset,
-    RingColor,
-    RingOffsetColor,
-    BoxShadowOffsetX,
-    BoxShadowOffsetY,
-    BoxShadowBlur,
-    BoxShadowSpread,
-    BoxShadowColor,
-    Visibility,
-};
 
 enum StylePropertyFlags : std::uint32_t {
     STYLE_PROPERTY_NONE = 0u,

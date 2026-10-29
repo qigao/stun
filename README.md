@@ -10,6 +10,11 @@ defines that target. **Runtime migration is not complete:** the current utility
 catalog still generates CSS for StyleEngine. This design update does not replace
 that implementation or claim new shader/backend support.
 
+The first [native paint compiler slice](flexUI/docs/TAILWIND_NATIVE_PAINT_PROFILE.md)
+provides an independent typed compiler and a property-registry bridge for a
+limited opacity/color/state profile. The default Box/XML path and backend
+effect admission remain migration work.
+
 ## Application authoring and ownership
 
 - **XML** describes UI structure and static properties; FlexUI compiles it into an

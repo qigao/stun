@@ -104,6 +104,7 @@ set(FLEXUI_SOURCES
   src/computed_style.cpp
   src/style_engine.cpp
   src/style_property_registry.cpp
+  src/tailwind_style_apply.cpp
   src/style_property_impact.cpp
   src/css_semantic_value.cpp
   src/css_typed_value.cpp
@@ -178,6 +179,9 @@ set(FLEXUI_HEADERS
   include/flexUI/render_frame.h
   include/flexUI/shadcn_ir.h
   include/flexUI/tailwindcss.h
+  include/flexUI/tailwind_native.h
+  include/flexUI/style_property_id.h
+  include/flexUI/detail/tailwind_style_apply.h
   include/flexUI/utility_jit.h
   include/flexUI/widget.h
   include/flexUI/element.h
@@ -240,7 +244,7 @@ endif()
 
 # 链接依赖
 target_link_libraries(flexUI 
-    PUBLIC ${LEXBOR_LIBRARY} Flex::Runtime Flex::Render Flex::Animation FlexUI::TailwindCSS Salts::Core Salts::CMeta nlohmann_json::nlohmann_json
+    PUBLIC ${LEXBOR_LIBRARY} Flex::Runtime Flex::Render Flex::Animation FlexUI::TailwindCSS FlexUI::TailwindNative Salts::Core Salts::CMeta nlohmann_json::nlohmann_json
     PRIVATE Flex::Compiler Salts::Unicode unofficial::tree-sitter::tree-sitter pugixml::pugixml
 )
 set_target_properties(flexUI PROPERTIES FOLDER flexUI/)
@@ -280,6 +284,26 @@ write_basic_package_version_file(
   VERSION "${FLEXUI_PLUGIN_PACKAGE_VERSION}"
   COMPATIBILITY SameMajorVersion)
 
+install(
+  EXPORT FlexUITailwindNativeTargets
+  FILE FlexUITailwindNativeTargets.cmake
+  NAMESPACE FlexUI::
+  DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/FlexUI"
+  COMPONENT FlexUITailwindNative)
+install(
+  FILES "${CMAKE_CURRENT_BINARY_DIR}/FlexUIConfig.cmake"
+        "${CMAKE_CURRENT_BINARY_DIR}/FlexUIConfigVersion.cmake"
+  DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/FlexUI"
+  COMPONENT FlexUITailwindNative)
+install(
+  FILES include/flexUI/tailwind_native.h
+        include/flexUI/style_property_id.h
+  DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/flexUI"
+  COMPONENT FlexUITailwindNative)
+install(
+  FILES "${CMAKE_CURRENT_SOURCE_DIR}/../flex/include/flex/core/types.h"
+  DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/flex/core"
+  COMPONENT FlexUITailwindNative)
 install(
   EXPORT FlexUIPluginSDKTargets
   FILE FlexUIPluginSDKTargets.cmake
