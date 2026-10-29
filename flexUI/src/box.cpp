@@ -584,7 +584,7 @@ Box::Box(flex::Renderer* renderer, BoxOptions options)
       bindings_([this]() {
         dirty_style_ = true;
         dirty_layout_ = true;
-        dirty_paint_ = true;
+        notify_dirty_paint();
       }) {
   if (renderer) {
     renderer_ = std::make_unique<Renderer>(renderer);
@@ -811,8 +811,15 @@ RenderFrame Box::make_render_frame() const {
 }
 
 void Box::run_render_stage() {
+  // RenderManager can call application/widget/backend code that requests a
+  // second paint. A successful frame only consumes the requests present when
+  // that frame started; it must not clear newer requests. On any exception
+  // the pending bit remains set so the caller can explicitly handle/retry.
+  const std::uint64_t submitted_revision = paint_request_revision_;
   render_mgr_->render_frame(make_render_frame());
-  dirty_paint_ = false;
+  if (paint_request_revision_ == submitted_revision) {
+    dirty_paint_ = false;
+  }
 }
 
 void Box::load_css(const std::string& css) {
