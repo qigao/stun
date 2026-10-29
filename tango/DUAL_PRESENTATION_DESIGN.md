@@ -65,6 +65,41 @@ atomicity and lifetime across source resize/retirement on all three native
 platforms. This proves only snapshot ownership; it is **not** an OpenGL
 presenter, GL glyph atlas, GPU shader or device-retirement qualification.
 
+## First GL pixel presenter implementation (experimental)
+
+`flex/backends/tango_opengl/cell_presenter.cpp` now stages a typed
+`CellPixelPlan` from the immutable C11 grid. It keeps every cell background,
+leading grapheme and wide-cell continuation, supports explicit reverse/bold/
+dim/underline/strike operations and rejects italic/blink/unknown styles.
+It also bounds cell counts, draw commands, UTF-8 bytes and framebuffer
+dimensions, and checks the selected font's measured glyph bounds before
+beginning a pixel frame. This is a **one-glyph-per-leading-cell** first
+profile, not the final instanced glyph pipeline; source Unicode remains Tango
+C11, not a new TUI parser. The frame plan is immutable to callers.
+
+`gl_presenter.cpp` creates a **real external gCanvas OpenGL renderer**
+from an explicitly current host context and proc loader. It owns
+gCanvas's existing GPU shader/glyph context, uses no alternate NanoVG
+engine and does not register `RendererBackend::TangoOpenGL` until separate
+GPU runtime, input, owner-retirement and product acceptance completes.
+The demo `flexUI/examples/tango_opengl_demo.cpp` opens an actual GLFW
+GL 4.1 context, captures real Tango cells, presents the staged frame and
+swaps the host window buffer; an optional font path selects the exact
+monospaced font. The demo is built only with explicit
+`-DFLEX_BUILD_BACKEND_TANGO_OPENGL=ON`, gCanvas GL, Tango and desktop
+examples enabled. The host must destroy presenter resources with the
+compatible context current.
+
+The ordinary headless cross-platform test `test_tango_gl_frame` uses a
+recording pixel renderer to prove cell geometry, UTF-8/CJK span
+projection, reverse/color/decoration, revision/budget/no-fallback and
+the owner-thread contract. **Those CPU tests do not qualify real GL
+pixels, font coverage, multi-frame GPU fences, resource retirement or
+input hit testing.** The production public `TangoOpenGL` factory remains
+unregistered and unsupported until #342's native GPU acceptance.
+A driver rejection after frame begin is not an atomic GPU rollback.
+This new source does not change native Tango TTY behavior.
+
 ## Native TTY presenter
 
 Owns/borrows the terminal, validates the bounded buffer, produces VT diff

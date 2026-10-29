@@ -274,10 +274,12 @@ terminal 由宿主拥有，必须活到 renderer 析构之后。TUI 使用离散
 与像素 backend 完全一致的曲线、旋转、阴影或模糊能力；调用方应通过
 `RendererCapabilities` 查询能力。
 
-### TangoOpenGL（独立、尚未实现）
+### TangoOpenGL（独立 GL 呈现代码已引入，生产门禁尚未完成）
 
-`RendererBackend::TangoOpenGL` 当前仅有公开枚举/注册槽位和 CPU effect-admission profile；
-**没有**注册工厂、GL glyph atlas、framebuffer、输入命中映射或 native resource-owner 实现。
+`RendererBackend::TangoOpenGL` 已有公开枚举/注册槽位和 CPU effect-admission profile；
+新增的 `flex_tango_gl_frame` 将已冻结的 Tango cell 栅格转换为有界 glyph/背景绘制计划，
+`flex_backend_tango_opengl` 的可选代码可从真实 host GL context 创建 gCanvas pixel presenter，
+但**没有**注册最终生产工厂、独立 instanced glyph atlas、输入命中映射、完整 GPU retirement/native resource-owner 资格或真实 GUI acceptance。
 `is_renderer_backend_available(RendererBackend::TangoOpenGL)` 在没有明确注册时为 false，
 `create_renderer(RendererBackend::TangoOpenGL, ...)` 返回空，不尝试 `RendererBackend::TUI`
 或 `RendererBackend::OpenGL`。未来 GL presenter 必须显式接收宿主拥有的 context、Tango
@@ -319,5 +321,11 @@ option(FLEX_BUILD_BACKEND_D2D "Build Direct2D renderer backend" ON)
 target_link_libraries(my_gl_app PRIVATE flex_backend_opengl)
 target_link_libraries(my_vk_app PRIVATE flex_backend_vulkan)
 ```
+
+显式选用 Tango GL 呈现库需在满足 Tango + gCanvas desktop GL 依赖时加
+`-DFLEX_BUILD_BACKEND_TANGO_OPENGL=ON`。TTY-only 构建仍编译不依赖 GL 的
+`flex_tango_gl_frame` CPU 计划，但不提供 GPU presenter。实际窗口示例为
+`tango_opengl_demo`；没有通过其实际图像/输入/设备生命周期验收前，
+`RendererBackend::TangoOpenGL` 工厂保持未注册。
 
 关闭某个选项会使对应 target 和入口头不可用；构建系统不会自动选择其他 backend。

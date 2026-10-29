@@ -90,6 +90,18 @@ add_test(NAME test_effect_admission COMMAND test_effect_admission)
 set_tests_properties(test_effect_admission PROPERTIES TIMEOUT 120)
 add_dependencies(stun_xml_runtime_qualification test_effect_admission)
 
+# Exercise the real Tango C11 grid-to-pixel compositor recipe with a strict
+# recording pixel renderer; no GL/window dependency for this qualification.
+if(TARGET flex_tango_gl_frame)
+  add_executable(test_tango_gl_frame
+    "${STUN_ROOT}/flex/tests/test_tango_gl_frame.cpp")
+  target_link_libraries(test_tango_gl_frame
+    PRIVATE flex_tango_gl_frame Salts::TinyTest)
+  add_test(NAME test_tango_gl_frame COMMAND test_tango_gl_frame)
+  set_tests_properties(test_tango_gl_frame PROPERTIES TIMEOUT 120)
+  add_dependencies(stun_xml_runtime_qualification test_tango_gl_frame)
+endif()
+
 # Exercise the production command replay and preflight code with a recording
 # renderer, then the same command path with the real Tango cell renderer.
 foreach(test IN ITEMS test_render_command test_render_command_tango)
