@@ -8,7 +8,9 @@ on:
     paths:
       - '.github/workflows/gui-native-e2e.yml'
       - '.github/scripts/gui_native_e2e.py'
+      - '.github/scripts/gui_native_suite.py'
       - '.github/scripts/tests/test_gui_native_e2e.py'
+      - '.github/scripts/tests/test_gui_native_suite.py'
       - '.github/scripts/gui_runtime/**'
       - 'flexUI/examples/desktop_editor/**'
   workflow_dispatch:
@@ -242,17 +244,16 @@ jobs:
           test -f build/stun-gui/bin/desktop_editor_assets/editor.css
           test -f build/stun-gui/bin/desktop_editor_assets/editor.tbs
 
-      - name: Capture actual Stun GUI window and real mouse Save interaction
+      - name: Qualify real Stun Save and reject wrong visible states
         shell: bash
         run: |
           set -euo pipefail
           export LD_LIBRARY_PATH="$SALTS_ROOT/lib:$SALTS_UTILS_ROOT/lib:$CHTTP_ROOT/lib:$TURBOSCRIPT_ROOT/lib:${LD_LIBRARY_PATH:-}"
           xvfb-run -a -s '-screen 0 1280x900x24 -nolisten tcp' \
-            /usr/bin/python3 .github/scripts/gui_native_e2e.py \
+            /usr/bin/python3 .github/scripts/gui_native_suite.py \
               --exe build/stun-gui/bin/flexui_desktop_editor \
               --source-sha "${{ steps.source.outputs.sha }}" \
-              --out build/stun-gui/gui-e2e \
-              --ocr-initial Save --ocr-after Saved
+              --out build/stun-gui/gui-e2e
 
       - name: Preserve exact-head actual GUI screenshot evidence
         if: always()
@@ -262,9 +263,7 @@ jobs:
           retention-days: 3
           if-no-files-found: warn
           path: |
-            build/stun-gui/gui-e2e/*.png
-            build/stun-gui/gui-e2e/evidence.json
-            build/stun-gui/gui-e2e/application.log
+            build/stun-gui/gui-e2e/
             build/stun-gui/CMakeFiles/CMakeConfigureLog.yaml
 
       - name: Report real compiler cache statistics

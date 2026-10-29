@@ -87,6 +87,43 @@ uncertain OCR result is a failure, not an automatic pass.
   do not assume identical pixels across Linux/macOS/Windows.
   Retain actual screenshots and diffs as bounded-lifetime CI artifacts.
 
+## Real application negative cases
+
+The CI entry point is `.github/scripts/gui_native_suite.py`. It runs the
+successful application first, then two isolated asset variants, sequentially
+on the same display and runner:
+
+| Scenario | Isolated asset change | Required visible failure |
+| --- | --- | --- |
+| Initial label | Change the Save button label to `Broken` in copied XML | A rendered blue button with OCR `Broken`; the driver rejects the initial state before clicking |
+| Pending completion | Change the successful completion's displayed text to `Saving...` in copied TurboScript | Initial `Save`, a real click and changed pixels, then OCR `Saving`; the driver rejects the missing `Saved` completion |
+
+Both variants execute copies of the same native executable and document
+service plugin. Their SHA256 identities must match the successful baseline.
+Each mutation must have exactly one source anchor and change only the named
+asset; the original application and assets must retain their hashes. The
+pending variant preserves the real command, plugin and completion callback.
+
+~~~sh
+xvfb-run -a -s '-screen 0 1280x900x24 -nolisten tcp' \
+  python3 .github/scripts/gui_native_suite.py \
+    --exe build/bin/flexui_desktop_editor \
+    --source-sha "$(git rev-parse HEAD)" \
+    --out build/gui-e2e
+~~~
+
+A nonzero exit alone is insufficient. A negative case must have the expected
+visual failure code, a live application at the failure point, the real
+window, the expected erroneous text in screenshot OCR, and a normal native
+window-close exit. Missing dependencies, a blank image, empty OCR, a crashed
+process or forced cleanup fail the suite.
+
+The positive evidence remains at the output root. Each negative case keeps
+its own screenshots, application log and `evidence.json` with `result: FAIL`.
+The separate `suite.json` records whether those required failures were
+actually observed. It reports PASS only after the positive and both real
+negative cases qualify; it never rewrites failed driver evidence as success.
+
 ## M1 native GUI build / actual-screen CI
 
 The path-scoped workflow .github/workflows/gui-native-e2e.yml now targets
@@ -95,7 +132,7 @@ the real production flexui_desktop_editor through the minimal
 production sources). It downloads SHA256-verified published native SDK
 archives via curl, restores a pinned vcpkg compiler/dependency baseline,
 uses verified ccache, builds the real OpenGL/GLFW GUI, then runs the
-Python screenshot/XTest/OCR command above under Mesa llvmpipe/Xvfb.
+Python screenshot/XTest/OCR suite above under Mesa llvmpipe/Xvfb.
 The restored vcpkg cache is exported in the installing shell. Completed
 dependency builds and compiler results are retained even when a later
 GUI qualification fails, without changing that failure into success.
@@ -104,7 +141,8 @@ The exact job name is "GUI visible screenshot / Linux X11", selected
 by the trusted exact-head acceptance matrix for changes to the desktop
 editor, the script or GUI build workflow. A CI success requires that
 the actual window opened, rendered blue Save, reacted to mouse input,
-displayed the Saved completion and closed correctly. Native source/UI
+displayed the Saved completion and closed correctly, and that both wrong
+visible states were rejected for their expected reason. Native source/UI
 tests are not replaced.
 
 The workflow is intentionally one Linux GPU-software window runner,

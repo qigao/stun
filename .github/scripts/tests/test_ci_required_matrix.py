@@ -21,7 +21,9 @@ class RequirementTests(unittest.TestCase):
         for path in (
             "flexUI/examples/desktop_editor/editor.xml",
             ".github/scripts/gui_native_e2e.py",
+            ".github/scripts/gui_native_suite.py",
             ".github/scripts/tests/test_gui_native_e2e.py",
+            ".github/scripts/tests/test_gui_native_suite.py",
             ".github/scripts/gui_runtime/CMakeLists.txt",
             ".github/workflows/gui-native-e2e.yml",
         ):

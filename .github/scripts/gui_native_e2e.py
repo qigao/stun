@@ -23,11 +23,17 @@ TITLE = "FlexUI Desktop Editor"
 
 
 class VisualFailure(RuntimeError):
-    pass
+    def __init__(self, message, *, code="gui_failure"):
+        super().__init__(message)
+        self.code = code
 
 
 class OcrMismatch(VisualFailure):
     """A readable frame has not reached the required visible state yet."""
+
+    def __init__(self, message, words):
+        super().__init__(message, code="ocr_mismatch")
+        self.words = words
 
 
 def is_button_blue(rgb):
@@ -183,7 +189,8 @@ def local_ocr(path, expected):
     # Compare whole words: "Unsaved" must never satisfy the "Saved" gate.
     if not wanted or not any(found[i:i + len(wanted)] == wanted
                              for i in range(len(found) - len(wanted) + 1)):
-        raise OcrMismatch(f"visible OCR {found!r} did not contain words {wanted!r}")
+        raise OcrMismatch(
+            f"visible OCR {found!r} did not contain words {wanted!r}", words)
     return words
 
 
@@ -208,7 +215,8 @@ def run(args):
         "real_mouse_event": False, "result": "FAIL"
     }
     start = time.monotonic()
-    disp, process = None, None
+    disp, process, target = None, None, None
+    close_requested = False
     try:
         try:
             from Xlib import display, X
@@ -285,21 +293,25 @@ def run(args):
                     continue
                 roi = (max(0, box[0] - 5), max(0, box[1] - 3),
                        min(width, box[2] + 5), min(height, box[3] + 3))
+                metadata["save_button_box"] = list(box)
                 if args.ocr_initial:
                     try:
                         metadata["initial_ocr"] = button_ocr(
                             before, roi, out / "before_button_ocr.png",
                             args.ocr_initial)
+                        metadata["initial_ocr_observed"] = metadata["initial_ocr"]
                     except OcrMismatch as exc:
                         last_initial_error = str(exc)
                         metadata["initial_ocr_last_mismatch"] = str(exc)
+                        metadata["initial_ocr_observed"] = exc.words
                         time.sleep(.08)
                         continue
                 ready = True
                 break
             if not ready:
-                raise VisualFailure("initial GUI state not reached: " + last_initial_error)
-            metadata["save_button_box"] = list(box)
+                raise VisualFailure(
+                    "initial GUI state not reached: " + last_initial_error,
+                    code="initial_state_not_reached")
             center = ((box[0] + box[2]) // 2, (box[1] + box[3]) // 2)
             mouse(disp, target, *center)
             time.sleep(.20)
@@ -322,8 +334,10 @@ def run(args):
                     try:
                         metadata["after_ocr"] = button_ocr(
                             frame, roi, out / "after_button_ocr.png", args.ocr_after)
+                        metadata["after_ocr_observed"] = metadata["after_ocr"]
                     except OcrMismatch as exc:
                         metadata["after_ocr_last_mismatch"] = str(exc)
+                        metadata["after_ocr_observed"] = exc.words
                         matched = False
                 if matched:
                     matching_frames += 1
@@ -339,10 +353,13 @@ def run(args):
                 if args.ocr_after:
                     raise VisualFailure(
                         "real Save click did not reach stable visible completion: " +
-                        metadata.get("after_ocr_last_mismatch", "no qualifying pixel change"))
+                        metadata.get("after_ocr_last_mismatch", "no qualifying pixel change"),
+                        code="completion_not_reached")
                 raise VisualFailure(
-                    "real Save click did not change visible button beyond hover")
+                    "real Save click did not change visible button beyond hover",
+                    code="completion_not_reached")
             post.save(out / "after.png")
+            close_requested = True
             request_close(disp, target)
             try:
                 code = process.wait(timeout=5)
@@ -354,20 +371,58 @@ def run(args):
                             duration_seconds=round(time.monotonic() - start, 2))
     except BaseException as exc:
         metadata["error"] = str(exc)
+        metadata["failure_code"] = getattr(exc, "code", type(exc).__name__)
+        metadata["application_alive_on_failure"] = (
+            process is not None and process.poll() is None)
         raise
     finally:
-        if process is not None and process.poll() is None:
-            process.terminate()
-            try:
-                process.wait(timeout=2)
-            except subprocess.TimeoutExpired:
-                process.kill()
-                process.wait()
+        try:
+            # A visible mismatch still owns a live native application. Ask it to
+            # close normally before any bounded forced cleanup; keep the original
+            # visual failure and report cleanup separately for negative scenarios.
+            if (process is not None and process.poll() is None and target is not None
+                    and disp is not None and not close_requested):
+                try:
+                    request_close(disp, target)
+                    process.wait(timeout=5)
+                    metadata["cleanup_mode"] = "wm_delete_window"
+                except Exception as exc:
+                    metadata["cleanup_mode"] = "wm_delete_window_failed"
+                    metadata["cleanup_error"] = str(exc)
+            if process is not None and process.poll() is None:
+                metadata["cleanup_mode"] = "terminate"
+                process.terminate()
+                try:
+                    process.wait(timeout=2)
+                except subprocess.TimeoutExpired:
+                    metadata["cleanup_mode"] = "kill"
+                    process.kill()
+                    try:
+                        process.wait(timeout=2)
+                    except subprocess.TimeoutExpired:
+                        metadata["cleanup_error"] = "native process did not exit after SIGKILL"
+            if process is not None:
+                metadata.setdefault("cleanup_mode",
+                                    "wm_delete_window" if close_requested else "already_exited")
+                metadata["cleanup_exit_code"] = process.poll()
+        except Exception as exc:
+            metadata["cleanup_error"] = str(exc)
         if disp is not None:
-            disp.close()
+            try:
+                disp.close()
+            except Exception as exc:
+                metadata["display_cleanup_error"] = str(exc)
+                metadata.setdefault("cleanup_error", "X11 display close failed: " + str(exc))
+        cleanup_failed = metadata["result"] == "PASS" and "cleanup_error" in metadata
+        if cleanup_failed:
+            metadata.update(result="FAIL", failure_code="cleanup_failed",
+                            error="native GUI cleanup failed: " + metadata["cleanup_error"])
+        metadata["duration_seconds"] = round(time.monotonic() - start, 2)
         (out / "evidence.json").write_text(
             json.dumps(metadata, indent=2, sort_keys=True) + "\n",
             encoding="utf-8")
+        if cleanup_failed:
+            raise VisualFailure(metadata["error"], code="cleanup_failed")
     print("GUI E2E PASS", metadata["source_sha"],
           "changed_pixels", metadata["changed_button_pixels"])
     return metadata

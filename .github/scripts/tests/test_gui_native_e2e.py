@@ -125,8 +125,11 @@ class GuiOcrTests(unittest.TestCase):
         for text in ("Saving...", "Save failed", "Unsaved", "Save", "S a v e d"):
             with self.subTest(text=text), patch.object(
                     gui.subprocess, "run", return_value=self.result(text)):
-                with self.assertRaises(gui.OcrMismatch):
+                with self.assertRaises(gui.OcrMismatch) as failure:
                     gui.local_ocr("unused.png", "Saved")
+                self.assertEqual(failure.exception.code, "ocr_mismatch")
+                self.assertEqual([word["text"] for word in failure.exception.words],
+                                 text.split())
 
     def test_preflight_failure_preserves_evidence(self):
         with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {}, clear=True):
@@ -137,7 +140,35 @@ class GuiOcrTests(unittest.TestCase):
             evidence = json.loads((Path(directory) / "evidence.json").read_text())
             self.assertEqual(evidence["result"], "FAIL")
             self.assertFalse(evidence["real_mouse_event"])
+            self.assertFalse(evidence["application_alive_on_failure"])
+            self.assertEqual(evidence["failure_code"], "gui_failure")
             self.assertIn("error", evidence)
+
+    def test_display_close_error_preserves_original_failure_evidence(self):
+        class Display:
+            def close(self):
+                raise RuntimeError("X11 transport closed during flush")
+        xlib = SimpleNamespace(display=SimpleNamespace(Display=Display), X=object())
+        pil = SimpleNamespace(ImageStat=object())
+        with tempfile.TemporaryDirectory() as directory:
+            exe = Path(directory) / "native-gui"
+            exe.write_text("not launched: pre-existing window must reject admission\n")
+            exe.chmod(0o755)
+            args = SimpleNamespace(exe=str(exe), source_sha="a" * 40,
+                                   out=str(Path(directory) / "evidence"),
+                                   timeout=1, minimum_changed=38)
+            with patch.dict(sys.modules, {"Xlib": xlib, "PIL": pil}), \
+                 patch.dict(os.environ, {"DISPLAY": ":test"}), \
+                 patch.object(gui, "find_titled_windows",
+                              return_value=[SimpleNamespace(id=1)]):
+                with self.assertRaisesRegex(gui.VisualFailure, "existing same-title GUI"):
+                    gui.run(args)
+            evidence = json.loads((Path(args.out) / "evidence.json").read_text())
+            self.assertEqual(evidence["result"], "FAIL")
+            self.assertEqual(evidence["failure_code"], "gui_failure")
+            self.assertIn("existing same-title GUI", evidence["error"])
+            self.assertIn("closed during flush", evidence["cleanup_error"])
+            self.assertFalse(evidence["application_alive_on_failure"])
 
 
 @unittest.skipUnless(os.environ.get("STUN_GUI_X11_TESTS") == "1",

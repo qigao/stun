@@ -269,6 +269,10 @@ def main():
         sys.executable,
         str(Path(__file__).with_name("test_gui_native_e2e.py"))
     ], check=True)
+    subprocess.run([
+        sys.executable,
+        str(Path(__file__).with_name("test_gui_native_suite.py"))
+    ], check=True)
     print("CI PR/master-push scope: all targeted and fail-open cases passed")
 
 
