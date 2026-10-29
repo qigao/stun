@@ -1,3 +1,4 @@
+#include <flexUI/box.h>
 #include <flexUI/element.h>
 #include <flexUI/render_command.h>
 #include <flexUI/render_manager.h>
@@ -132,11 +133,13 @@ class PreflightRenderer final : public flex::Renderer {
 class PreflightWidget final : public flexUI::Widget {
  public:
   bool append_unsupported_blur = false;
+  std::function<void()> on_emit;
 
   const char* type_name() const override { return "PreflightWidget"; }
   bool paints_host_box() const override { return true; }
   void emit_render_commands(const flexUI::Element&,
                             flexUI::RenderCommandList& commands) override {
+    if (on_emit) on_emit();
     commands.draw_rect(0, 0, 20, 16, 0,
                        flex::Paint::solid(flex::Color{0.2f, 0.4f, 0.6f, 1.0f}),
                        flex::Paint::none(), 0);
@@ -374,5 +377,92 @@ suite("RenderManager complete-frame preflight") {
     check_equal(backend.removals, removals_before + 1);
     check_equal(backend.retained_pushes, 2);
     check(!root.is_dirty(flex::DirtyFlags::Visual));
+  }
+}
+
+suite("Box paint notifications across render submissions") {
+  it("keeps a widget paint request raised while recording the current frame") {
+    PreflightRenderer backend;
+    flexUI::Box box(&backend);
+    auto widget = std::make_unique<PreflightWidget>();
+    auto* producer = widget.get();
+    auto* root = box.create_with_widget("div", std::move(widget), "root");
+    box.set_root(root);
+
+    producer->on_emit = [&box] { box.notify_dirty_paint(); };
+    box.update();
+    check_equal(backend.begins, 1);
+    check(backend.rectangles > 0);
+    check(box.is_dirty());
+    const int first_draws = backend.rectangles;
+
+    producer->on_emit = {};
+    box.update();
+    check_equal(backend.begins, 2);
+    check(backend.rectangles > first_draws);
+    check(!box.is_dirty());
+    const int settled_draws = backend.rectangles;
+    box.update();
+    check_equal(backend.rectangles, settled_draws);
+  }
+
+  it("keeps an element paint request raised by a real backend draw callback") {
+    PreflightRenderer backend;
+    flexUI::Box box(&backend);
+    auto root_widget = std::make_unique<PreflightWidget>();
+    auto* root = box.create_with_widget("div", std::move(root_widget), "root");
+    box.set_root(root);
+
+    backend.on_draw = [root] { root->mark_paint_dirty(); };
+    box.update();
+    check(backend.rectangles > 0);
+    check(root->dirty_paint());
+    check(box.is_dirty());
+    const int first_draws = backend.rectangles;
+
+    backend.on_draw = {};
+    box.update();
+    check(backend.rectangles > first_draws);
+    check(!root->dirty_paint());
+    check(!box.is_dirty());
+    const int settled_draws = backend.rectangles;
+    box.update();
+    check_equal(backend.rectangles, settled_draws);
+  }
+
+  it("preserves pending paint on preflight rejection and backend failure") {
+    PreflightRenderer backend;
+    flexUI::Box box(&backend);
+    auto widget = std::make_unique<PreflightWidget>();
+    auto* producer = widget.get();
+    auto* root = box.create_with_widget("div", std::move(widget), "root");
+    box.set_root(root);
+
+    producer->append_unsupported_blur = true;
+    bool rejected = false;
+    try {
+      box.update();
+    } catch (const flexUI::RenderValidationException& error) {
+      rejected = error.diagnostic().code ==
+                 flexUI::RenderValidationError::UnsupportedOperation;
+    }
+    check(rejected);
+    check_equal(backend.operations, 0);
+    check(box.is_dirty());
+    check(root->dirty_paint());
+
+    producer->append_unsupported_blur = false;
+    backend.fail_draw = true;
+    bool failed = false;
+    try {
+      box.update();
+    } catch (const std::runtime_error& error) {
+      failed = std::string(error.what()) == "test backend draw failure";
+    }
+    check(failed);
+    check_equal(backend.begins, 1);
+    check_equal(backend.ends, 0);
+    check(box.is_dirty());
+    check(root->dirty_paint());
   }
 }

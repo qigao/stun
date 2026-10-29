@@ -282,7 +282,12 @@ public:
   // 脏标记通知
   void notify_dirty_style() { dirty_style_ = true; }
   void notify_dirty_layout() { dirty_layout_ = true; }
-  void notify_dirty_paint() { dirty_paint_ = true; }
+  // Paint requests raised during a synchronous render must survive its commit.
+  // The revision increments even if the pending flag was already set.
+  void notify_dirty_paint() {
+    dirty_paint_ = true;
+    ++paint_request_revision_;
+  }
   bool style_state_affects_selectors(Symbol state) const;
 
   // Widget 注册
@@ -371,6 +376,7 @@ private:
   bool dirty_style_ = true;
   bool dirty_layout_ = true;
   bool dirty_paint_ = true;
+  std::uint64_t paint_request_revision_ = 0;
   std::unordered_set<std::uintptr_t> styled_elements_;
   std::unordered_map<const Element *, float> container_widths_;
 
