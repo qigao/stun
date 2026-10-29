@@ -72,6 +72,8 @@ def verify_labeled_workflow_isolation():
     workflows = Path(__file__).resolve().parents[2] / "workflows"
     guard = "    if: github.event.action != 'labeled' || github.event.label.name == 'ci/full'"
     suffix = "-${{ github.event.action == 'labeled' && github.event.label.name != 'ci/full' && github.run_id || 'qualification' }}"
+    dispatch_suffix = "-${{ (github.event_name == 'workflow_dispatch' || (github.event.action == 'labeled' && github.event.label.name != 'ci/full')) && github.run_id || 'qualification' }}"
+    master_push_and_dispatch = {"runtime-conformance.yml", "graphlayout-native.yml"}
     guarded = []
     for path in sorted(workflows.glob("*.yml")):
         source = path.read_text(encoding="utf-8")
@@ -82,9 +84,14 @@ def verify_labeled_workflow_isolation():
         group = next(
             (line for line in source.splitlines() if line.startswith("  group: ")), ""
         )
-        assert group.endswith(suffix), (path.name, group)
+        if path.name in master_push_and_dispatch:
+            assert "  push:" in source and "  workflow_dispatch:" in source
+            assert group.endswith(dispatch_suffix), (path.name, group)
+        else:
+            assert group.endswith(suffix), (path.name, group)
         assert "  cancel-in-progress: true" in source, path.name
     assert len(guarded) == 9, guarded
+    assert master_push_and_dispatch.issubset(set(guarded)), guarded
 
 def main():
     assert SCRIPT.is_file(), SCRIPT
