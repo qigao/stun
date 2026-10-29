@@ -107,9 +107,9 @@ def find_titled_windows(disp, title):
 def window_rect(disp, window):
     root = disp.screen().root
     geometry = window.get_geometry()
-    # The root->window translation gives the native client origin in root
-    # coordinates. window.translate_coords(root) is the inverse.
-    pos = root.translate_coords(window, 0, 0)
+    # Translate window client origin (0, 0) into root-screen coordinates.
+    # Reversing source and destination would yield a negative screen origin.
+    pos = window.translate_coords(root, 0, 0)
     return int(pos.x), int(pos.y), int(geometry.width), int(geometry.height)
 
 

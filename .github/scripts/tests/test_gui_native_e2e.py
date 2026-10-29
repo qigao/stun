@@ -84,6 +84,28 @@ class GuiPixelTests(unittest.TestCase):
                               Frame(width=927, height=608),
                               (700, 20, 820, 50))
 
+    def test_x11_client_origin_translates_window_to_root(self):
+        # XTranslateCoordinates(source=window, destination=root, 0, 0).
+        # Reversing the two produces negative screen coordinates.
+        class Geometry:
+            width = 928
+            height = 608
+        class Root:
+            pass
+        root = Root()
+        class Window:
+            def get_geometry(self):
+                return Geometry()
+            def translate_coords(self, destination, x, y):
+                self_was_source = destination is root and (x, y) == (0, 0)
+                if not self_was_source:
+                    raise AssertionError("X11 translation direction inverted")
+                return type("Position", (), {"x": 127, "y": 83})()
+        disp = type("Display", (), {
+            "screen": lambda _self: type("Screen", (), {"root": root})()
+        })()
+        self.assertEqual(gui.window_rect(disp, Window()), (127, 83, 928, 608))
+
     def test_renderer_is_real_x11_only(self):
         import inspect
         body = inspect.getsource(gui.run)

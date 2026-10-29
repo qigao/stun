@@ -9,7 +9,7 @@ get_filename_component(STUN_ROOT "${CMAKE_CURRENT_LIST_DIR}/../../.." ABSOLUTE)
 # alternative renderer. Use the same installed Salts and TurboScript SDKs
 # required by production, with a single real OpenGL/GLFW presentation path.
 find_package(Salts CONFIG REQUIRED PATHS "$ENV{SALTS_ROOT}" NO_DEFAULT_PATH)
-find_package(SaltsUtils CONFIG REQUIRED PATHS "$ENV{SALTS_ROOT}" NO_DEFAULT_PATH)
+find_package(SaltsUtils CONFIG REQUIRED PATHS "$ENV{SALTS_UTILS_ROOT}" NO_DEFAULT_PATH)
 find_package(Threads REQUIRED)
 find_program(RE2C_EXECUTABLE re2c REQUIRED)
 set(CMAKE_C_STANDARD 11)
