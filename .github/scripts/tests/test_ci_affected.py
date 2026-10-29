@@ -141,6 +141,7 @@ def main():
 
         full = synchronize(before, after)
         full["pull_request"]["labels"] = [{"name": "ci/full"}]
+        full["pull_request"]["base"] = {"sha": before}
         assert check(directory, full, ["shared/gcanvas/*"])
         assert check(directory, full, [
             "charts/*", "!charts/mermaid/flowchart/lexer.re",
@@ -205,6 +206,41 @@ def main():
         git(directory, "commit", "-qm", "move graphics source")
         newest = git(directory, "rev-parse", "HEAD")
         assert check(directory, synchronize(newer, newest), ["shared/gcanvas/*"])
+
+        # Pure documentation PRs are still checked by the mandatory parser
+        # contract, but ci/full must not allocate unrelated native runners.
+        guide = directory / ".github" / "CI_SCOPE.md"
+        guide.parent.mkdir(parents=True, exist_ok=True)
+        guide.write_text("# CI routing\n", encoding="utf-8")
+        git(directory, "add", ".")
+        git(directory, "commit", "-qm", "documentation-only change")
+        doc_head = git(directory, "rev-parse", "HEAD")
+        full_doc = synchronize(newest, doc_head)
+        full_doc["pull_request"]["base"] = {"sha": newest}
+        full_doc["pull_request"]["labels"] = [{"name": "ci/full"}]
+        assert not check(directory, full_doc, ["charts/*"])
+        assert not check(directory, full_doc, ["shared/gcanvas/*"])
+        full_doc_label = pull_request("labeled", newest, doc_head)
+        full_doc_label["label"] = {"name": "ci/full"}
+        assert not check(directory, full_doc_label, ["shared/gcanvas/*"])
+
+        # A cumulative ci/full PR with any real source remains fully gated.
+        full_mixed = synchronize(after, doc_head)
+        full_mixed["pull_request"]["base"] = {"sha": after}
+        full_mixed["pull_request"]["labels"] = [{"name": "ci/full"}]
+        assert check(directory, full_mixed, ["tango/*"])
+
+        # A Markdown extension inside a test module is production input,
+        # not an excuse to skip native qualification.
+        markdown_fixture = directory / "shared" / "markdown" / "tests" / "fixtures" / "renderer.md"
+        markdown_fixture.parent.mkdir(parents=True, exist_ok=True)
+        markdown_fixture.write_text("|a|b|\n|---|---|\n", encoding="utf-8")
+        git(directory, "add", ".")
+        git(directory, "commit", "-qm", "native markdown golden fixture")
+        fixture_head = git(directory, "rev-parse", "HEAD")
+        fixture_full = pull_request("labeled", doc_head, fixture_head)
+        fixture_full["label"] = {"name": "ci/full"}
+        assert check(directory, fixture_full, ["tango/*"])
 
     # Reuse the same existing lightweight public-dependency job; no new runner
     # or cross-platform matrix is created for acceptance verifier fixtures.
