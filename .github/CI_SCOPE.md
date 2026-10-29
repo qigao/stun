@@ -181,6 +181,45 @@ required GitHub commit status: the stable event-driven status publisher and
 administrator-enabled master ruleset remain tracked in
 [Issue #315](https://github.com/qigao/stun/issues/315).
 
+## Stable event-driven acceptance status (stage M2; ruleset pending)
+
+`.github/workflows/required-acceptance.yml` uses only trusted default-branch
+Python code to publish one stable GitHub commit-status context,
+`Stun required acceptance`, against the real PR source HEAD. It responds to
+`pull_request_target` (open/update/ci-full label removal or addition) and
+upstream `workflow_run` requested/completed events. The latter can have an
+empty `pull_requests` list; the publisher therefore resolves *currently open*
+master-targeting PRs by exact source SHA from the API.
+
+The publisher reads PR changed files and default-branch workflow policies
+to infer required host jobs; it reads live per-job execution results and
+requires exact-head completed SUCCESS for every applicable job. Missing,
+stale, cancelled, skipped, neutral, pending, duplicated or failed evidence,
+missing `ci/full`, and unknown source roots publish **failure** rather
+than a misleading success. Concurrent PR heads and source changes are
+rechecked before writing. Multiple open PRs with one SHA cannot bypass
+the policy via another PR's successful label. The existing M0 verifier is
+still the underlying evidence checker.
+
+This workflow neither checks out the PR head nor executes PR content,
+uses a status-writing token only for trusted default-branch code, and
+does not run native tests, poll, or add cross-platform build runners. The
+single `workflow_run` publisher is intentionally a lightweight follow-up
+to existing tests. It is **not** the same as requiring a native workflow
+summary; the separate commit-status context is what an administrator
+must select as the required status in the master Ruleset.
+
+**Do not claim protection is active until the ruleset actually requires
+`Stun required acceptance` and a live negative/positive merge test passes.**
+The workflow must first exist on `master` before its `workflow_run`
+trigger operates; the Draft PR adding it cannot itself validate the
+post-merge event. GitHub API/token errors leave the status missing or
+failing, which must block once the ruleset is enabled. Fork PR status
+publication is subject to the base-repository token's commit-status
+access; any unsupported source SHA must fail closed, not be bypassed.
+
+See [Issue #315](https://github.com/qigao/stun/issues/315).
+
 ## Maintenance
 
 - Add new files/paths to both the top-level trigger and
