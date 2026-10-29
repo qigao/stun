@@ -18,7 +18,7 @@ permissions:
   packages: read
 
 concurrency:
-  group: stun-real-gui-${github.event.pull_request.number || github.ref}
+  group: stun-real-gui-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -28,8 +28,8 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 70
     env:
-      GH_TOKEN: ${github.token}
-      GITHUB_TOKEN: ${github.token}
+      GH_TOKEN: ${{ github.token }}
+      GITHUB_TOKEN: ${{ github.token }}
       LIBGL_ALWAYS_SOFTWARE: '1'
       GALLIUM_DRIVER: llvmpipe
       VCPKG_TARGET_TRIPLET: x64-linux
@@ -46,17 +46,18 @@ jobs:
 
       - uses: actions/checkout@v4
         with:
-          ref: ${steps.source.outputs.sha}
+          ref: ${{ steps.source.outputs.sha }}
           persist-credentials: false
 
       - name: Assert immutable checkout
-        run: test "$(git rev-parse HEAD)" = "${steps.source.outputs.sha}"
+        run: test "$(git rev-parse HEAD)" = "${{ steps.source.outputs.sha }}"
 
       - name: Use verified isolated ccache for the native GUI
+        id: verified_cache
         uses: ./.github/actions/setup-ccache
         with:
           profile: native-gui-linux
-          source_sha: ${steps.source.outputs.sha}
+          source_sha: ${{ steps.source.outputs.sha }}
 
       - name: Install native desktop driver and Python screenshot prerequisites
         shell: bash
@@ -92,10 +93,10 @@ jobs:
       - name: Download and SHA256-verify official native SDK archives via curl
         shell: bash
         env:
-          SALTS_RELEASE: ${steps.releases.outputs.salts}
-          UTILS_RELEASE: ${steps.releases.outputs.utils}
-          CHTTP_RELEASE: ${steps.releases.outputs.chttp}
-          TURBOSCRIPT_RELEASE: ${steps.releases.outputs.turboscript}
+          SALTS_RELEASE: ${{ steps.releases.outputs.salts }}
+          UTILS_RELEASE: ${{ steps.releases.outputs.utils }}
+          CHTTP_RELEASE: ${{ steps.releases.outputs.chttp }}
+          TURBOSCRIPT_RELEASE: ${{ steps.releases.outputs.turboscript }}
         run: |
           set -euo pipefail
           mkdir -p "$RUNNER_TEMP/stun-gui/packages"
@@ -148,7 +149,7 @@ jobs:
       - name: Restore cached native third-party ports
         uses: actions/cache@v4
         with:
-          path: ${runner.temp}/stun-gui-vcpkg-cache
+          path: ${{ runner.temp }}/stun-gui-vcpkg-cache
           key: stun-gui-vcpkg-v1-linux-x64-b1b19307
 
       - name: Build pinned real GLFW / OpenGL / CSS dependencies
@@ -165,8 +166,8 @@ jobs:
         id: xml_deps
         uses: actions/cache@v4
         with:
-          path: ${runner.temp}/stun-gui-xml-deps
-          key: stun-gui-xml-v1-linux-x64-${hashFiles('flexUI/tests/xml-runtime-deps/CMakeLists.txt')}
+          path: ${{ runner.temp }}/stun-gui-xml-deps
+          key: stun-gui-xml-v1-linux-x64-${{ hashFiles('flexUI/tests/xml-runtime-deps/CMakeLists.txt') }}
 
       - name: Build canonical XML source dependencies when needed
         if: steps.xml_deps.outputs.cache-hit != 'true'
@@ -231,14 +232,14 @@ jobs:
           xvfb-run -a -s '-screen 0 1280x900x24 -nolisten tcp' \
             /usr/bin/python3 .github/scripts/gui_native_e2e.py \
               --exe build/stun-gui/bin/flexui_desktop_editor \
-              --source-sha "${steps.source.outputs.sha}" \
+              --source-sha "${{ steps.source.outputs.sha }}" \
               --out build/stun-gui/gui-e2e
 
       - name: Preserve exact-head actual GUI screenshot evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: stun-visible-gui-${steps.source.outputs.sha}
+          name: stun-visible-gui-${{ steps.source.outputs.sha }}
           retention-days: 3
           if-no-files-found: warn
           path: |
@@ -248,6 +249,6 @@ jobs:
             build/stun-gui/CMakeFiles/CMakeConfigureLog.yaml
 
       - name: Report real compiler cache statistics
-        if: always()
+        if: always() && steps.verified_cache.outcome == 'success'
         shell: bash
         run: bash .github/scripts/report-ccache.sh native-gui-linux
