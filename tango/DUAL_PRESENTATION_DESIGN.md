@@ -46,6 +46,25 @@ null and explicit creation must fail. Neither path can silently fall back
 to the other or to generic gCanvas OpenGL. A renderer switch requires
 an explicit new host/presenter selection and fresh admission.
 
+## First shared cell-frame implementation
+
+The C11 core now provides `tui_grid_snapshot_capture()` in
+`tui_grid_snapshot.h` / `tui_grid_snapshot.c`:
+a bounded, owned, versioned deep copy of `tui_buffer_t` cells. The API
+takes explicit cell/byte limits and a nonzero caller-owned revision. It
+normalizes every leading cell through Tango's existing
+`tui_buffer_set()` Unicode/span policy on a stack scratch grid, and
+requires matching wide-cell continuations. Invalid metadata, orphan
+continuations, inconsistent styles and malformed grapheme data fail before
+publishing a pointer. Nothing in the new code accesses TTY or OpenGL.
+The original source may be resized/destroyed after successful capture.
+
+`tango_grid_snapshot_test` exercises real C11 Unicode cells, independent
+storage, forged public structs, clipping, resource budgets, failure
+atomicity and lifetime across source resize/retirement on all three native
+platforms. This proves only snapshot ownership; it is **not** an OpenGL
+presenter, GL glyph atlas, GPU shader or device-retirement qualification.
+
 ## Native TTY presenter
 
 Owns/borrows the terminal, validates the bounded buffer, produces VT diff
