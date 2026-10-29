@@ -81,7 +81,14 @@ def verify_labeled_workflow_isolation():
         if "types: [opened, synchronize, reopened, labeled]" not in source:
             continue
         guarded.append(path.name)
-        assert "jobs:\n  changes:\n" + guard + "\n" in source, path.name
+        if path.name == "gui-native-e2e.yml":
+            # A single native screenshot job is already guarded; do not
+            # waste a second Ubuntu runner solely to satisfy this audit.
+            assert ("jobs:\n  screenshot:\n"
+                    "    name: GUI visible screenshot / Linux X11\n"
+                    + guard + "\n") in source, path.name
+        else:
+            assert "jobs:\n  changes:\n" + guard + "\n" in source, path.name
         group = next(
             (line for line in source.splitlines() if line.startswith("  group: ")), ""
         )
@@ -91,7 +98,7 @@ def verify_labeled_workflow_isolation():
         else:
             assert group.endswith(suffix), (path.name, group)
         assert "  cancel-in-progress: true" in source, path.name
-    assert len(guarded) == 9, guarded
+    assert len(guarded) == 10, guarded
     assert master_push_and_dispatch.issubset(set(guarded)), guarded
 
 def main():
