@@ -15,7 +15,8 @@ add_executable(test_text_layout_unicode
   "${STUN_ROOT}/flexUI/src/text_util.cpp"
   "${STUN_ROOT}/flexUI/src/text_layout.cpp"
   "${STUN_ROOT}/flexUI/src/computed_style.cpp"
-  "${STUN_ROOT}/flexUI/src/render_command.cpp")
+  "${STUN_ROOT}/flexUI/src/render_command.cpp"
+  "${STUN_ROOT}/flexUI/src/render_command_validation.cpp")
 # Compile actual layout and widget consumers plus their retained regressions.
 # This is not a full widget/application runtime qualification.
 add_library(unicode_call_sites OBJECT
