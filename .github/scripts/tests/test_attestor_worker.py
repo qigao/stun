@@ -11,6 +11,7 @@ import unittest
 SCRIPTS = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(SCRIPTS))
 from attestor_inbox import DurableWebhookInbox
+from attestor_policy import PolicyIntegrityError, policy_bundle_sha256
 from attestor_worker import (ATTESTED_CONTEXT, AttestorWorkerError, process_one)
 from test_publish_required_acceptance import (
     good_responses, pr_target, completed_workflow, REPO, SHA
@@ -74,6 +75,7 @@ class DedicatedWorkerTests(unittest.TestCase):
             "repository": REPO, "repository_id": REPO_ID,
             "installation_id": APP_INSTALLATION,
             "issuer_bot_id": APP_BOT_ID, "trusted_policy_root": ROOT,
+            "expected_policy_digest": policy_bundle_sha256(ROOT),
             "github_get": self.get, "write_app_status": self.writer,
         }
         settings.update(kwargs)
@@ -197,10 +199,31 @@ class DedicatedWorkerTests(unittest.TestCase):
 
     def test_policy_must_be_pinned_absolute_default_branch_tree(self):
         self.enqueue()
-        with self.assertRaises(AttestorWorkerError):
+        with self.assertRaises(PolicyIntegrityError):
             self.process(trusted_policy_root=Path("relative/checkout"))
         self.assertEqual(self.db.summary()["pending"], 1)
         self.assertEqual(self.writes, [])
+
+    def test_wrong_approved_policy_digest_rejected_before_claim(self):
+        self.enqueue()
+        with self.assertRaises(PolicyIntegrityError):
+            self.process(expected_policy_digest="0" * 64)
+        self.assertEqual(self.db.summary()["pending"], 1)
+        self.assertEqual(self.db.summary()["claimed"], 0)
+        self.assertEqual(self.writes, [])
+
+    def test_missing_approved_policy_digest_never_falls_back(self):
+        self.enqueue()
+        with self.assertRaises(PolicyIntegrityError):
+            self.process(expected_policy_digest=None)
+        self.assertEqual(self.db.summary()["pending"], 1)
+        self.assertEqual(self.writes, [])
+
+    def test_untrusted_policy_implementation_path_rejected(self):
+        self.enqueue()
+        with self.assertRaises(PolicyIntegrityError):
+            self.process(trusted_policy_root=Path(self.tmp.name))
+        self.assertEqual(self.db.summary()["pending"], 1)
 
     def test_nosuch_event_kind_is_terminal_failure(self):
         event = signed_admitted_event()

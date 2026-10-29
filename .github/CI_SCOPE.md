@@ -399,6 +399,41 @@ Until a dedicated App is installed and its own status tested, the active
 master Ruleset must continue to require the old GitHub Actions context.
 No dual-context Ruleset migration is performed by this PR.
 
+## Pin exact immutable external attestor policy releases (Issue #322, M3)
+
+The external dedicated-App worker must not accept an arbitrary directory
+containing `.github/scripts/ci_required_matrix.py` as a trusted policy
+deployment. `.github/scripts/attestor_policy.py` computes a deterministic
+SHA256 over the exact relative paths, length and bytes of the seven loaded
+attestor Python modules and all native workflow YAML used by the trusted
+M0/M1/M2 ownership matrix. Missing, empty, oversized, symlinked or modified
+files are rejected; the actual **loaded Python module locations** must also
+come from the same pinned root. These checks run **before claiming** any
+webhook work item or publishing any commit status.
+
+`attestor_worker.process_one(..., expected_policy_digest=...)` now REQUIRES
+an explicit 64-hex digest provided by the **independent external deployment
+operator**, never one automatically computed from the same runtime directory,
+PR input, GitHub Actions variables or webhook body. An immutable, read-only
+release mount for the lifetime of each worker process is still mandatory:
+hashing alone cannot prevent a concurrent file replacement between
+verification and execution. An approver must record the reviewed source
+revision, independent release checksum and exact installed App identity
+before enabling publication.
+
+The Public Dependency parser job executes `test_attestor_policy.py` and
+the updated `test_attestor_worker.py` offline: deterministic positive
+release hash, missing/invalid digest, source/YAML modification, symlink
+traversal, unexpected loaded module and pre-claim rejection. No new Actions
+runner or native build is added. These are **policy release correctness
+tests**, NOT App deployment or exclusive signer verification.
+
+Current protected master Ruleset #26090409 remains Active and continues
+requiring GitHub Actions `Stun required acceptance`. The dedicated App
+identity, trusted external policy deployment, installation tokens, actual
+HTTPS ingress and `Stun attested acceptance` dual-status migration remain
+open in [Issue #322](https://github.com/qigao/stun/issues/322).
+
 ## Maintenance
 
 - Add new files/paths to both the top-level trigger and

@@ -2,12 +2,20 @@
 """One-shot, single-owner EXTERNAL GitHub App attestation worker contract.
 
 Not a daemon, a deployed service, a token minter or an Actions job. The
-externally controlled launcher must provide a pinned trusted policy tree,
-read-only authenticated GitHub API client, an App-installation-only status
-writer, and a protected durable inbox. No GITHUB_TOKEN or issuer fallback.
+externally controlled launcher must provide an immutable policy tree
+and an independently approved SHA256 digest, a read-only GitHub API client,
+an App-installation-only status writer, and a protected durable inbox.
+No GITHUB_TOKEN, self-generated digest or status-issuer fallback.
 """
 from pathlib import Path
 
+import attestor_webhook
+import attestor_inbox
+import attestor_policy
+import ci_required_matrix
+import publish_required_acceptance
+import verify_exact_head_ci
+from attestor_policy import verify_policy_bundle
 from attestor_webhook import EVENT_ACTIONS, TRUSTED_WORKFLOW_PATHS
 from publish_required_acceptance import evaluate_event
 
@@ -60,8 +68,8 @@ def _validate_record(event, repo, repository_id, installation_id):
 
 
 def process_one(inbox, owner, *, repository, repository_id, installation_id,
-                issuer_bot_id, trusted_policy_root, github_get,
-                write_app_status):
+                issuer_bot_id, trusted_policy_root, expected_policy_digest,
+                github_get, write_app_status):
     """Claim at most one queued event, verify live CI, publish using App writer.
 
     write_app_status(sha, state, description, pr_number, context) must use
@@ -69,6 +77,10 @@ def process_one(inbox, owner, *, repository, repository_id, installation_id,
     callback returns GitHub's actual status object including creator.id,
     state, sha and context. This function checks them; it NEVER sources a
     token from environment or falls back to GitHub Actions credentials.
+
+    expected_policy_digest is pinned outside the repository/Actions/webhook.
+    The deployed policy mount must remain immutable for the worker lifetime:
+    SHA verification cannot protect a mutable filesystem against TOCTOU.
 
     A genuine negative CI decision is a completed work item (publishes
     failure). Token/API/identity failures are terminal failed items, with
@@ -80,11 +92,25 @@ def process_one(inbox, owner, *, repository, repository_id, installation_id,
                 repository_id, installation_id, issuer_bot_id
             )) or not callable(github_get) or not callable(write_app_status)):
         raise AttestorWorkerError("missing explicit dedicated App identity or API")
+    # The expected hash comes from an independently approved external release
+    # configuration. Never compute it from untrusted files and accept that
+    # value as the expected digest. Both loaded modules and on-disk policy
+    # are verified before any ownership claim or status publication.
     root = Path(trusted_policy_root)
-    if (not root.is_absolute() or
-            not (root / ".github/scripts/ci_required_matrix.py").is_file() or
-            not (root / ".github/workflows").is_dir()):
-        raise AttestorWorkerError("missing pinned trusted policy installation")
+    if type(inbox) is not attestor_inbox.DurableWebhookInbox:
+        raise AttestorWorkerError("untrusted inbox implementation")
+    loaded = {
+        ".github/scripts/attestor_policy.py": attestor_policy.__file__,
+        ".github/scripts/attestor_worker.py": __file__,
+        ".github/scripts/attestor_webhook.py": attestor_webhook.__file__,
+        ".github/scripts/attestor_inbox.py": attestor_inbox.__file__,
+        ".github/scripts/ci_required_matrix.py": ci_required_matrix.__file__,
+        ".github/scripts/verify_exact_head_ci.py": verify_exact_head_ci.__file__,
+        ".github/scripts/publish_required_acceptance.py":
+            publish_required_acceptance.__file__,
+    }
+    verify_policy_bundle(root, expected_policy_digest,
+                         loaded_module_paths=loaded)
 
     item = inbox.claim_next(owner)
     if item is None:
