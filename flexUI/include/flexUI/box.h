@@ -280,8 +280,17 @@ public:
   AnimationManager &animations() { return animations_; }
 
   // 脏标记通知
-  void notify_dirty_style() { dirty_style_ = true; }
-  void notify_dirty_layout() { dirty_layout_ = true; }
+  // Keep notifications emitted while a stage is executing. These revisions
+  // count every request, including repeated notifications of an already-dirty
+  // stage; they are owner-thread scheduling state, not cross-thread atomics.
+  void notify_dirty_style() {
+    dirty_style_ = true;
+    ++style_request_revision_;
+  }
+  void notify_dirty_layout() {
+    dirty_layout_ = true;
+    ++layout_request_revision_;
+  }
   // Paint requests raised during a synchronous render must survive its commit.
   // The revision increments even if the pending flag was already set.
   void notify_dirty_paint() {
@@ -376,6 +385,8 @@ private:
   bool dirty_style_ = true;
   bool dirty_layout_ = true;
   bool dirty_paint_ = true;
+  std::uint64_t style_request_revision_ = 0;
+  std::uint64_t layout_request_revision_ = 0;
   std::uint64_t paint_request_revision_ = 0;
   std::unordered_set<std::uintptr_t> styled_elements_;
   std::unordered_map<const Element *, float> container_widths_;

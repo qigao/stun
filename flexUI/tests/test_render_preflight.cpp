@@ -134,9 +134,18 @@ class PreflightWidget final : public flexUI::Widget {
  public:
   bool append_unsupported_blur = false;
   std::function<void()> on_emit;
+  std::function<void()> on_measure;
 
   const char* type_name() const override { return "PreflightWidget"; }
   bool paints_host_box() const override { return true; }
+  bool measure_intrinsic_size(const flexUI::Element&, float, float,
+                              float&, float&) const override {
+    if (!on_measure) return false;
+    // Exercise the real intrinsic-size callback without changing geometry:
+    // the only requested work is a new style/layout generation.
+    on_measure();
+    return false;
+  }
   void emit_render_commands(const flexUI::Element&,
                             flexUI::RenderCommandList& commands) override {
     if (on_emit) on_emit();
@@ -464,5 +473,115 @@ suite("Box paint notifications across render submissions") {
     check_equal(backend.ends, 0);
     check(box.is_dirty());
     check(root->dirty_paint());
+  }
+}
+
+suite("Box style and layout request revisions") {
+  it("runs another actual layout pass when intrinsic measurement invalidates layout") {
+    PreflightRenderer backend;
+    flexUI::Box box(&backend);
+    auto widget = std::make_unique<PreflightWidget>();
+    auto* producer = widget.get();
+    auto* root = box.create_with_widget("div", std::move(widget), "root");
+    box.set_root(root);
+    box.update();
+    check(!box.is_dirty());
+
+    int measures = 0;
+    producer->on_measure = [&] {
+      ++measures;
+      if (measures == 1) box.notify_dirty_layout();
+    };
+    root->mark_layout_dirty();
+    box.update();
+    check_equal(measures, 2);
+    check(!box.is_dirty());
+  }
+
+  it("recomputes style and layout after a widget measurement invalidates style") {
+    PreflightRenderer backend;
+    flexUI::Box box(&backend);
+    auto widget = std::make_unique<PreflightWidget>();
+    auto* producer = widget.get();
+    auto* root = box.create_with_widget("div", std::move(widget), "root");
+    box.set_root(root);
+    box.update();
+    check(!box.is_dirty());
+
+    int measures = 0;
+    producer->on_measure = [&] {
+      ++measures;
+      if (measures == 1) root->mark_style_dirty();
+    };
+    root->mark_layout_dirty();
+    box.update();
+    check_equal(measures, 2);
+    check(!root->dirty_style());
+    check(!box.is_dirty());
+  }
+
+  it("rejects an endlessly reentrant layout without submitting a stale frame") {
+    PreflightRenderer backend;
+    flexUI::Box box(&backend);
+    auto widget = std::make_unique<PreflightWidget>();
+    auto* producer = widget.get();
+    auto* root = box.create_with_widget("div", std::move(widget), "root");
+    box.set_root(root);
+    box.update();
+    const int frames_before = backend.begins;
+
+    int measures = 0;
+    producer->on_measure = [&] {
+      ++measures;
+      box.notify_dirty_layout();
+    };
+    root->mark_layout_dirty();
+    bool rejected = false;
+    try {
+      box.update();
+    } catch (const std::logic_error& error) {
+      rejected = std::string(error.what()) ==
+                 "ViewPipeline style/layout did not stabilize within four passes";
+    }
+    check(rejected);
+    check_equal(measures, 4);
+    check_equal(backend.begins, frames_before);
+    check(box.is_dirty());
+
+    producer->on_measure = {};
+    box.update();
+    check(!box.is_dirty());
+    check_equal(backend.begins, frames_before + 1);
+  }
+
+  it("retains a pending layout request if intrinsic measurement throws") {
+    PreflightRenderer backend;
+    flexUI::Box box(&backend);
+    auto widget = std::make_unique<PreflightWidget>();
+    auto* producer = widget.get();
+    auto* root = box.create_with_widget("div", std::move(widget), "root");
+    box.set_root(root);
+    box.update();
+    const int frames_before = backend.begins;
+
+    producer->on_measure = [] {
+      throw std::runtime_error("test intrinsic measurement failure");
+    };
+    root->mark_layout_dirty();
+    bool failed = false;
+    try {
+      box.update();
+    } catch (const std::runtime_error& error) {
+      failed = std::string(error.what()) ==
+               "test intrinsic measurement failure";
+    }
+    check(failed);
+    check(box.is_dirty());
+    check_equal(backend.begins, frames_before);
+
+    producer->on_measure = {};
+    box.update();
+    check(!box.is_dirty());
+    check_equal(backend.begins, frames_before + 1);
   }
 }

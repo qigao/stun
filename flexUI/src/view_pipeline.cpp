@@ -1,5 +1,7 @@
 #include <flexUI/view_pipeline.h>
 
+#include <stdexcept>
+
 namespace flexUI {
 
 ViewPipelineResult ViewPipeline::update(ViewPipelineHost& host) {
@@ -38,7 +40,18 @@ ViewPipelineResult ViewPipeline::update(ViewPipelineHost& host) {
     break;
   }
 
+  // The pass budget bounds recursive widget/state invalidations. Never send a
+  // frame using styles or layout that are still known to be pending.
+  if (host.needs_style_stage() || host.needs_layout_stage()) {
+    throw std::logic_error(
+        "ViewPipeline style/layout did not stabilize within four passes");
+  }
+
   host.run_positioning_stage();
+  if (host.needs_style_stage() || host.needs_layout_stage()) {
+    throw std::logic_error(
+        "ViewPipeline positioning invalidated style/layout before render");
+  }
 
   if (!host.needs_render_stage()) {
     if (state_ != ViewLifecycleState::Styled) {
