@@ -103,6 +103,21 @@ depth). `test_ci_affected.py` statically checks all nine label-sensitive
 workflow guards and concurrency groups. A skipped label event must never
 be presented as an executed native test.
 
+## Isolate manual full qualification from master push CI
+
+The `runtime-conformance` and `graphlayout-native` workflows listen to
+both `push` on `master` and `workflow_dispatch`. Previously a manual
+run on `master` shared the same `qualification` concurrency key as a
+push run; either event could cancel the other's in-flight tests, even
+though one is explicit full qualification and the other is automatic
+incremental validation.
+
+A `workflow_dispatch` now uses a unique `github.run_id` group suffix
+for these two workflows. Unrelated labels retain their own isolated
+groups; ordinary master pushes, PR updates, and explicit `ci/full`
+events retain normal superseding semantics. Test commands, module scope
+filters, and required source coverage are unchanged.
+
 ## Maintenance
 
 - Add new files/paths to both the top-level trigger and
