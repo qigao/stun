@@ -582,8 +582,8 @@ BoxOptions BoxOptions::legacy_without_jit() {
 Box::Box(flex::Renderer* renderer, BoxOptions options)
     : theme_mode_(options.theme),
       bindings_([this]() {
-        dirty_style_ = true;
-        dirty_layout_ = true;
+        notify_dirty_style();
+        notify_dirty_layout();
         notify_dirty_paint();
       }) {
   if (renderer) {
@@ -777,18 +777,28 @@ bool Box::needs_render_stage() const {
 }
 
 void Box::run_style_stage() {
+  const std::uint64_t submitted_revision = style_request_revision_;
   sync_utility_stylesheet();
   compute_styles(root_);
-  dirty_style_ = false;
+  // Reentrant requests (including future style hooks) belong to a later pass.
+  // An exception never consumes the pending request.
+  if (style_request_revision_ == submitted_revision) {
+    dirty_style_ = false;
+  }
 }
 
 void Box::run_layout_stage() {
+  const std::uint64_t submitted_revision = layout_request_revision_;
   root_->set_x(0);
   root_->set_y(0);
   LayoutManager::sync_to_flex(root_, viewport_width_, viewport_height_);
   LayoutManager::perform_layout(root_);
   snapshot_sticky_layout(root_);
-  dirty_layout_ = false;
+  // Intrinsic measurement can invoke user Widget callbacks that invalidate
+  // layout again. Do not consume work requested during this very pass.
+  if (layout_request_revision_ == submitted_revision) {
+    dirty_layout_ = false;
+  }
 }
 
 void Box::run_layout_semantics_stage() {
