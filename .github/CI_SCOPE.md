@@ -1,5 +1,27 @@
 # Stun CI: incremental scope and complete requalification
 
+## Enforced master rules (2026-10-29)
+
+The active [master exact-HEAD acceptance ruleset](https://github.com/qigao/stun/rules/26090409)
+targets only `refs/heads/master`. Every change must go through a pull request
+and pass the single `Stun required acceptance` commit-status context from
+GitHub Actions (integration ID 15368). There are no bypass actors, including
+repository administrators. Direct pushes, force pushes and branch deletion
+are blocked by the applicable rules.
+
+Pull requests require zero approvals; the exact-head acceptance gate remains
+mandatory. Existing merge, squash and rebase methods remain available.
+The ruleset does not require an up-to-date test-merge SHA and does not enable
+a merge queue: the trusted publisher qualifies the actual PR source HEAD,
+with `ci/full` and executed jobs selected from the cumulative source delta.
+Documentation-only PRs still require the unfiltered parser contract, without
+unrelated native platform matrices.
+
+The M0/M1 sections below describe the earlier implementation stages. The
+repository rules API, not those historical stage limitations, is the source
+of truth for current enforcement. See [issue #315](https://github.com/qigao/stun/issues/315)
+for the activation and live negative/positive verification requirements.
+
 ## Why the old CI was expensive
 
 GitHub applies `pull_request.paths` to the **entire PR diff**, not just the
@@ -81,11 +103,11 @@ equivalent. The usual full runtime workflow can also be started with
 `workflow_dispatch` on a selected branch, but use the `ci/full` label for an
 entire PR qualification matrix.
 
-**GitHub branch protection caveat:** a job skipped by `if:` can appear green.
-A green workflow name alone does not prove its runtime tests executed. Keep
-the exact-head full qualification as a mandatory release/merge review rule;
-if repository rulesets need automated enforcement, require a dedicated
-non-skippable full-acceptance check rather than treating `skipped` as passed.
+**Required-status distinction:** a job skipped by `if:` can appear green.
+A green workflow name alone does not prove its runtime tests executed. The
+active master ruleset therefore requires only the dedicated
+`Stun required acceptance` commit status. Its trusted verifier rejects
+missing, skipped, neutral, cancelled, stale-head or failing required jobs.
 
 ## Isolate unrelated PR labels from real CI execution
 
@@ -181,7 +203,7 @@ required GitHub commit status: the stable event-driven status publisher and
 administrator-enabled master ruleset remain tracked in
 [Issue #315](https://github.com/qigao/stun/issues/315).
 
-## Stable event-driven acceptance status (stage M2; ruleset pending)
+## Stable event-driven acceptance status (stage M2)
 
 `.github/workflows/required-acceptance.yml` uses only trusted default-branch
 Python code to publish one stable GitHub commit-status context,
@@ -216,8 +238,9 @@ to existing tests. It is **not** the same as requiring a native workflow
 summary; the separate commit-status context is what an administrator
 must select as the required status in the master Ruleset.
 
-**Do not claim protection is active until the ruleset actually requires
-`Stun required acceptance` and a live negative/positive merge test passes.**
+The active master ruleset requires `Stun required acceptance` from GitHub
+Actions. Activation must be verified against live negative and positive PR
+merge states, rather than inferred from a green status alone.
 The workflow must first exist on `master` before its `workflow_run`
 trigger operates; the Draft PR adding it cannot itself validate the
 post-merge event. GitHub API/token errors leave the status missing or
