@@ -19,9 +19,11 @@ add_library(
   renderer_factory.cpp
   effect_admission.cpp
   effect_budget.cpp
+  effect_resource_owner.cpp
   $<TARGET_OBJECTS:flex_stb_sprintf>
   ${FLEX_ENGINE_INCLUDE_DIR}/flex/render.h
   ${FLEX_ENGINE_INCLUDE_DIR}/flex/render/effect_admission.h
+  ${FLEX_ENGINE_INCLUDE_DIR}/flex/render/effect_resource_owner.h
   ${FLEX_ENGINE_INCLUDE_DIR}/flex/core/renderer.h
   ${FLEX_ENGINE_INCLUDE_DIR}/flex/core/render_value_validation.h
   ${FLEX_ENGINE_INCLUDE_DIR}/flex/bridge/renderer.h)

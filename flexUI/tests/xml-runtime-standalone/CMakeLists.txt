@@ -81,7 +81,8 @@ endforeach()
 add_executable(test_effect_admission
   "${STUN_ROOT}/flex/tests/test_effect_admission.cpp"
   "${STUN_ROOT}/flex/modules/render/effect_admission.cpp"
-  "${STUN_ROOT}/flex/modules/render/effect_budget.cpp")
+  "${STUN_ROOT}/flex/modules/render/effect_budget.cpp"
+  "${STUN_ROOT}/flex/modules/render/effect_resource_owner.cpp")
 target_include_directories(test_effect_admission PRIVATE "${STUN_ROOT}/flex/include")
 target_compile_features(test_effect_admission PRIVATE cxx_std_17)
 target_link_libraries(test_effect_admission PRIVATE Salts::TinyTest Threads::Threads)

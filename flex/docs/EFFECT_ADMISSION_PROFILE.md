@@ -244,6 +244,56 @@ adapter-domain, device-domain or installed-artifact change must advance
 host contract. CPU input snapshots and final UI/viewport/program revision checks
 remain part of the later transactional publisher.
 
+
+## Pre-submission native owner bridge (second M2 slice, #17)
+
+`flex/render/effect_resource_owner.h` adds
+`prepare_native_effect(validated, shared_budget, native_owner)`.
+This API does not create a second provider or select an alternative backend.
+It only moves from *validated metadata plus budget* to a single candidate
+`PreparedNativeEffect` whose backend-specific resource bundle and shared
+reservation live and die together.
+
+The backend supplies both `NativeEffectResourceOwner::capabilities()` and
+`prepare_resources(const ValidatedEffectContract&)`. The latter must return
+a complete **real** owner-specific bundle; null or exception is a hard failure.
+A backend is responsible for cleaning its partial allocations before returning
+an error, and the returned bundle's noexcept destructor must complete native
+cleanup synchronously on the proper owner thread. The bundle must retain any
+backend/device lifetime dependencies independently of the short-lived factory.
+
+The generic bridge performs:
+1. A fresh owner capability query and an atomic reservation from the existing
+   domain ledger, before asking the owner to create any native resource.
+2. Native preparation from the **frozen** validated contract only.
+3. Verification of the complete bundle's owner/domain/device generation,
+   backend profile, target/unit digest, variant, implementation and parameter
+   ABI hashes, and entire conservatively charged resource cost.
+4. A second owner capability query plus lost-ledger check, before returning a
+   successful candidate. A stale generation, changed capability revision or
+   lost device is rejected without publishing the candidate.
+5. Cleanup in a strict order on all failure, reset, move-assignment and normal
+   destruction paths: **native resources first, reserved budget second**.
+   Repeated reset is idempotent; old and candidate batches consume their peak
+   combined budget until each actually retires.
+
+`NativeEffectResourceIdentity::charged_cost` must match the contract's
+conservative reservation. This is *not* a GPU memory query and does not
+prove actual driver allocation size. The owner must use an accurate
+conservative bound and ensure all capability-domain or artifact changes
+advance its revision. No new D2D, GL, GLES, Vulkan or Tango shader/manifest is
+registered by this bridge, and no production adapter currently implements
+the new owner interface.
+
+**Pre-submission only:** `PreparedNativeEffect` has no `submit()` method
+or implicit GPU fence, and must not be destroyed while resources could still
+be accessed by an in-flight frame. Moving it into a future RenderPlan
+requires an independently implemented owner-thread completion, retirement
+and lost/aborted protocol. CPU admission/owner tests with synthetic
+artifacts cannot qualify real shader compilation, GPU execution, or PTY UI.
+This bridge does not publish Style/Layout/hit geometry and has no CSS
+input or fallback.
+
 ## Qualification and remaining integration
 
 `flex/tests/test_effect_admission.cpp` uses explicitly synthetic capability and
