@@ -1,5 +1,10 @@
 # flexUI Shadcn Conformance
 
+> **2026-10-29：** 本文记录当前 catalog/fixture/Widget 覆盖，不是原生 Tailwind-only
+> 或所有后端效果的完成证明。目标见
+> [TAILWIND_NATIVE_BACKENDS_DESIGN.md](TAILWIND_NATIVE_BACKENDS_DESIGN.md)。
+> utility 覆盖、组件结构和 Widget 行为仍分别验收，并补实际后端证据。
+
 此目录中的 conformance fixtures 用于验证 `flexUI` 是否能承载 `shadcn` 常见组件所依赖的高频 CSS / state 语义。
 
 ## Ready scope
@@ -206,3 +211,4 @@ cmd /c "`"$vc`" >nul && cmake --build build\codex-structural --target visual_dem
 ```powershell
 build\codex-structural\flexUI\examples\visual_demo.exe
 ```
+

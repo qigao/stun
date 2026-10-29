@@ -1,6 +1,17 @@
 # Tailwind-like Utility JIT 默认样式架构
 
-- 状态：已实现，仓库既有回归基线待单独收口
+## 2026-10-29 决策取代说明
+
+当前目标以 [原生 Tailwind 与多后端效果契约](TAILWIND_NATIVE_BACKENDS_DESIGN.md) 为准：
+Tailwind 是唯一样式输入，直接生成类型化程序；不保留手写 CSS、生成 CSS、CSS theme
+或关闭 JIT 后退回 CSS 的作者路径。D2D、gCanvas GL/GLES/Vulkan 和 Tango 的效果能力、
+产物、资源预算与退休分别验证；Tango 不执行 GPU shader。
+
+下文保留已实现的 catalog/JIT、默认 theme、历史优先级和验证记录，作为迁移基线。
+其中 app CSS、semantic CSS class、stylesheet slot 和 legacy API 的描述均不是新目标。
+新迁移按 #17 与新设计 M0–M5 独立验收，本次文档更新没有更改运行时代码。
+
+- 历史 catalog/JIT 状态：已实现，仓库既有回归基线待单独收口
 - 日期：2026-07-15
 - 决策范围：`flexUI` 默认样式运行时、仓库内应用入口、`charts` UI 适配层
 - 相关计划：[TAILWIND_JIT_DEFAULT_PLAN.md](TAILWIND_JIT_DEFAULT_PLAN.md)
@@ -8,11 +19,11 @@
 > 实施记录：P1-P8 的核心代码和相邻测试已落地；P9 已加入确定性离屏渲染快照与
 > 典型/大树性能基线。原生窗口人工 smoke 和仓库既有失败项仍保留在实施计划中。
 
-## 2026-10-22 兼容目标更新
+## 2026-10-22 兼容目标更新（历史，已由上文取代）
 
 本文主要记录当前 whitelist/JIT 实现及其已有不变量；它不再定义长期对外 Tailwind 语义。
 
-以下是长期目标，不能视为当前 catalog/JIT 已实现的完整能力：
+以下为当时的长期目标，现已被上文取代；也不能视为 catalog/JIT 已实现的完整能力：
 
 - 使用标准 `class="..."`；
 - 固定一个上游 Tailwind 版本/compatibility profile；
@@ -534,3 +545,4 @@ SVG 输出不随 adapter 迁移，因此无需数据回滚。
 - [DotGraph flexUI adapter](../../charts/dotgraph/src/flexui_dotgraph.cpp)
 - [FlexChart component](../../charts/flexchart/src/chart_component.cpp)
 - [Infographic component](../../charts/infographic/src/infographic_component.cpp)
+

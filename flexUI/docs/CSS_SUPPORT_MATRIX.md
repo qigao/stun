@@ -1,6 +1,10 @@
-# flexUI CSS Support Matrix
+# flexUI 现有样式能力与 Tailwind 迁移清单
 
-本文件定义 `flexUI` 当前 CSS 能力边界，以及与 WPT 对齐的测试引入顺序。
+本文件记录 `flexUI` 当前 CSS 实现的能力边界和回归证据，作为迁移时的功能清单。
+2026-10-29 起，目标作者语言仅为 Tailwind；规范见
+[TAILWIND_NATIVE_BACKENDS_DESIGN.md](TAILWIND_NATIVE_BACKENDS_DESIGN.md)。
+保留本文件名及历史 WPT 来源，不代表目标继续提供 CSS API。每项能力必须记录对应的
+Tailwind 表达、类型化效果、具体后端支持和回归证据；不能通过删除旧测试或静默省略来完成迁移。
 
 ## 测试源
 
@@ -272,3 +276,4 @@ box.register_font("Inter", "assets/Inter.ttf");
   - 对应的 `flexUI` 能力点
   - 是否为裁剪版语义
   - 明确未覆盖的标准边界
+
