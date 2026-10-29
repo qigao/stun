@@ -262,6 +262,19 @@ access; any unsupported source SHA must fail closed, not be bypassed.
 
 See [Issue #315](https://github.com/qigao/stun/issues/315).
 
+## Final label admission is revalidated before status publication
+
+The publisher may spend time retrieving a complete exact-HEAD native job
+matrix while another actor removes `ci/full`. The initial PR snapshot alone
+is insufficient: just before writing `Stun required acceptance`, the
+publisher re-reads the live PR and rejects success if its final labels are
+missing, malformed or no longer contain `ci/full`. A source SHA, PR state
+or base branch change remains a separate fail-closed check. Existing
+`unlabeled` event publication continues to recompute status, without
+executing native tests. This reduces stale-success windows; it is not a
+substitute for the dedicated App issuer tracked in
+[Issue #322](https://github.com/qigao/stun/issues/322).
+
 ## Maintenance
 
 - Add new files/paths to both the top-level trigger and

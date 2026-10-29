@@ -161,6 +161,16 @@ def assess_one(get, number, repo_root, expected_sha):
             final.get("state") != "open" or
             final.get("base", {}).get("ref") != "master"):
         raise ValueError("PR changed before publishing status")
+    # An unlabeled event can arrive while a previous success assessment is
+    # still fetching native job evidence. Never publish that stale success.
+    # Recheck the label independently of the earlier M0 snapshot; GitHub
+    # commit statuses are bound to SHA, not to the PR label event.
+    latest_labels = final.get("labels")
+    if not isinstance(latest_labels, list) or any(
+            not isinstance(label, dict) for label in latest_labels):
+        raise ValueError("PR label evidence missing at final admission")
+    if "ci/full" not in {label.get("name") for label in latest_labels}:
+        errors.append("ci/full label removed during validation")
     return errors
 
 
