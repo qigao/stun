@@ -16,6 +16,7 @@ set(CMAKE_C_STANDARD_REQUIRED ON)
 # TUI library sources
 set(TUI_SOURCES
     src/tui_buffer.c
+    src/tui_grid_snapshot.c
     src/tui_buffer_ext.c
     src/tui_terminal.c
     src/tui_input.c
