@@ -296,7 +296,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          targets=(test_plugin_abi test_plugin_host test_plugin_manifest test_plugin_create_unwind stun_gcanvas_window_host_source_compile test_ui_document test_desktop_application test_script_controller test_application_service_requests test_service_registry test_application_completion test_application_service_dispatcher test_tailwind_native test_tailwind_native_style test_tailwindcss_module test_effect_admission test_tango_gl_frame test_render_command test_render_command_tango test_render_preflight chart_ui_test dotgraph_parser_test test_dotgraph_ui_xml test_markdown_widget test_flexui_tango_stream flexui_tui_streaming_demo)
+          targets=(test_plugin_abi test_plugin_host test_plugin_manifest test_plugin_create_unwind stun_gcanvas_window_host_source_compile test_ui_document test_desktop_application test_script_controller test_application_service_requests test_service_registry test_application_completion test_application_service_dispatcher test_tailwind_native test_tailwind_native_style test_tailwindcss_module test_effect_admission test_tango_gl_frame stun_tango_gl_presenter_source_compile test_render_command test_render_command_tango test_render_preflight chart_ui_test dotgraph_parser_test test_dotgraph_ui_xml test_markdown_widget test_flexui_tango_stream flexui_tui_streaming_demo)
           if [[ "$RUNNER_OS" == Windows ]]; then
             targets+=(test_tui_win32_console test_tui_win32_conpty)
           fi

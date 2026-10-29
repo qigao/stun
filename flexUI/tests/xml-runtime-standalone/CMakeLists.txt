@@ -102,6 +102,24 @@ if(TARGET flex_tango_gl_frame)
   add_dependencies(stun_xml_runtime_qualification test_tango_gl_frame)
 endif()
 
+# Compile the ACTUAL OpenGL presenter integration source with its real
+# gCanvas/OpenGL public headers on all three headless platforms. This is a
+# SOURCE/ABI qualification, not a GPU-context or screenshot runtime claim.
+if(TARGET flex_tango_gl_frame)
+  add_library(stun_tango_gl_presenter_source_compile OBJECT
+    "${STUN_ROOT}/flex/backends/tango_opengl/gl_presenter.cpp")
+  target_include_directories(stun_tango_gl_presenter_source_compile PRIVATE
+    "${STUN_ROOT}/flex/backends/opengl/include"
+    "${STUN_ROOT}/flex/render/engines/gcanvas/include"
+    "${STUN_ROOT}/shared/gcanvas/include")
+  target_link_libraries(stun_tango_gl_presenter_source_compile
+    PRIVATE flex_tango_gl_frame)
+  target_compile_features(stun_tango_gl_presenter_source_compile
+    PRIVATE cxx_std_17)
+  add_dependencies(stun_xml_runtime_qualification
+    stun_tango_gl_presenter_source_compile)
+endif()
+
 # Exercise the production command replay and preflight code with a recording
 # renderer, then the same command path with the real Tango cell renderer.
 foreach(test IN ITEMS test_render_command test_render_command_tango)
