@@ -393,10 +393,11 @@ spec("Effect metadata admission keeps backend profiles and semantic contracts di
         for (auto& artifact : wrong_shader.manifest.artifacts) {
             artifact.kind = fx::ArtifactKind::EsslSource;
         }
-        for (auto& stage : wrong_shader.capabilities.effects.front().stages)
-            stage.kind = fx::ArtifactKind::EsslSource;
-        for (auto& stage : wrong_shader.capabilities.device.stages)
-            stage.kind = fx::ArtifactKind::EsslSource;
+        // Leave the adapter/device's qualified GLSL domain intact. Changing
+        // those records to ESSL would itself create an InvalidManifest before
+        // validating the selected artifact; this case specifically checks that
+        // TangoOpenGL refuses an ESSL shader against an otherwise valid GL
+        // capability and installed-program profile.
         effect_test_install_observations(wrong_shader);
         check(effect_validation_error(effect_validate(wrong_shader),
                                       fx::EffectError::UnsupportedStage));
