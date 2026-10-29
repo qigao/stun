@@ -21,6 +21,8 @@ import time
 
 WIDTH, HEIGHT = 928, 608
 TITLE = "FlexUI Desktop Editor"
+# Exercise root/client coordinate translation in the production application.
+WINDOW_ORIGIN = (127, 83)
 # Independent client-space contract: 24px shell padding, 680px title,
 # 16px gap and a 136x36 Save control. Never derive the oracle from the
 # runtime assets under test; a broken asset must not redefine correctness.
@@ -140,33 +142,102 @@ def window_rect(disp, window):
     # python-xlib's receiver is the destination, its argument the source:
     # Window.translate_coords(self, src_window, src_x, src_y).
     pos = root.translate_coords(window, 0, 0)
+    if not pos.same_screen:
+        raise VisualFailure("native window is on a different X11 screen")
     return int(pos.x), int(pos.y), int(geometry.width), int(geometry.height)
 
 
-def capture(disp, window):
+def place_window(disp, window, report, *, deadline):
+    """Send one move request and require the actual client origin to settle."""
+    initial = window_rect(disp, window)
+    screen = disp.screen().root.get_geometry()
+    report.update(initial_rect=list(initial), requested_origin=list(WINDOW_ORIGIN),
+                  observed_rect=list(initial),
+                  screen_size=[int(screen.width), int(screen.height)])
+    x, y = WINDOW_ORIGIN
+    if not (x > 0 and y > 0 and x + initial[2] <= screen.width and
+            y + initial[3] <= screen.height):
+        raise VisualFailure("off-origin GUI does not fit its X11 screen",
+                            code="window_placement_failed")
+    geometry = window.get_geometry()
+    errors = []
+
+    def move_error(error, _request):
+        errors.append(str(error))
+        return True
+
+    # Configure uses parent-relative outer coordinates; translate only by the
+    # required root-space delta, retaining parent offsets and window borders.
+    window.configure(x=int(geometry.x) + x - initial[0],
+                     y=int(geometry.y) + y - initial[1], onerror=move_error)
+    disp.sync()
+    if errors:
+        raise VisualFailure("X11 rejected the window move: " + errors[0],
+                            code="window_placement_failed")
+    settle_deadline = min(deadline, time.monotonic() + 2.0)
+    while time.monotonic() < settle_deadline:
+        observed = window_rect(disp, window)
+        report["observed_rect"] = list(observed)
+        if observed[2:] != initial[2:]:
+            raise VisualFailure("moving the GUI changed its client size",
+                                code="window_placement_failed")
+        if observed[:2] == WINDOW_ORIGIN:
+            return observed
+        time.sleep(.05)
+    raise VisualFailure(
+        f"native GUI did not reach screen origin {list(WINDOW_ORIGIN)}: "
+        f"observed {report['observed_rect']}", code="window_placement_failed")
+
+
+def capture(disp, window, *, expected_rect=None, desktop_path=None):
     from PIL import ImageGrab
-    x, y, w, h = window_rect(disp, window)
-    screen = ImageGrab.grab(xdisplay=os.environ["DISPLAY"])
+    rect = window_rect(disp, window)
+    if expected_rect is not None and rect != tuple(expected_rect):
+        raise VisualFailure("native GUI moved or resized before capture",
+                            code="window_geometry_changed")
+    x, y, w, h = rect
+    screen = ImageGrab.grab(xdisplay=os.environ["DISPLAY"]).convert("RGB")
+    if window_rect(disp, window) != rect:
+        raise VisualFailure("native GUI moved or resized during capture",
+                            code="window_geometry_changed")
     if x < 0 or y < 0 or x + w > screen.width or y + h > screen.height:
         raise VisualFailure("the real GUI is not fully visible on its X11 screen")
-    return screen.crop((x, y, x + w, y + h)).convert("RGB")
+    if desktop_path is not None:
+        screen.save(desktop_path)
+    return screen.crop((x, y, x + w, y + h))
 
 
-def mouse(disp, window, x, y, *, click=False):
+def mouse(disp, window, x, y, *, click=False, expected_rect=None):
     from Xlib import X
     from Xlib.ext import xtest
-    ox, oy, w, h = window_rect(disp, window)
+    rect = window_rect(disp, window)
+    if expected_rect is not None and rect != tuple(expected_rect):
+        raise VisualFailure("native GUI moved or resized before mouse input",
+                            code="window_geometry_changed")
+    ox, oy, w, h = rect
     if not (0 <= x < w and 0 <= y < h):
         raise VisualFailure("mouse target was outside real window")
     disp.set_input_focus(window, X.RevertToParent, X.CurrentTime)
     xtest.fake_input(disp, X.MotionNotify, x=ox + x, y=oy + y)
     disp.sync()
+    pointer = window.query_pointer()
+    observed_screen = [int(pointer.root_x), int(pointer.root_y)]
+    observed_client = [int(pointer.win_x), int(pointer.win_y)]
+    if (not pointer.same_screen or pointer.root.id != disp.screen().root.id or
+            observed_screen != [ox + x, oy + y] or observed_client != [x, y] or
+            window_rect(disp, window) != rect):
+        raise VisualFailure("XTest pointer did not reach the real client target",
+                            code="mouse_target_mismatch")
     if click:
         xtest.fake_input(disp, X.ButtonPress, 1)
         disp.sync()
         time.sleep(.06)
         xtest.fake_input(disp, X.ButtonRelease, 1)
         disp.sync()
+    return {"action": "left_click" if click else "move",
+            "window_rect": list(rect), "client": [x, y],
+            "screen": [ox + x, oy + y], "observed_screen": observed_screen,
+            "observed_client": observed_client}
 
 
 def request_close(disp, window):
@@ -321,6 +392,10 @@ def run(args):
                 raise VisualFailure("window PID belongs to another process")
             metadata.update(visible_window=True, window_id=hex(target.id),
                             window_rect=[x, y, width, height])
+            metadata["window_placement"] = {}
+            expected_rect = place_window(
+                disp, target, metadata["window_placement"], deadline=deadline)
+            metadata["window_rect"] = list(expected_rect)
             # GLFW maps the window before XML/controller initialization has
             # necessarily rendered. Wait for actual pixels, not a fixed sleep.
             ready_deadline = min(deadline, time.monotonic() + 6.0)
@@ -332,7 +407,8 @@ def run(args):
                 if process.poll() is not None:
                     raise VisualFailure(
                         f"app exited before rendered Save: {process.returncode}")
-                before = capture(disp, target)
+                before = capture(disp, target, expected_rect=expected_rect,
+                                 desktop_path=out / "desktop_before.png")
                 before.save(out / "before.png")
                 initial_samples += 1
                 variation = max(ImageStat.Stat(before).stddev)
@@ -377,18 +453,22 @@ def run(args):
                     "initial GUI state not reached: " + last_initial_error,
                     code=last_initial_code)
             center = ((box[0] + box[2]) // 2, (box[1] + box[3]) // 2)
-            mouse(disp, target, *center)
+            metadata["hover_mouse"] = mouse(
+                disp, target, *center, expected_rect=expected_rect)
             time.sleep(.20)
-            hovered = capture(disp, target)
+            hovered = capture(disp, target, expected_rect=expected_rect,
+                              desktop_path=out / "desktop_hover.png")
             hovered.save(out / "hover.png")
-            mouse(disp, target, *center, click=True)
+            metadata["save_click"] = mouse(
+                disp, target, *center, click=True, expected_rect=expected_rect)
             metadata["real_mouse_event"] = True
             post, matched_since, matching_frames = None, None, 0
             while time.monotonic() < deadline:
                 if process.poll() is not None:
                     raise VisualFailure(
                         f"app exited before Save completed: {process.returncode}")
-                frame = capture(disp, target)
+                frame = capture(disp, target, expected_rect=expected_rect,
+                                desktop_path=out / "desktop_after.png")
                 # Keep the latest frame even on a timeout or failed Save.
                 frame.save(out / "after.png")
                 changed = count_changed(hovered, frame, roi)

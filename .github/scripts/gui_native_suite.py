@@ -86,15 +86,70 @@ def runtime_identity(exe):
     return {name: gui.sha256_file(path) for name, path in paths.items()}
 
 
+def integer_coordinates(value, length):
+    return isinstance(value, list) and len(value) == length and all(
+        type(coordinate) is int for coordinate in value)
+
+
+def validate_window_placement(evidence):
+    rect = evidence.get("window_rect")
+    require(integer_coordinates(rect, 4) and
+            abs(rect[2] - gui.WIDTH) <= 8 and abs(rect[3] - gui.HEIGHT) <= 8,
+            "wrong native window geometry")
+    require(rect[:2] == list(gui.WINDOW_ORIGIN),
+            "native window did not reach the required nonzero screen origin")
+    placement = evidence.get("window_placement")
+    require(isinstance(placement, dict), "missing native window placement evidence")
+    initial = placement.get("initial_rect")
+    require(integer_coordinates(initial, 4) and initial[2:] == rect[2:],
+            "window placement did not preserve the initial client dimensions")
+    requested = placement.get("requested_origin")
+    require(integer_coordinates(requested, 2) and requested == list(gui.WINDOW_ORIGIN),
+            "window placement requested the wrong screen origin")
+    observed = placement.get("observed_rect")
+    require(integer_coordinates(observed, 4) and observed == rect,
+            "window placement disagrees with the observed native client rectangle")
+    screen = placement.get("screen_size")
+    require(integer_coordinates(screen, 2) and screen[0] > 0 and screen[1] > 0 and
+            0 <= rect[0] < rect[0] + rect[2] <= screen[0] and
+            0 <= rect[1] < rect[1] + rect[3] <= screen[1],
+            "placed native client rectangle is not fully visible on its desktop")
+    return placement
+
+
+def validate_mouse_coordinates(evidence, clicked):
+    if not clicked:
+        require("hover_mouse" not in evidence and "save_click" not in evidence,
+                "pre-click negative unexpectedly contains native mouse actions")
+        return
+    rect, box = evidence["window_rect"], evidence["save_button_box"]
+    center = [(box[0] + box[2]) // 2, (box[1] + box[3]) // 2]
+    screen = [rect[0] + center[0], rect[1] + center[1]]
+    for key, action in (("hover_mouse", "move"), ("save_click", "left_click")):
+        mouse = evidence.get(key)
+        require(isinstance(mouse, dict) and mouse.get("action") == action,
+                f"missing or wrong native {key} action")
+        require(integer_coordinates(mouse.get("window_rect"), 4) and
+                mouse["window_rect"] == rect,
+                f"native {key} used a different client rectangle")
+        require(integer_coordinates(mouse.get("client"), 2) and mouse["client"] == center,
+                f"native {key} did not target the rendered Save center")
+        require(integer_coordinates(mouse.get("screen"), 2) and mouse["screen"] == screen,
+                f"native {key} did not translate client coordinates to the screen")
+        require(integer_coordinates(mouse.get("observed_screen"), 2) and
+                mouse["observed_screen"] == screen and
+                integer_coordinates(mouse.get("observed_client"), 2) and
+                mouse["observed_client"] == center,
+                f"native {key} pointer observation disagrees with the requested target")
+
+
 def validate_common(evidence, identity, source_sha):
     require(evidence.get("source_sha") == source_sha, "wrong source HEAD in GUI evidence")
     require(evidence.get("binary_sha256") == identity["binary"],
             "wrong native binary in GUI evidence")
     require(evidence.get("visible_window") is True, "real application window was not visible")
-    rect = evidence.get("window_rect", [])
-    require(isinstance(rect, list) and len(rect) == 4 and
-            abs(rect[2] - gui.WIDTH) <= 8 and abs(rect[3] - gui.HEIGHT) <= 8,
-            "wrong native window geometry")
+    validate_window_placement(evidence)
+    rect = evidence["window_rect"]
     box = evidence.get("save_button_box")
     require(isinstance(box, list) and len(box) == 4 and
             all(type(value) is int for value in box), "rendered button was not identified")
@@ -115,6 +170,7 @@ def validate_positive(evidence, identity, source_sha, minimum_changed):
             gui.label_starts_with(evidence.get("initial_ocr"), INITIAL_LABEL) and
             gui.label_starts_with(evidence.get("after_ocr"), COMPLETION_LABEL),
             "normal GUI lacks complete Save-to-Saved evidence")
+    validate_mouse_coordinates(evidence, True)
     require(evidence.get("cleanup_mode") == "wm_delete_window" and
             evidence.get("cleanup_exit_code") == 0 and "cleanup_error" not in evidence,
             "normal GUI did not close cleanly through its native window")
@@ -145,6 +201,7 @@ def validate_negative(evidence, scenario, identity, source_sha, minimum_changed)
             "application startup failure or crash is not an expected visual failure")
     require(evidence.get("real_mouse_event") is scenario["mouse"],
             "wrong real mouse evidence for the negative scenario")
+    validate_mouse_coordinates(evidence, scenario["mouse"])
     require(evidence.get("cleanup_mode") == "wm_delete_window" and
             evidence.get("cleanup_exit_code") == 0 and "cleanup_error" not in evidence,
             "broken GUI did not close cleanly through its native window")
@@ -158,6 +215,32 @@ def validate_negative(evidence, scenario, identity, source_sha, minimum_changed)
                 "completion negative did not start with visible Save")
         require(evidence.get("changed_button_pixels", 0) >= minimum_changed,
                 "completion negative did not produce a real post-click pixel change")
+
+
+def verify_desktop_screenshots(directory, evidence, clicked):
+    """Require client pixels to come from the retained off-origin root capture."""
+    from PIL import Image
+    placement = validate_window_placement(evidence)
+    x, y, width, height = evidence["window_rect"]
+    bounds = (x, y, x + width, y + height)
+    records = []
+    for name in (("before", "hover", "after") if clicked else ("before",)):
+        client_path, desktop_path = directory / f"{name}.png", directory / f"desktop_{name}.png"
+        require(client_path.is_file() and desktop_path.is_file(),
+                f"missing retained {name} client or desktop screenshot")
+        with Image.open(client_path) as client, Image.open(desktop_path) as desktop:
+            require(client.mode == "RGB" and desktop.mode == "RGB",
+                    f"retained {name} screenshots must preserve RGB pixels")
+            require(client.size == (width, height),
+                    f"retained {name} client screenshot has wrong dimensions")
+            require(list(desktop.size) == placement["screen_size"],
+                    f"retained {name} desktop screenshot has wrong dimensions")
+            require(desktop.crop(bounds).tobytes() == client.tobytes(),
+                    f"retained {name} client pixels do not match the desktop at the placed origin")
+        records.append({"frame": name, "desktop": desktop_path.name,
+                        "client": client_path.name, "crop_rect": list(bounds),
+                        "pixels_match": True})
+    return records
 
 
 def verify_negative_screenshots(directory, evidence, scenario, minimum_changed):
@@ -240,8 +323,12 @@ def run_suite(args):
         identity = runtime_identity(exe)
         summary["original_runtime_sha256"] = identity
         positive, rejected = execute_driver(args, exe, out)
+        summary["positive_window_placement"] = positive.get("window_placement")
+        summary["positive_hover_mouse"] = positive.get("hover_mouse")
+        summary["positive_save_click"] = positive.get("save_click")
         require(not rejected and positive.get("result") == "PASS", "normal real GUI did not pass")
         validate_positive(positive, identity, args.source_sha, args.minimum_changed)
+        summary["positive_desktop_screenshots"] = verify_desktop_screenshots(out, positive, True)
         summary["positive_result"] = "PASS"
         summary["positive_button_layout"] = positive["save_button_layout"]
         require(runtime_identity(exe) == identity, "positive run changed original runtime files")
@@ -259,9 +346,15 @@ def run_suite(args):
                 record["failure_code"] = evidence.get("failure_code")
                 record["error"] = evidence.get("error")
                 record["save_button_layout"] = evidence.get("save_button_layout")
+                record["window_placement"] = evidence.get("window_placement")
+                for key in ("hover_mouse", "save_click"):
+                    if key in evidence:
+                        record[key] = evidence[key]
                 require(rejected, "deliberately broken GUI did not raise a visual failure")
                 validate_negative(evidence, scenario, identity, args.source_sha,
                                   args.minimum_changed)
+                record["desktop_screenshots"] = verify_desktop_screenshots(
+                    evidence_dir, evidence, scenario["mouse"])
                 record["verified_visible_label_ocr"] = verify_negative_screenshots(
                     evidence_dir, evidence, scenario, args.minimum_changed)
                 require(runtime_identity(copied) == mutated, "negative run changed its runtime files")

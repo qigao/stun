@@ -8,6 +8,7 @@ import os
 from pathlib import Path
 import sys
 import tempfile
+import time
 from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
@@ -119,8 +120,8 @@ class GuiPixelTests(unittest.TestCase):
         body = inspect.getsource(gui.run)
         self.assertIn('display.Display()', body)
         self.assertIn('subprocess.Popen(', body)
-        self.assertIn('capture(disp, target)', body)
-        self.assertIn('mouse(disp, target, *center, click=True)', body)
+        self.assertIn('capture(disp, target, expected_rect=expected_rect', body)
+        self.assertIn('disp, target, *center, click=True, expected_rect=expected_rect', body)
         self.assertNotIn('"--smoke"', body)
 
     def test_binary_and_pixel_sources_are_separate(self):
@@ -264,6 +265,60 @@ class GuiOcrTests(unittest.TestCase):
             self.assertFalse(evidence["application_alive_on_failure"])
 
 
+class WindowPlacementTests(unittest.TestCase):
+    def fixture(self, *, screen_size=(1280, 900), move_error=None):
+        requests = []
+
+        def configure(**request):
+            requests.append(request)
+            if move_error:
+                request["onerror"](move_error, None)
+
+        root = SimpleNamespace(get_geometry=lambda: SimpleNamespace(
+            width=screen_size[0], height=screen_size[1]))
+        disp = SimpleNamespace(screen=lambda: SimpleNamespace(root=root), sync=lambda: None)
+        window = SimpleNamespace(get_geometry=lambda: SimpleNamespace(x=0, y=0),
+                                 configure=configure)
+        return disp, window, requests
+
+    def test_ignored_native_move_is_a_bounded_failure(self):
+        disp, window, requests = self.fixture()
+        report = {}
+        with patch.object(gui, "window_rect", return_value=(0, 0, 928, 608)), \
+             patch.object(gui.time, "monotonic", side_effect=[0, 0, 3]), \
+             patch.object(gui.time, "sleep"):
+            with self.assertRaises(gui.VisualFailure) as failure:
+                gui.place_window(disp, window, report, deadline=10)
+        self.assertEqual(failure.exception.code, "window_placement_failed")
+        self.assertEqual(len(requests), 1)
+        self.assertEqual(report["observed_rect"], [0, 0, 928, 608])
+        self.assertEqual(report["requested_origin"], [127, 83])
+
+    def test_async_x11_move_error_is_not_silently_accepted(self):
+        disp, window, requests = self.fixture(move_error="BadMatch")
+        with patch.object(gui, "window_rect", return_value=(0, 0, 928, 608)):
+            with self.assertRaisesRegex(gui.VisualFailure, "X11 rejected.*BadMatch") as failure:
+                gui.place_window(disp, window, {}, deadline=10)
+        self.assertEqual(failure.exception.code, "window_placement_failed")
+        self.assertEqual(len(requests), 1)
+
+    def test_incomplete_visibility_rejects_placement_before_moving(self):
+        disp, window, requests = self.fixture(screen_size=(1000, 650))
+        with patch.object(gui, "window_rect", return_value=(0, 0, 928, 608)):
+            with self.assertRaisesRegex(gui.VisualFailure, "does not fit"):
+                gui.place_window(disp, window, {}, deadline=10)
+        self.assertEqual(requests, [])
+
+    def test_move_cannot_silently_resize_the_client(self):
+        disp, window, requests = self.fixture()
+        with patch.object(gui, "window_rect", side_effect=[
+                (0, 0, 928, 608), (127, 83, 927, 608)]), \
+             patch.object(gui.time, "monotonic", return_value=0):
+            with self.assertRaisesRegex(gui.VisualFailure, "changed its client size"):
+                gui.place_window(disp, window, {}, deadline=10)
+        self.assertEqual(len(requests), 1)
+
+
 @unittest.skipUnless(os.environ.get("STUN_GUI_X11_TESTS") == "1",
                      "native X11 driver checks require STUN_GUI_X11_TESTS=1 and Xvfb")
 class NativeX11DriverTests(unittest.TestCase):
@@ -293,17 +348,60 @@ class NativeX11DriverTests(unittest.TestCase):
         self.assertEqual(frame.size, (928, 608))
         self.assertEqual(frame.getpixel((10, 10)), (37, 99, 235))
 
+    def test_move_nested_bordered_client_and_preserve_root_frame(self):
+        from PIL import Image
+        self.window.configure(x=210, y=130, border_width=2)
+        self.disp.sync()
+        self.assertEqual(gui.window_rect(self.disp, self.window), (259, 161, 928, 608))
+        placement = {}
+        rect = gui.place_window(self.disp, self.window, placement,
+                                deadline=time.monotonic() + 2)
+        self.assertEqual(rect, (127, 83, 928, 608))
+        self.assertEqual(placement["initial_rect"], [259, 161, 928, 608])
+        self.assertEqual(placement["observed_rect"], list(rect))
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "desktop.png"
+            frame = gui.capture(self.disp, self.window, expected_rect=rect, desktop_path=path)
+            with Image.open(path) as desktop:
+                self.assertEqual(list(desktop.size), placement["screen_size"])
+                self.assertEqual(desktop.mode, "RGB")
+                crop = desktop.crop((127, 83, 1055, 691))
+                self.assertEqual(crop.tobytes(), frame.tobytes())
+            self.assertEqual(frame.getpixel((10, 10)), (37, 99, 235))
+
+    def test_capture_rejects_stale_window_geometry(self):
+        with self.assertRaises(gui.VisualFailure) as failure:
+            gui.capture(self.disp, self.window, expected_rect=(0, 0, 928, 608))
+        self.assertEqual(failure.exception.code, "window_geometry_changed")
+
     def test_real_mouse_click_reaches_client_coordinates(self):
         from Xlib import X
-        gui.mouse(self.disp, self.window, 37, 41, click=True)
+        evidence = gui.mouse(self.disp, self.window, 37, 41, click=True)
         pointer = self.disp.screen().root.query_pointer()
         self.assertEqual((pointer.root_x, pointer.root_y), (164, 124))
+        self.assertEqual(evidence, {
+            "action": "left_click", "window_rect": [127, 83, 928, 608],
+            "client": [37, 41], "screen": [164, 124],
+            "observed_screen": [164, 124], "observed_client": [37, 41]})
         buttons = []
         while self.disp.pending_events():
             event = self.disp.next_event()
             if event.type in (X.ButtonPress, X.ButtonRelease):
                 buttons.append((event.type, event.event_x, event.event_y))
         self.assertEqual(buttons, [(X.ButtonPress, 37, 41), (X.ButtonRelease, 37, 41)])
+
+    def test_wrong_root_translation_never_sends_a_click(self):
+        from Xlib import X
+        with patch.object(gui, "window_rect", return_value=(0, 0, 928, 608)):
+            with self.assertRaises(gui.VisualFailure) as failure:
+                gui.mouse(self.disp, self.window, 37, 41, click=True)
+        self.assertEqual(failure.exception.code, "mouse_target_mismatch")
+        buttons = []
+        while self.disp.pending_events():
+            event = self.disp.next_event()
+            if event.type in (X.ButtonPress, X.ButtonRelease):
+                buttons.append(event.type)
+        self.assertEqual(buttons, [])
 
 
 if __name__ == "__main__":

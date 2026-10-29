@@ -78,7 +78,8 @@ jobs:
           STUN_GUI_X11_TESTS: '1'
         run: |
           xvfb-run -a -s '-screen 0 1280x900x24 -nolisten tcp' \
-            /usr/bin/python3 .github/scripts/tests/test_gui_native_e2e.py
+            /usr/bin/python3 -m unittest discover \
+              -s .github/scripts/tests -p 'test_gui_native*.py'
 
       - name: Select pinned published native SDK versions
         id: releases

@@ -10,7 +10,9 @@ Python code: .github/scripts/gui_native_e2e.py.
 Build the existing flexui_desktop_editor target from the normal Stun
 CMake tree with real gCanvas OpenGL window, TurboScript and PluginHost.
 The launcher starts that **built native executable with no flags**
-and waits for a visible X11 window titled "FlexUI Desktop Editor".
+and waits for a visible X11 window titled "FlexUI Desktop Editor". It then
+moves that production window so its client origin is at screen `(127, 83)`
+and waits for X11 to report the actual position before capturing or clicking.
 The existing --smoke mode has an invisible window and is **not**
 valid screenshot/visual E2E evidence.
 
@@ -43,7 +45,7 @@ xvfb-run -a -s '-screen 0 1280x900x24 -nolisten tcp' \
 ~~~
 
 This refuses missing binaries, no X11 display, missing or ambiguous
-visible windows, wrong dimensions, blank frames, absent/misplaced blue
+visible windows, wrong dimensions or screen position, blank frames, absent/misplaced blue
 Save button, missing native Save-click visual change or completed Saved
 text, nonzero exit, or failure to close via WM_DELETE_WINDOW. First-frame
 rendering and native completion use bounded observation of the real
@@ -51,8 +53,13 @@ screen; merely finding an X11 window or displaying Saving is insufficient.
 
 Evidence files:
 
-- before.png, hover.png, after.png: real X11 root framebuffer cropped to
-  the visible client window, not generated from an internal widget tree
+- desktop_before.png, desktop_hover.png, desktop_after.png: unmodified RGB
+  root framebuffer captures, including the production window at its nonzero
+  screen origin. Only phases reached by that scenario produce a capture.
+- before.png, hover.png, after.png: client crops from the **same root capture**
+  as each matching desktop image. The suite requires the desktop crop at the
+  recorded rectangle to equal every retained client pixel exactly. It rejects
+  missing root captures, incorrect dimensions, stale crops and pixel mismatches.
 - *_ocr.png: derived crops inside the detected button (2px inset), with
   grayscale contrast normalization, inversion, 3x bicubic scaling and a
   white border. Every label uses the same preprocessing, preserving
@@ -63,6 +70,10 @@ Evidence files:
   and OCR observations. Save layout evidence includes expected/observed
   bounds, each edge's delta and the allowed tolerance. A failed interaction
   retains the last actual post-click frame and OCR error for diagnosis.
+  `window_placement` records the initial client rectangle, requested origin,
+  observed root-relative rectangle and screen size. `hover_mouse` and
+  `save_click` record requested client/screen coordinates and the pointer's
+  actual client/screen coordinates queried from X11.
 
 The critical screenshot comparison is **hover vs. after real mouse click**,
 not initial vs. hovered: a hover color is not proof of a click handler.
@@ -75,6 +86,31 @@ satisfy completion. OCR keeps all observed text in reading order, including
 uncertain words: a low-confidence `Not` before `Saved` cannot be discarded
 to create a successful label. Prefix words must each have finite confidence
 between 20 and 100; punctuation-only border observations do not count as words.
+
+### Production window at a nonzero screen origin
+
+Every scenario, including the four real negative variants, must report the
+production client at `(127, 83)` with unchanged client dimensions and fully
+inside its desktop. Captures check that the client rectangle remains fixed;
+a later move or resize cannot silently change which root pixels are cropped.
+The CI display is 1280x900 and the editor client is 928x608.
+
+Hover and click use the center of the detected Save pixels in client
+coordinates. The suite independently adds the observed window origin and
+requires the recorded screen target and actual X11 pointer observations to
+agree. For the normal detected bounds `(721, 25, 855, 59)`, that is client
+`(788, 42)` and screen `(915, 125)`. A record that uses the client position
+as a screen position, changes the origin, omits a pointer observation or
+claims a different control center fails admission. Initial-label and layout
+negatives must stop before either mouse action; they cannot claim hover or
+click evidence.
+
+The suite compares each `before`, `hover` and `after` client image with its
+corresponding raw desktop crop, using the actual root-relative rectangle and
+the recorded screen size. The positive run and completion negatives require
+all three pairs; the two pre-click negatives require their `before` pair.
+This connects the production window's nonzero placement, real pointer
+coordinates and retained pixels in the same end-to-end run.
 
 ### Independent Save geometry oracle
 
@@ -104,7 +140,14 @@ a full-screen golden or qualification of other DPI/viewport settings.
 - The same test file also runs native X11 coordinate/capture/mouse
   regressions when STUN_GUI_X11_TESTS=1. These create an off-origin X11
   window and exercise the real python-xlib API. They verify the driver,
-  and do not replace the subsequent Stun application run.
+  and do not replace the subsequent Stun application run. The production
+  application suite now also requires nonzero placement and preserves the
+  raw root captures for all five actual application scenarios.
+- `test_gui_native_suite.py` rejects missing or forged placement/pointer
+  records and inconsistent desktop/client image pairs. Pillow-dependent
+  image regressions may skip in the public parser job without Pillow;
+  the real GUI job requires Pillow, runs both complete regression files under
+  Xvfb, and validates the actual production screenshots in the subsequent suite.
 - A local Xvfb/Tk window validated the X11 screenshot/XTest transport:
   a responding test button passed, while an inert one failed.
   This is a harness self-test only, not a Stun renderer result.
@@ -153,14 +196,17 @@ xvfb-run -a -s '-screen 0 1280x900x24 -nolisten tcp' \
 
 A nonzero exit alone is insufficient. A negative case must have the expected
 visual failure code, a live application at the failure point, the real
-window, the expected erroneous text in screenshot OCR, and a normal native
+window at the required nonzero origin, the expected erroneous text in
+screenshot OCR, matching raw-desktop/client pixels, and a normal native
 window-close exit. Missing dependencies, a blank image, empty OCR, a crashed
 process or forced cleanup fail the suite.
 
 The positive evidence remains at the output root. Each negative case keeps
 its own screenshots, application log and `evidence.json` with `result: FAIL`.
 The separate `suite.json` records whether those required failures were
-actually observed. It reports PASS only after the positive and all four real
+actually observed, including placement, hover/click records for scenarios
+that reach those actions, and verified desktop/client screenshot pairs.
+It reports PASS only after the positive and all four real
 negative cases qualify; it never rewrites failed driver evidence as success.
 
 ## M1 native GUI build / actual-screen CI
@@ -180,6 +226,7 @@ The exact job name is "GUI visible screenshot / Linux X11", selected
 by the trusted exact-head acceptance matrix for changes to the desktop
 editor, the script or GUI build workflow. A CI success requires that
 the actual window opened, rendered blue Save, reacted to mouse input,
+was positioned at the nonzero screen origin with verified root captures,
 displayed the `Saved by` completion prefix and closed correctly, and that all four wrong
 visible states were rejected for their expected reason. Native source/UI
 tests are not replaced.

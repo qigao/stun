@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Admission/isolation regressions, not a native Stun GUI qualification."""
+from copy import deepcopy
 import json
 from pathlib import Path
 import sys
@@ -11,9 +12,16 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import gui_native_suite as suite
 
+try:
+    from PIL import Image, ImageDraw
+except ImportError:
+    Image = ImageDraw = None
+
 
 SHA = "a" * 40
 IDENTITY = {"binary": "b" * 64, "plugin": "c" * 64}
+WINDOW_RECT = [127, 83, 928, 608]
+SCREEN_SIZE = [1280, 900]
 
 
 def words(text):
@@ -21,13 +29,25 @@ def words(text):
             for part in text.split()]
 
 
+def mouse_evidence(action, box):
+    client = [(box[0] + box[2]) // 2, (box[1] + box[3]) // 2]
+    screen = [127 + client[0], 83 + client[1]]
+    return {"action": action, "window_rect": list(WINDOW_RECT),
+            "client": client, "screen": screen,
+            "observed_screen": list(screen), "observed_client": list(client)}
+
+
 def negative_evidence(scenario):
     box = [721, 25, 855, 59]
     if "layout_offset" in scenario:
         box = [edge + offset for edge, offset in zip(box, scenario["layout_offset"])]
-    return {
+    evidence = {
         "source_sha": SHA, "binary_sha256": IDENTITY["binary"], "result": "FAIL",
-        "visible_window": True, "window_rect": [0, 0, 928, 608],
+        "visible_window": True, "window_rect": list(WINDOW_RECT),
+        "window_placement": {"initial_rect": [0, 0, 928, 608],
+                             "requested_origin": [127, 83],
+                             "observed_rect": list(WINDOW_RECT),
+                             "screen_size": list(SCREEN_SIZE)},
         "save_button_box": box, "save_button_layout": suite.gui.button_layout(box),
         "failure_code": scenario["failure_code"], "application_alive_on_failure": True,
         "real_mouse_event": scenario["mouse"], "cleanup_mode": "wm_delete_window",
@@ -35,6 +55,10 @@ def negative_evidence(scenario):
         "initial_ocr": words("Save") if scenario["mouse"] or "layout_offset" in scenario else [],
         scenario["observation"]: words(scenario["observed_label"]),
     }
+    if scenario["mouse"]:
+        evidence["hover_mouse"] = mouse_evidence("move", box)
+        evidence["save_click"] = mouse_evidence("left_click", box)
+    return evidence
 
 
 def positive_evidence():
@@ -207,6 +231,183 @@ class NegativeAdmissionTests(unittest.TestCase):
                     suite.execute_driver(args, Path("/unused/native-gui"), Path(directory))
 
 
+class PlacementAdmissionTests(unittest.TestCase):
+    def validate(self, evidence, scenario):
+        if scenario is None:
+            suite.validate_positive(evidence, IDENTITY, SHA, 38)
+        else:
+            suite.validate_negative(evidence, scenario, IDENTITY, SHA, 38)
+
+    def all_cases(self):
+        return [(positive_evidence(), None)] + [
+            (negative_evidence(scenario), scenario) for scenario in suite.SCENARIOS]
+
+    def test_every_case_requires_a_real_nonzero_placement_record(self):
+        for original, scenario in self.all_cases():
+            invalid = (
+                {"window_rect": [0, 0, 928, 608]},
+                {"window_rect": [127, 83, True, 608]},
+                {"window_placement": None},
+                {"window_placement": {}},
+            )
+            for update in invalid:
+                with self.subTest(scenario=scenario, update=update):
+                    evidence = deepcopy(original)
+                    evidence.update(update)
+                    with self.assertRaises(suite.SuiteFailure):
+                        self.validate(evidence, scenario)
+            for key, value in (
+                    ("initial_rect", [0, 0, 927, 608]),
+                    ("initial_rect", [0, 0]),
+                    ("requested_origin", [0, 0]),
+                    ("requested_origin", [127.0, 83]),
+                    ("observed_rect", [128, 83, 928, 608]),
+                    ("observed_rect", [127, 83, 928, 607]),
+                    ("screen_size", [1000, 900]),
+                    ("screen_size", [1280, 600]),
+                    ("screen_size", [1280, True]),
+                    ("screen_size", None)):
+                with self.subTest(scenario=scenario, field=key, value=value):
+                    evidence = deepcopy(original)
+                    evidence["window_placement"][key] = value
+                    with self.assertRaises(suite.SuiteFailure):
+                        self.validate(evidence, scenario)
+
+    def test_matching_forged_origin_in_all_rectangles_is_still_rejected(self):
+        for original, scenario in self.all_cases():
+            evidence = deepcopy(original)
+            evidence["window_rect"] = [0, 0, 928, 608]
+            evidence["window_placement"].update(
+                requested_origin=[0, 0], observed_rect=[0, 0, 928, 608])
+            with self.subTest(scenario=scenario), self.assertRaisesRegex(
+                    suite.SuiteFailure, "nonzero screen origin"):
+                self.validate(evidence, scenario)
+
+    def test_clicking_cases_require_translated_and_observed_pointer_coordinates(self):
+        for original, scenario in self.all_cases():
+            if scenario is not None and not scenario["mouse"]:
+                continue
+            for key in ("hover_mouse", "save_click"):
+                evidence = deepcopy(original)
+                evidence.pop(key)
+                with self.subTest(scenario=scenario, missing=key), self.assertRaisesRegex(
+                        suite.SuiteFailure, key):
+                    self.validate(evidence, scenario)
+                for field, value in (
+                        ("action", "left_click" if key == "hover_mouse" else "move"),
+                        ("window_rect", [0, 0, 928, 608]),
+                        ("client", [787, 42]),
+                        ("client", [788.0, 42]),
+                        ("screen", [788, 42]),
+                        ("screen", [916, 125]),
+                        ("observed_screen", [915, 126]),
+                        ("observed_client", [788, 43]),
+                        ("observed_client", None)):
+                    with self.subTest(scenario=scenario, action=key, field=field, value=value):
+                        evidence = deepcopy(original)
+                        evidence[key][field] = value
+                        with self.assertRaisesRegex(suite.SuiteFailure, key):
+                            self.validate(evidence, scenario)
+
+    def test_preclick_negatives_must_not_record_mouse_actions(self):
+        for scenario in (item for item in suite.SCENARIOS if not item["mouse"]):
+            for key in ("hover_mouse", "save_click"):
+                for value in (None, mouse_evidence("left_click", [721, 25, 855, 59])):
+                    evidence = negative_evidence(scenario)
+                    evidence[key] = value
+                    with self.subTest(scenario=scenario, key=key, value=value), \
+                         self.assertRaisesRegex(suite.SuiteFailure, "pre-click negative"):
+                        self.validate(evidence, scenario)
+
+
+@unittest.skipIf(Image is None, "Pillow is required for retained-root pixel regressions")
+class DesktopScreenshotTests(unittest.TestCase):
+    """Synthetic images exercise rejection only; they do not qualify the GUI."""
+
+    def write_frames(self, directory, clicked):
+        for index, name in enumerate(("before", "hover", "after") if clicked else ("before",)):
+            client = Image.new("RGB", (928, 608), (15 + index, 23, 42))
+            draw = ImageDraw.Draw(client)
+            draw.rectangle((10, 12, 300, 30), fill=(250, 100, 40))
+            draw.rectangle((721, 25, 854, 58), fill=(37, 99 + index, 235))
+            desktop = Image.new("RGB", tuple(SCREEN_SIZE), (192, 0, 192))
+            desktop.paste(client, (127, 83))
+            client.save(directory / f"{name}.png")
+            desktop.save(directory / f"desktop_{name}.png")
+
+    def test_each_case_verifies_its_actual_capture_phases(self):
+        cases = [(positive_evidence(), True)] + [
+            (negative_evidence(case), case["mouse"]) for case in suite.SCENARIOS]
+        for evidence, clicked in cases:
+            with self.subTest(clicked=clicked, result=evidence["result"]), \
+                 tempfile.TemporaryDirectory() as temporary:
+                directory = Path(temporary)
+                self.write_frames(directory, clicked)
+                records = suite.verify_desktop_screenshots(directory, evidence, clicked)
+                self.assertEqual([record["frame"] for record in records],
+                                 ["before", "hover", "after"] if clicked else ["before"])
+                self.assertTrue(all(record["crop_rect"] == [127, 83, 1055, 691] and
+                                    record["pixels_match"] is True for record in records))
+
+    def test_missing_client_or_root_capture_is_not_reconstructed(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            self.write_frames(directory, True)
+            for name in ("before", "hover", "after"):
+                for prefix in ("", "desktop_"):
+                    path = directory / f"{prefix}{name}.png"
+                    original = path.read_bytes()
+                    path.unlink()
+                    with self.subTest(file=path.name), self.assertRaisesRegex(
+                            suite.SuiteFailure, "missing retained"):
+                        suite.verify_desktop_screenshots(directory, positive_evidence(), True)
+                    path.write_bytes(original)
+
+    def test_one_changed_pixel_in_each_root_crop_fails(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            self.write_frames(directory, True)
+            for name in ("before", "hover", "after"):
+                path = directory / f"desktop_{name}.png"
+                original = path.read_bytes()
+                with Image.open(path) as image:
+                    changed = image.copy()
+                changed.putpixel((137, 93), (0, 255, 0))
+                changed.save(path)
+                with self.subTest(frame=name), self.assertRaisesRegex(
+                        suite.SuiteFailure, "pixels do not match"):
+                    suite.verify_desktop_screenshots(directory, positive_evidence(), True)
+                path.write_bytes(original)
+
+    def test_stale_or_origin_zero_crops_cannot_claim_nonzero_placement(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            self.write_frames(directory, True)
+            (directory / "after.png").write_bytes((directory / "hover.png").read_bytes())
+            with self.assertRaisesRegex(suite.SuiteFailure, "pixels do not match"):
+                suite.verify_desktop_screenshots(directory, positive_evidence(), True)
+            self.write_frames(directory, True)
+            with Image.open(directory / "before.png") as client:
+                desktop = Image.new("RGB", tuple(SCREEN_SIZE), (192, 0, 192))
+                desktop.paste(client, (0, 0))
+                desktop.save(directory / "desktop_before.png")
+            with self.assertRaisesRegex(suite.SuiteFailure, "pixels do not match"):
+                suite.verify_desktop_screenshots(directory, positive_evidence(), True)
+
+    def test_wrong_size_or_converted_pixel_format_is_rejected(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            for name, size, mode in (
+                    ("before.png", (927, 608), "RGB"),
+                    ("desktop_before.png", (1279, 900), "RGB"),
+                    ("desktop_before.png", tuple(SCREEN_SIZE), "RGBA")):
+                self.write_frames(directory, False)
+                Image.new(mode, size).save(directory / name)
+                with self.subTest(file=name, size=size, mode=mode), \
+                     self.assertRaises(suite.SuiteFailure):
+                    suite.verify_desktop_screenshots(directory, positive_evidence(), False)
+
+
 class IsolationTests(unittest.TestCase):
     def create_files(self, root):
         root.mkdir()
@@ -258,6 +459,27 @@ class IsolationTests(unittest.TestCase):
             self.assertEqual(summary["result"], "FAIL")
             self.assertEqual(summary["negative_cases"], [])
             self.assertIn("error", summary)
+
+    @unittest.skipIf(Image is None, "Pillow is required for retained-root pixel regressions")
+    def test_success_metadata_without_desktop_captures_cannot_pass_the_suite(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            exe = self.create_files(root / "runtime")
+            identity = suite.runtime_identity(exe)
+            evidence = positive_evidence()
+            evidence["binary_sha256"] = identity["binary"]
+            out = root / "evidence"
+            args = SimpleNamespace(exe=str(exe), source_sha=SHA, out=str(out),
+                                   timeout=12, minimum_changed=38)
+            with patch.object(suite, "execute_driver", return_value=(evidence, False)), \
+                 self.assertRaisesRegex(suite.SuiteFailure, "missing retained"):
+                suite.run_suite(args)
+            summary = json.loads((out / "suite.json").read_text(encoding="utf-8"))
+            self.assertEqual(summary["result"], "FAIL")
+            self.assertNotIn("positive_result", summary)
+            self.assertEqual(summary["positive_window_placement"], evidence["window_placement"])
+            self.assertEqual(summary["positive_save_click"], evidence["save_click"])
+            self.assertTrue(summary["original_runtime_unchanged"])
 
 
 if __name__ == "__main__":
