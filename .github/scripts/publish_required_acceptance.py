@@ -76,6 +76,63 @@ def open_prs_at_sha(get, repo, sha):
     return sorted(set(result))
 
 
+def latest_ci_full_label_time(get, number):
+    """Require real ci/full admission chronology, not only current label."""
+    from datetime import datetime, timezone
+    events = pages(get, f"/issues/{number}/events", None, limit=20)
+    timestamps = []
+    for item in events:
+        if not isinstance(item, dict):
+            raise ValueError("malformed issue label event")
+        if item.get("event") != "labeled":
+            continue
+        if item.get("label", {}).get("name") != "ci/full":
+            continue
+        stamp = item.get("created_at")
+        if not isinstance(stamp, str):
+            raise ValueError("ci/full label event missing timestamp")
+        timestamps.append(datetime.fromisoformat(
+            stamp.replace("Z", "+00:00")
+        ).astimezone(timezone.utc))
+    if not timestamps:
+        raise ValueError("ci/full label admission event not found")
+    return max(timestamps)
+
+
+def ci_full_freshness_errors(snapshot, requirements, label_time):
+    """Only real required jobs admitted since ci/full may satisfy the gate."""
+    from datetime import datetime, timezone
+    errors = []
+    sha = snapshot.get("head_sha")
+    for path, names in requirements.items():
+        candidates = [r for r in snapshot.get("runs", [])
+                      if r.get("path") == path and r.get("head_sha") == sha
+                      and r.get("event") == "pull_request"]
+        if not candidates:
+            continue  # M0 rejects missing workflow.
+        latest = max(candidates, key=lambda r: (
+            int(r.get("id", 0)), int(r.get("run_attempt", 0))
+        ))
+        if (latest.get("status") != "completed" or
+                latest.get("conclusion") != "success"):
+            continue  # M0 rejects unfinished or unsuccessful runs.
+        for name in names:
+            matched = [j for j in latest.get("jobs", [])
+                       if j.get("name") == name]
+            if len(matched) != 1:
+                continue  # M0 rejects missing or duplicate jobs.
+            stamp = matched[0].get("started_at")
+            if not isinstance(stamp, str):
+                errors.append(f"{path}: job {name!r} has no start timestamp")
+                continue
+            when = datetime.fromisoformat(
+                stamp.replace("Z", "+00:00")
+            ).astimezone(timezone.utc)
+            if when < label_time:
+                errors.append(f"{path}: job {name!r} predates ci/full admission")
+    return errors
+
+
 def assess_one(get, number, repo_root, expected_sha):
     """Recheck PR identity before and after evidence and policy selection."""
     before = get(f"/pulls/{number}")
@@ -92,6 +149,11 @@ def assess_one(get, number, repo_root, expected_sha):
     requirements = load_workflow_requirements(paths, repo_root)
     snapshot = collect_snapshot(get, number, requirements)
     errors = verify_snapshot(snapshot, requirements)
+    if "ci/full" in snapshot.get("labels", []):
+        admission_time = latest_ci_full_label_time(get, number)
+        errors.extend(ci_full_freshness_errors(
+            snapshot, requirements, admission_time
+        ))
     if snapshot.get("head_sha") != sha:
         errors.append("PR changed while trusted requirements were selected")
     final = get(f"/pulls/{number}")

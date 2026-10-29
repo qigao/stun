@@ -191,6 +191,13 @@ upstream `workflow_run` requested/completed events. The latter can have an
 empty `pull_requests` list; the publisher therefore resolves *currently open*
 master-targeting PRs by exact source SHA from the API.
 
+Each required native job must have actually started **no earlier than the
+most recent `ci/full` label admission event** from the GitHub issue-events
+API. This prevents a newly added/re-added `ci/full` label from immediately
+reusing older same-SHA green jobs. Re-runs are qualified using their real
+latest-attempt job start times rather than the original workflow run
+creation timestamp. Missing or malformed admission timestamps fail closed.
+
 The publisher reads PR changed files and default-branch workflow policies
 to infer required host jobs; it reads live per-job execution results and
 requires exact-head completed SUCCESS for every applicable job. Missing,
