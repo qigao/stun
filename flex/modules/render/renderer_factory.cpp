@@ -12,7 +12,7 @@ namespace flex {
 namespace {
 
 constexpr std::size_t backend_count =
-    static_cast<std::size_t>(RendererBackend::Custom) + 1;
+    static_cast<std::size_t>(RendererBackend::TangoOpenGL) + 1;
 
 std::size_t backend_index(RendererBackend backend) {
     return static_cast<std::size_t>(backend);
@@ -47,6 +47,8 @@ const char* renderer_backend_name(RendererBackend backend) {
         return "Vulkan";
     case RendererBackend::TUI:
         return "TUI";
+    case RendererBackend::TangoOpenGL:
+        return "TangoOpenGL";
     case RendererBackend::Direct2D:
         return "Direct2D";
     case RendererBackend::Custom:

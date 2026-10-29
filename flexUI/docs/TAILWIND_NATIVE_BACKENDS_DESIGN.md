@@ -14,7 +14,7 @@ Tailwind 原生编译器直接生成不可变 `TailwindProgram`，供统一的�
 
 一个语义效果可以有不同后端实现。**EffectId 表达效果；shader、D2D effect graph 和终端 cell 操作表达实现。** 后端不重新解释 Tailwind，不拥有另一棵 UI 树。
 
-Tango 没有可编程 GPU shader。D2D 与 gCanvas 的 shader 格式、能力与资源生命周期也不同。任何能力未实现、参数超限或设备失效都必须产生明确结果，不能静默丢掉效果、切换 renderer、降低效果质量或重试另一个 provider。
+Tango 必须区分现有的 **TTY cell 输出**（无 GPU shader）和规划中的 **OpenGL cell-grid 呈现**（独立 GLSL/GPU 管线与资源 owner）；通用 gCanvas OpenGL 不能冒充 TangoOpenGL。D2D 与 gCanvas 的 shader 格式、能力与资源生命周期也不同。任何能力未实现、参数超限或设备失效都必须产生明确结果，不能静默丢掉效果、切换 renderer、降低效果质量或重试另一个 provider。
 
 本设计不引入样式字节码 VM，不修改 chart DSL / Mermaid grammar，不以新 workflow 或 ruleset 代替已有后端验收。
 
@@ -28,7 +28,8 @@ Tango 没有可编程 GPU shader。D2D 与 gCanvas 的 shader 格式、能力与
 | 属性 | 已有 `StylePropertyDesc`、CMeta 类型与 layout/text/paint/hit-test/composite impact；typed value 覆盖仍有限 | 扩展同一个 registry 和求值器，覆盖布局、主题、动画和效果所需类型 |
 | 能力 | `RendererCapabilities` 主要是 shadow、blur、rotation 等布尔值 | 可查询的效果、参数域、格式、资源与设备契约 |
 | D2D | 借用 `ID2D1RenderTarget*`；基础图形/文字/图片；shadow/blur 为 false，非空请求抛错 | 基础绘制 profile 加经过单独实现与验收的 D2D effect profile |
-| Tango | 当前为 8×16 逻辑像素到 cell 的适配；若干不支持的操作是 no-op，圆角和部分 alpha 行为不完整 | 显式 TerminalCell profile，严格准入与完整终端语义 |
+| TangoTTY | 当前为 8×16 逻辑像素到 cell 的适配，输出 VT/TTY/ConPTY；若干不支持的操作是 no-op，圆角和部分 alpha 行为不完整 | 显式 TerminalCell profile，严格准入与完整终端语义；无 GPU shader |
+| TangoOpenGL | 目前**没有**生产 renderer 或独立 native GL presenter；一般 Flex OpenGL 不等于 TangoOpenGL | 共享 C11 Tango cell grid，以 glyph atlas/GLSL 经明确 cell→pixel 投影呈现；独立 NativePixel GPU profile、资源 owner、真实验收 |
 | gCanvas | 已有 GL/GLES/Vulkan 实现和参数化 shader；部分效果有输入/变换限制；当前 renderer 不支持 retained mode | 分别声明每个 API profile 和效果域，建立有界程序/资源缓存 |
 
 源码证据：[utility 编译器](https://github.com/qigao/stun/blob/5ef5d4428bbad4256986240b17a3662c379e3222/flexUI/modules/tailwindcss/compiler.cpp)、[属性 registry](https://github.com/qigao/stun/blob/5ef5d4428bbad4256986240b17a3662c379e3222/flexUI/include/flexUI/detail/style_property_registry.h)、[RendererCapabilities](https://github.com/qigao/stun/blob/5ef5d4428bbad4256986240b17a3662c379e3222/flex/include/flex/core/renderer.h)、[D2D](https://github.com/qigao/stun/blob/5ef5d4428bbad4256986240b17a3662c379e3222/flex/backends/d2d/renderer.cpp)、[Tango adapter](https://github.com/qigao/stun/blob/5ef5d4428bbad4256986240b17a3662c379e3222/flex/backends/tui/renderer.cpp)、[gCanvas adapter](https://github.com/qigao/stun/blob/5ef5d4428bbad4256986240b17a3662c379e3222/flex/render/engines/gcanvas/renderer.cpp)。
@@ -51,7 +52,9 @@ flowchart TD
     A --> R["后端拥有的 RenderPlan"]
     R --> D["D2D draw / effect graph"]
     R --> G["gCanvas GL / GLES / Vulkan"]
-    R --> U["Tango cell program"]
+    R --> U["Tango TTY: cell / VT output"]
+    R --> TU["Tango OpenGL: cell grid to pixel projection"]
+    TU --> TG["gCanvas GL / Tango glyph pipeline"]
 ```
 
 这是逻辑分层，不要求每帧重建所有对象。静态规则、类型与常量可提前编译；状态、主题、文本、viewport 和 container 变化按依赖更新。容器条件可以要求布局后的有界重算，沿用单一布局事实源。
@@ -86,8 +89,10 @@ flowchart TD
 
 | 目标 | 坐标与主题 | 后端 |
 | --- | --- | --- |
-| `NativePixel` | 明确 logical/device 单位、DPI、字体度量、颜色与 alpha 契约 | D2D 或某个 gCanvas API profile |
-| `TerminalCell` | 明确 row/column、grapheme 宽度、整数间距 token、可用颜色/文本属性和边框字符 | Tango |
+| `NativePixel` | 明确 logical/device 单位、DPI、字体度量、颜色与 alpha 契约 | D2D、gCanvas，或经过独立 cell→pixel 投影的 TangoOpenGL 呈现与像素效果 |
+| `TerminalCell` | 明确 row/column、grapheme 宽度、整数间距 token、可用颜色/文本属性和边框字符 | TangoTTY 与 Tango 的共享 C11 cell-grid 源 |
+
+TangoOpenGL **不是**改变 C11 Tango cell 语义的第二套布局。它消费明确版本化的 Tango cell-grid 快照，经字体度量、DPI 和 cell→pixel 投影变成 GPU framebuffer。该转换在现阶段尚未实现，CPU effect admission 只验证已投影后的 NativePixel 效果；不把 cell 单位隐式当作像素。设计细则见 [Tango dual presentation](../../tango/DUAL_PRESENTATION_DESIGN.md)。
 
 同一个应用可共享 XML 结构、业务状态和 controller，并显式提供不同目标的 Theme/Preset。终端 profile 不声称与桌面有相同像素几何或完整 Tailwind v4 CSS 输出等价性。
 
@@ -102,7 +107,8 @@ flowchart TD
 | gCanvas desktop GL | desktop GLSL program，当前模板为 `#version 410 core`；GL 参数/实例布局 | 记录 GL 版本、扩展、uniform/texture 限制及编译链接结果 |
 | gCanvas GLES | 独立 ESSL profile，当前生成器使用 `#version 300 es` 和精度声明 | precision、UBO 容量与纹理限制独立检查；不是 desktop GL 产物直接复用 |
 | gCanvas Vulkan | SPIR-V modules + descriptor/pipeline layout | 记录 SPIR-V/Vulkan 目标、格式、资源布局、特化值与设备特性 |
-| Tango | 原生 cell、文本属性、边框、滚动与输出批次 | 无 GPU shader；无对应 terminal 语义的效果返回 Unsupported |
+| TangoTTY | 原生 cell、文本属性、边框、滚动与 VT/ConPTY 输出批次 | 无 GPU shader；无对应终端语义的效果返回 Unsupported |
+| TangoOpenGL | 共享 Tango cell frame；独立 OpenGL glyph atlas、cell instance 和 GLSL 呈现（待实现） | 必须有独立 GL context、NativePixel 投影、manifest/ABI、设备能力、真实资源 owner 和 GPU 完成证据；尚未登记生产支持 |
 
 现有 gCanvas shader 证据：[GL/GLES 源转换](https://github.com/qigao/stun/blob/5ef5d4428bbad4256986240b17a3662c379e3222/shared/gcanvas/src/backends/opengles/gles_shader_source.cpp)、[GL 编译与实例绘制](https://github.com/qigao/stun/blob/5ef5d4428bbad4256986240b17a3662c379e3222/shared/gcanvas/src/backends/gl/context_impl_gl.cpp)、[Vulkan module 与提交](https://github.com/qigao/stun/blob/5ef5d4428bbad4256986240b17a3662c379e3222/shared/gcanvas/src/backends/vulkan/context_impl_vulkan.cpp)、[圆角/阴影 shader](https://github.com/qigao/stun/blob/5ef5d4428bbad4256986240b17a3662c379e3222/shared/gcanvas/src/shaders/rounded_rect.frag)。
 
@@ -146,7 +152,7 @@ Microsoft 的 [custom effects](https://learn.microsoft.com/en-us/windows/win32/d
 
 有效能力是 **已实现且已验收的 adapter 能力、已安装产物、当前设备能力和应用预算的交集**。未知能力按不支持处理。
 
-准入逐项验证 shader stage、资源访问方式和 adapter 已实现的执行路径；API/backend 可用不代表任意 stage 可用。Compute 只有在 adapter 执行路径、设备能力、dispatch/workgroup/shared-memory 限额全部通过验证后才能登记。Tango 和 native builtin 不需要伪造 GPU stage。
+准入逐项验证 shader stage、资源访问方式和 adapter 已实现的执行路径；API/backend 可用不代表任意 stage 可用。Compute 只有在 adapter 执行路径、设备能力、dispatch/workgroup/shared-memory 限额全部通过验证后才能登记。TangoTTY 和 native builtin 不需要伪造 GPU stage；TangoOpenGL 也不得仅凭使用 OpenGL 就自动获得 compute 权限。
 
 现有 `supports_blur=true` 无法描述普通 blur 与 backdrop、非均匀变换、离屏大小和半径限制，不能继续作为充分准入证明。建议接口如下，所有类型均为设计示意：
 
@@ -223,7 +229,8 @@ viewport、终端尺寸、颜色能力或设备能力变化需要重新验证受
 | D2D graph、brush、bitmap、临时 surface | D2D render owner；遵守目标资源域和设备代际 |
 | GL/GLES program、texture、buffer | 对应 context/share-group owner；在正确 current context 中释放 |
 | Vulkan pipeline、descriptor、image | device owner；在引用它们的提交完成后释放 |
-| Tango cell program、buffer borrow | terminal owner；遵守 frame/resize generation 和输出完成协议 |
+| TangoTTY cell program、buffer borrow | terminal owner；遵守 frame/resize generation 和输出完成协议 |
+| TangoOpenGL glyph atlas、buffer、program、framebuffer | GL context/share-group owner；遵守 cell-snapshot revision、device generation、实际 GPU 完成与正确 context 的销毁协议 |
 
 `ProgramRevision`、`UiRevision`、`ViewportRevision`、`CapabilityRevision` 和 `DeviceGeneration` 是不同身份。普通 resize 不必销毁所有 shader；设备重建后不得复用旧 GPU handle。异步准备结果必须携带所有输入 revision，过期结果只清理，不发布。
 
@@ -235,7 +242,7 @@ native resource cache 必须按 `BackendOwnerId / ResourceDomainId` 隔离；`De
 
 同一资源域使用统一预算账本，按实际资源身份计费，覆盖 live、candidate、cached、in-flight 与 retiring 的交叠峰值。分配前取得有界 reservation，提交时转移，失败清理或实际退休后恰好释放一次。多个准备任务只检查预算快照而不保留额度，不算完成准入。
 
-只有未被计划或在途提交引用的资源才可回收。GPU 使用相应 completion/fence；Tango 使用输出完成及 owner retirement，不伪造 GPU fence。Widget 逻辑删除不等于 GPU 资源可立即销毁，不能绕过现有组件 unmount 门禁。
+只有未被计划或在途提交引用的资源才可回收。GPU（包含 TangoOpenGL）使用对应的 completion/fence；TangoTTY 使用终端输出完成及 owner retirement，不伪造 GPU fence。Widget 逻辑删除不等于 GPU 资源可立即销毁，不能绕过现有组件 unmount 门禁。
 
 device loss 后保留逻辑 UI 和 CPU program，但旧设备计划进入不可用状态。宿主显式重建设备并重新准入成功后才恢复绘制；不自动换 backend，也不宣称旧画面仍可正常渲染。D2D 的 `D2DERR_RECREATE_TARGET` 和 Vulkan swapchain out-of-date 必须分别处理，不能混为已验收的通用恢复能力。
 
@@ -276,7 +283,7 @@ blur/可见 shadow 明确拒绝。旧 capability 只用于拒绝已知不支持�
 - **M0 设计与清单**：更新唯一决策、旧文档入口和 #17；精确记录现有功能/后端缺口。本次文档修改仅完成这一阶段的决策部分。
 - **M1 原生编译与属性**：固定 profile，完成 parser、类型化/延迟值、Theme/Preset、状态和覆盖顺序；保留现有功能的逐项迁移记录。
 - **M2 准入与目标**：实现 capability snapshot、参数域、资源预算、完整状态预检、事务发布、TerminalCell 契约与 no-op 退役。
-- **M3 后端效果**：分别实现并验收 D2D graph/HLSL、GL、GLES、Vulkan 产物；Tango 只登记已实现的终端效果；建立代际、缓存、提交和退休协议。
+- **M3 后端效果**：分别实现并验收 D2D graph/HLSL、GL、GLES、Vulkan 产物；TangoTTY 只登记已实现的终端效果，TangoOpenGL 另行实现并验收 cell 投影、glyph atlas、GLSL 和 GPU 退休；建立代际、缓存、提交和退休协议。
 - **M4 消费者与删除**：迁移 Widget、ChartFrame、示例、controller mutation 和测试；删除 CSS API、资源、parser 及无剩余用途的依赖。不得仅删除文件来宣称功能迁移完成，也不得在新运行时保留兼容 fallback。
 - **M5 原生验收**：同一 HEAD 的功能、生命周期和实际后端证据完整后，才发布对应 profile 的支持声明。
 
@@ -291,7 +298,8 @@ blur/可见 shadow 明确拒绝。旧 capability 只用于拒绝已知不支持�
 | 准入与事务 | 不支持的 effect/参数/格式/stage、非法 pass 依赖/别名、越界 dispatch/资源、缺产物、ABI/hash 错误、交叠峰值/并发 reservation 预算耗尽；失败前后输入/style/布局/命中/plan 一致 |
 | D2D | 当前 primitives 与新 effects 分开；实际设备绘制和输入，HLSL/effect 属性与区域映射、设备资源重建 |
 | GL / GLES / Vulkan | 每个 API/profile 分别构建、实际绘制、格式/alpha/clip/nesting/参数边界、多 pass 执行顺序与资源可见性；对应资源和在途提交退休 |
-| Tango | 实际 PTY/终端的 cells、颜色/属性、grapheme、输入、resize、滚动、输出失败；不支持请求必须失败 |
+| TangoTTY | 实际 PTY/ConPTY 的 cells、颜色/属性、grapheme、输入、resize、滚动、输出失败；不支持请求必须失败 |
+| TangoOpenGL | 真实 GL context 的 cell→pixel 投影、glyph atlas、CJK/emoji、颜色/alpha、shader/manifest/ABI、截图与输入命中、device loss/资源退休；不支持与未实现请求必须失败 |
 | 缓存与生命周期 | 重复 distinct arbitrary values、跨资源域隔离、在途参数更新、stale generation、device loss 的 Lost/Aborted 终态、卸载时在途资源、缓存/退休队列上限 |
 | 应用 | 真实 native 应用截图和交互，记录输入命中；终端按 cell 语义验收，不要求与像素后端截图一致 |
 

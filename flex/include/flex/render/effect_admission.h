@@ -31,7 +31,13 @@ struct EffectIdentity {
 };
 
 enum class BackendApi : std::uint8_t {
+    // Tango denotes the existing TTY/cell-output profile. Preserve its
+    // identity; it never accepts GPU shader modules.
     Unknown, Direct2D, OpenGL, OpenGLES, Vulkan, Tango,
+    // Separate OpenGL presentation of an already-projected Tango cell grid.
+    // Pixel effects here require independently qualified GLSL artifacts.
+    // This does NOT qualify a production Tango OpenGL renderer.
+    TangoOpenGL,
 };
 struct BackendProfile {
     BackendApi api = BackendApi::Unknown;
