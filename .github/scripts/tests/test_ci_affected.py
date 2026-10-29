@@ -256,6 +256,12 @@ def main():
         sys.executable,
         str(Path(__file__).with_name("test_publish_required_acceptance.py"))
     ], check=True)
+    # Pure pixel-oracle unit tests only: NOT proof of native Stun GUI output.
+    # Do not add an Xvfb runner or mock UI under the parser contract.
+    subprocess.run([
+        sys.executable,
+        str(Path(__file__).with_name("test_gui_native_e2e.py"))
+    ], check=True)
     print("CI PR/master-push scope: all targeted and fail-open cases passed")
 
 
