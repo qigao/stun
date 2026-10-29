@@ -216,6 +216,10 @@ def main():
         sys.executable,
         str(Path(__file__).with_name("test_ci_required_matrix.py"))
     ], check=True)
+    subprocess.run([
+        sys.executable,
+        str(Path(__file__).with_name("test_publish_required_acceptance.py"))
+    ], check=True)
     print("CI PR/master-push scope: all targeted and fail-open cases passed")
 
 
