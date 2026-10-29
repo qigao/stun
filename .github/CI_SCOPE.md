@@ -275,6 +275,53 @@ executing native tests. This reduces stale-success windows; it is not a
 substitute for the dedicated App issuer tracked in
 [Issue #322](https://github.com/qigao/stun/issues/322).
 
+## Dedicated attestor webhook admission contract (Issue #322; preparatory only)
+
+The staged `.github/scripts/attestor_webhook.py` is a **credential-free**
+webhook admission layer for a *future external* dedicated GitHub App. It is
+**not** a web server, an App installation, a token issuer, or a status
+publisher, and is not invoked by GitHub Actions for live status issuance.
+Its only use in repository Actions is an isolated, no-network fixture suite
+(`test_attestor_webhook.py`) in the already-required Public Dependency job.
+
+A trusted external service must supply the App's high-entropy webhook secret
+and exact `repository.full_name`, `repository.id` and `installation.id`
+from secured runtime configuration. Admission verifies HMAC-SHA256 over
+the original request bytes with constant-time comparison; rejects missing
+or duplicate signatures, legacy SHA1 signatures, wrong App installation,
+malformed event identity and oversized payloads; and normalizes GitHub App
+`pull_request` / `workflow_run` events for the existing *read-only* M0–M2
+evidence evaluator. It accepts workflow events only for pinned existing
+PR-test workflow paths. It does not execute PR code or trust webhook data
+as native test evidence.
+
+**Durability is an external requirement, not an implemented service:**
+`enqueue(delivery_id, body_sha256, normalized_event)` must commit a
+bounded, atomic delivery+payload-digest deduplication record and work item
+before the webhook endpoint acknowledges receipt. It must return an
+explicit boolean for newly enqueued versus already durably recorded,
+and raise on persistence failures or ID/digest conflicts. Queue processing,
+installation-token minting, deployment, rate limits, retries, monitoring,
+and HTTPS termination are intentionally not supplied by this module.
+
+GitHub's `X-Hub-Signature-256` authenticates the **body only**, not
+`X-GitHub-Delivery`; the latter is a correlation/deduplication hint, not
+cryptographic replay proof. A captured signed payload could still be
+redelivered with another header. The external worker must re-fetch current
+PR HEAD, labels, last `ci/full` admission, latest actual required Jobs,
+and active repository ownership before deciding any commit status. Replay
+cannot authorize acceptance based solely on old webhook contents.
+
+The proposed new App-owned context is **`Stun attested acceptance`**.
+The current protected `master` still requires the existing GitHub Actions
+context `Stun required acceptance` (App ID 15368); this preparatory module
+does **not** change that Ruleset. Before a cutover, create and install the
+dedicated App, keep all private keys/tokens and webhooks outside repository
+Actions, validate live positive and negative status updates, require both
+old and new contexts temporarily, and only then remove the old context.
+Track all missing external dependencies in
+[Issue #322](https://github.com/qigao/stun/issues/322).
+
 ## Maintenance
 
 - Add new files/paths to both the top-level trigger and
