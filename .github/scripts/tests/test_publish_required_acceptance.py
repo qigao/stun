@@ -34,6 +34,7 @@ def run(number, workflow):
         "id": number, "run_attempt": 1, "path": workflow,
         "event": "pull_request", "head_sha": SHA,
         "status": "completed", "conclusion": "success",
+        "created_at": "2026-10-29T01:05:00Z",
     }
 
 
@@ -41,6 +42,7 @@ def job(name, conclusion="success", sha=SHA):
     return {
         "name": name, "status": "completed", "conclusion": conclusion,
         "head_sha": sha,
+        "started_at": "2026-10-29T01:05:00Z",
     }
 
 
@@ -50,6 +52,10 @@ def good_responses():
         "/pulls/5": pr(),
         "/pulls/5/files?per_page=100&page=1": [
             {"filename": PATH, "status": "added"}
+        ],
+        "/issues/5/events?per_page=100&page=1": [
+            {"event": "labeled", "label": {"name": "ci/full"},
+             "created_at": "2026-10-29T01:00:00Z"},
         ],
         "/actions/runs?head_sha=" + SHA + "&event=pull_request&per_page=100&page=1": {
             "workflow_runs": [
@@ -146,6 +152,54 @@ class PublisherTests(unittest.TestCase):
             d["/pulls/5"]["labels"] = []
         _, posts, _ = simulate(changes=change)
         self.assertEqual(posts[0][1], "failure")
+
+    def test_pre_label_green_runs_are_not_accepted(self):
+        def change(d):
+            d["/issues/5/events?per_page=100&page=1"][0][
+                "created_at"
+            ] = "2026-10-29T01:10:00Z"
+        _, posts, _ = simulate(changes=change)
+        self.assertEqual(posts[0][1], "failure")
+        self.assertIn("predates ci/full", posts[0][2])
+
+    def test_label_without_event_provenance_is_failure(self):
+        def change(d):
+            d["/issues/5/events?per_page=100&page=1"] = []
+        _, posts, _ = simulate(changes=change)
+        self.assertEqual(posts[0][1], "failure")
+
+    def test_latest_ci_full_relabel_requires_new_tests(self):
+        def change(d):
+            d["/issues/5/events?per_page=100&page=1"].append({
+                "event": "labeled", "label": {"name": "ci/full"},
+                "created_at": "2026-10-29T01:15:00Z",
+            })
+        _, posts, _ = simulate(changes=change)
+        self.assertEqual(posts[0][1], "failure")
+
+    def test_rerun_after_label_is_valid_even_when_run_is_older(self):
+        def change(d):
+            for run in d["/actions/runs?head_sha=" + SHA +
+                         "&event=pull_request&per_page=100&page=1"]["workflow_runs"]:
+                run["created_at"] = "2026-10-29T00:30:00Z"
+                run["run_attempt"] = 2
+            # The actual required jobs were executed after label admission.
+        _, posts, _ = simulate(changes=change)
+        self.assertEqual(posts[0][1], "success")
+
+    def test_missing_job_start_time_fails_closed(self):
+        def change(d):
+            del d["/actions/runs/101/jobs?filter=latest&per_page=100&page=1"]["jobs"][0]["started_at"]
+        _, posts, _ = simulate(changes=change)
+        self.assertEqual(posts[0][1], "failure")
+
+    def test_exact_timestamp_is_valid(self):
+        def change(d):
+            d["/issues/5/events?per_page=100&page=1"][0][
+                "created_at"
+            ] = "2026-10-29T01:05:00Z"
+        _, posts, _ = simulate(changes=change)
+        self.assertEqual(posts[0][1], "success")
 
     def test_missing_workflow_failure(self):
         def change(d):

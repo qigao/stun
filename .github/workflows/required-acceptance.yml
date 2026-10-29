@@ -25,6 +25,7 @@ permissions:
   contents: read
   actions: read
   pull-requests: read
+  issues: read
   statuses: write
 
 # Serialize updates per SHA. Never poll or hold native runners.
