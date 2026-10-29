@@ -239,11 +239,34 @@ def run(args):
                 raise VisualFailure("window PID belongs to another process")
             metadata.update(visible_window=True, window_id=hex(target.id),
                             window_rect=[x, y, width, height])
-            time.sleep(.20)
-            before = capture(disp, target)
+            # A mapped X11 window is not proof that its first GPU frame
+            # has been presented. Observe real framebuffer pixels for a
+            # bounded startup interval; never invent an expected image,
+            # swap renderers, or accept a permanently blank window.
+            ready_deadline = min(deadline, time.monotonic() + 6.0)
+            initial_samples = 0
+            initial_stddev = 0.0
+            while True:
+                if process.poll() is not None:
+                    raise VisualFailure(
+                        f"GUI exited before first rendered frame: {process.returncode}")
+                before = capture(disp, target)
+                initial_samples += 1
+                variation = max(ImageStat.Stat(before).stddev)
+                initial_stddev = max(initial_stddev, variation)
+                if variation >= 8:
+                    break
+                if time.monotonic() >= ready_deadline:
+                    before.save(out / "before.png")
+                    metadata["initial_frame_samples"] = initial_samples
+                    metadata["initial_max_stddev"] = round(initial_stddev, 4)
+                    raise VisualFailure(
+                        "real GUI remained blank after bounded first-frame"
+                        f" sampling ({initial_samples} screenshots)")
+                time.sleep(.10)
+            metadata["initial_frame_samples"] = initial_samples
+            metadata["initial_max_stddev"] = round(initial_stddev, 4)
             before.save(out / "before.png")
-            if max(ImageStat.Stat(before).stddev) < 8:
-                raise VisualFailure("real GUI screenshot is blank")
             box = detect_button(before)
             metadata["save_button_box"] = list(box)
             center = ((box[0] + box[2]) // 2, (box[1] + box[3]) // 2)
