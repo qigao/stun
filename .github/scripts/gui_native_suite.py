@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Qualify the real Desktop Editor and require three visible application failures.
+"""Qualify the real Desktop Editor and require four visible application failures.
 
-All four cases use the same native executable and document-service plugin.
+All five cases use the same native executable and document-service plugin.
 Only isolated copies of XML/CSS/TurboScript assets receive the deliberate defects.
 """
 from __future__ import annotations
@@ -23,20 +23,27 @@ import gui_native_e2e as gui
 
 ASSETS = ("editor.xml", "editor.css", "editor.tbs")
 PLUGIN = "libflexui_document_service.so"
+INITIAL_LABEL = "Save"
+# The real service response starts with these words; the rest may be ellipsized.
+COMPLETION_LABEL = "Saved by"
 SCENARIOS = (
     {"name": "negative-pending", "asset": "editor.tbs",
      "old": "text: value.payload", "new": 'text: "Saving..."',
-     "failure_code": "completion_not_reached", "observed_word": "Saving",
-     "observation": "after_ocr_observed", "forbidden_word": "Saved", "mouse": True},
+     "failure_code": "completion_not_reached", "observed_label": "Saving",
+     "observation": "after_ocr_observed", "forbidden_label": "Saved", "mouse": True},
     {"name": "negative-initial-label", "asset": "editor.xml",
      "old": ">Save</button>", "new": ">Broken</button>",
-     "failure_code": "initial_state_not_reached", "observed_word": "Broken",
-     "observation": "initial_ocr_observed", "forbidden_word": "Save", "mouse": False},
+     "failure_code": "initial_state_not_reached", "observed_label": "Broken",
+     "observation": "initial_ocr_observed", "forbidden_label": "Save", "mouse": False},
     {"name": "negative-layout", "asset": "editor.css",
      "old": "width: 680px;", "new": "width: 600px;",
-     "failure_code": "layout_mismatch", "observed_word": "Save",
-     "observation": "initial_ocr_observed", "forbidden_word": "Saved", "mouse": False,
+     "failure_code": "layout_mismatch", "observed_label": "Save",
+     "observation": "initial_ocr_observed", "forbidden_label": "Saved", "mouse": False,
      "layout_offset": [-80, 0, -80, 0]},
+    {"name": "negative-not-saved", "asset": "editor.tbs",
+     "old": "text: value.payload", "new": 'text: "Not Saved"',
+     "failure_code": "completion_not_reached", "observed_label": "Not Saved",
+     "observation": "after_ocr_observed", "forbidden_label": COMPLETION_LABEL, "mouse": True},
 )
 
 
@@ -49,21 +56,25 @@ def require(condition, message):
         raise SuiteFailure(message)
 
 
-def contains_word(words, expected):
-    """Require a whole OCR word with the driver's confidence threshold."""
+def contains_phrase(words, expected):
+    """Find conflicting confident words anywhere in a negative observation."""
     if not isinstance(words, list):
         return False
+    tokens = []
     for word in words:
         if not isinstance(word, dict) or not isinstance(word.get("text"), str):
-            continue
+            return False
         try:
             confidence = float(word.get("confidence", -1))
         except (TypeError, ValueError):
-            continue
-        if math.isfinite(confidence) and 20 <= confidence <= 100:
-            if expected.lower() in re.findall(r"\w+", word["text"].lower()):
-                return True
-    return False
+            confidence = -1
+        confident = math.isfinite(confidence) and 20 <= confidence <= 100
+        tokens.extend((token, confident) for token in re.findall(r"\w+", word["text"].lower()))
+    wanted = re.findall(r"\w+", expected.lower())
+    return bool(wanted) and any(
+        all(confident and token == expected_token
+            for (token, confident), expected_token in zip(tokens[start:start + len(wanted)], wanted))
+        for start in range(len(tokens) - len(wanted) + 1))
 
 
 def runtime_identity(exe):
@@ -101,8 +112,8 @@ def validate_positive(evidence, identity, source_sha, minimum_changed):
             "normal GUI did not satisfy the expected button layout")
     require(evidence.get("real_mouse_event") is True and evidence.get("exit_code") == 0 and
             evidence.get("changed_button_pixels", 0) >= minimum_changed and
-            contains_word(evidence.get("initial_ocr"), "Save") and
-            contains_word(evidence.get("after_ocr"), "Saved"),
+            gui.label_starts_with(evidence.get("initial_ocr"), INITIAL_LABEL) and
+            gui.label_starts_with(evidence.get("after_ocr"), COMPLETION_LABEL),
             "normal GUI lacks complete Save-to-Saved evidence")
     require(evidence.get("cleanup_mode") == "wm_delete_window" and
             evidence.get("cleanup_exit_code") == 0 and "cleanup_error" not in evidence,
@@ -125,7 +136,7 @@ def validate_negative(evidence, scenario, identity, source_sha, minimum_changed)
                 abs((box[3] - box[1]) - (expected[3] - expected[1])) <=
                 gui.SAVE_LAYOUT_TOLERANCE,
                 "layout negative unexpectedly changed the button size")
-        require(contains_word(evidence.get("initial_ocr"), "Save"),
+        require(gui.label_starts_with(evidence.get("initial_ocr"), INITIAL_LABEL),
                 "layout negative did not render the unchanged Save label")
     require(evidence.get("result") == "FAIL", "deliberately broken GUI was accepted")
     require(evidence.get("failure_code") == scenario["failure_code"],
@@ -138,15 +149,15 @@ def validate_negative(evidence, scenario, identity, source_sha, minimum_changed)
             evidence.get("cleanup_exit_code") == 0 and "cleanup_error" not in evidence,
             "broken GUI did not close cleanly through its native window")
     observed = evidence.get(scenario["observation"])
-    require(contains_word(observed, scenario["observed_word"]),
+    require(gui.label_starts_with(observed, scenario["observed_label"]),
             "the expected visible negative-state label was not actually recognized")
-    require(not contains_word(observed, scenario["forbidden_word"]),
+    require(not contains_phrase(observed, scenario["forbidden_label"]),
             "negative OCR observation also claims the required success state")
     if scenario["mouse"]:
-        require(contains_word(evidence.get("initial_ocr"), "Save"),
-                "pending scenario did not start with visible Save")
+        require(gui.label_starts_with(evidence.get("initial_ocr"), INITIAL_LABEL),
+                "completion negative did not start with visible Save")
         require(evidence.get("changed_button_pixels", 0) >= minimum_changed,
-                "pending scenario did not produce a real post-click pixel change")
+                "completion negative did not produce a real post-click pixel change")
 
 
 def verify_negative_screenshots(directory, evidence, scenario, minimum_changed):
@@ -167,12 +178,12 @@ def verify_negative_screenshots(directory, evidence, scenario, minimum_changed):
         with Image.open(directory / "after.png") as image:
             after = image.convert("RGB")
         require(gui.count_changed(hover, after, roi) >= minimum_changed,
-                "retained pending frame has no qualifying real pixel change")
+                "retained completion-negative frame has no qualifying real pixel change")
         observed_frame = after
     # Recompute the crop from retained native screenshots, not just a failure
     # string, JSON word list or potentially stale standalone OCR crop.
     return gui.button_ocr(observed_frame, box, directory / "verified_visible_label_ocr.png",
-                          scenario["observed_word"])
+                          scenario["observed_label"])
 
 
 def execute_driver(args, exe, directory):
@@ -180,7 +191,7 @@ def execute_driver(args, exe, directory):
     driver_args = SimpleNamespace(
         exe=str(exe), source_sha=args.source_sha, out=str(directory),
         timeout=args.timeout, minimum_changed=args.minimum_changed,
-        ocr_initial="Save", ocr_after="Saved")
+        ocr_initial=INITIAL_LABEL, ocr_after=COMPLETION_LABEL)
     rejected = False
     with (directory / "driver.log").open("w", encoding="utf-8") as log:
         with redirect_stdout(log), redirect_stderr(log):
@@ -275,7 +286,8 @@ def run_suite(args):
                                         encoding="utf-8")
         if integrity_error is not None:
             raise integrity_error
-    print("GUI SUITE PASS", args.source_sha, "normal GUI and three expected visible failures")
+    print("GUI SUITE PASS", args.source_sha,
+          f"normal GUI and {len(SCENARIOS)} expected visible failures")
     return summary
 
 

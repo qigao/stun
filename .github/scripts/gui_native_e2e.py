@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import math
 import os
 from pathlib import Path
 import re
@@ -182,6 +183,36 @@ def request_close(disp, window):
     disp.sync()
 
 
+def label_starts_with(words, expected):
+    """Match a confident leading word sequence without hiding uncertain words.
+
+    Pure punctuation, including detected control borders, does not occupy a
+    word position. Every meaningful observation does, even when its confidence
+    is invalid or low: discarding an uncertain "Not" could turn failure into
+    success. Only the required prefix needs to be readable; clipped trailing
+    text does not invalidate an already established prefix.
+    """
+    if not isinstance(words, list) or not isinstance(expected, str):
+        return False
+    wanted = re.findall(r"\w+", expected.lower())
+    if not wanted:
+        return False
+    tokens = []
+    for word in words:
+        if not isinstance(word, dict) or not isinstance(word.get("text"), str):
+            return False
+        try:
+            confidence = float(word.get("confidence"))
+        except (TypeError, ValueError):
+            confidence = None
+        for token in re.findall(r"\w+", word["text"].lower()):
+            tokens.append((token, confidence))
+    return len(tokens) >= len(wanted) and all(
+        token == required and confidence is not None and
+        math.isfinite(confidence) and 20 <= confidence <= 100
+        for (token, confidence), required in zip(tokens, wanted))
+
+
 def local_ocr(path, expected):
     """Optional offline OCR, supplemental to real pixel and input evidence."""
     result = subprocess.run(
@@ -197,19 +228,19 @@ def local_ocr(path, expected):
         try:
             conf = float(fields[10])
         except ValueError:
-            continue
-        if conf >= 20 and fields[11].strip():
+            conf = None
+        if conf is not None and not math.isfinite(conf):
+            conf = None  # Keep JSON valid and the unreadable word in position.
+        if fields[11].strip():
             words.append({
                 "text": fields[11].strip(), "confidence": conf,
                 "box": [int(fields[i]) for i in (6, 7, 8, 9)]
             })
     found = re.findall(r"\w+", " ".join(x["text"] for x in words).lower())
     wanted = re.findall(r"\w+", expected.lower())
-    # Compare whole words: "Unsaved" must never satisfy the "Saved" gate.
-    if not wanted or not any(found[i:i + len(wanted)] == wanted
-                             for i in range(len(found) - len(wanted) + 1)):
+    if not label_starts_with(words, expected):
         raise OcrMismatch(
-            f"visible OCR {found!r} did not contain words {wanted!r}", words)
+            f"visible OCR {found!r} did not start with confident words {wanted!r}", words)
     return words
 
 

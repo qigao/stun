@@ -132,10 +132,12 @@ class GuiPixelTests(unittest.TestCase):
 
 class GuiOcrTests(unittest.TestCase):
     @staticmethod
-    def result(text):
+    def result(text, confidences=None):
         header = "level\tpage_num\tblock_num\tpar_num\tline_num\tword_num\tleft\ttop\twidth\theight\tconf\ttext\n"
-        rows = [f"5\t1\t1\t1\t1\t{i}\t10\t10\t50\t20\t95\t{word}\n"
-                for i, word in enumerate(text.split(), 1)]
+        parts = text.split()
+        confidences = confidences if confidences is not None else [95] * len(parts)
+        rows = [f"5\t1\t1\t1\t1\t{i}\t10\t10\t50\t20\t{confidence}\t{word}\n"
+                for i, (word, confidence) in enumerate(zip(parts, confidences), 1)]
         return SimpleNamespace(returncode=0, stdout=header + "".join(rows), stderr="")
 
     def test_completed_save_matches_visible_word(self):
@@ -152,6 +154,74 @@ class GuiOcrTests(unittest.TestCase):
                 self.assertEqual(failure.exception.code, "ocr_mismatch")
                 self.assertEqual([word["text"] for word in failure.exception.words],
                                  text.split())
+
+    def test_negated_labels_cannot_match_a_later_success_word(self):
+        for text, expected in (("Not Saved", "Saved"), ("Never Saved", "Saved"),
+                               ("Error Saved", "Saved"), ("Not Save", "Save")):
+            with self.subTest(text=text), patch.object(
+                    gui.subprocess, "run", return_value=self.result(text)):
+                with self.assertRaises(gui.OcrMismatch) as failure:
+                    gui.local_ocr("unused.png", expected)
+                self.assertEqual([word["text"] for word in failure.exception.words],
+                                 text.split())
+
+    def test_service_prefix_allows_clipped_tail_and_punctuation(self):
+        for text in ("Saved by native document service", "Saved by...",
+                     "| saved by |", "Saved by"):
+            with self.subTest(text=text), patch.object(
+                    gui.subprocess, "run", return_value=self.result(text)):
+                observed = gui.local_ocr("unused.png", "Saved by")
+                self.assertTrue(gui.label_starts_with(observed, "Saved by"))
+
+    def test_service_prefix_rejects_errors_and_inserted_words(self):
+        for text in ("Saved failed", "Saved nonsense by", "Saved not by", "Saved"):
+            with self.subTest(text=text), patch.object(
+                    gui.subprocess, "run", return_value=self.result(text)):
+                with self.assertRaises(gui.OcrMismatch):
+                    gui.local_ocr("unused.png", "Saved by")
+
+    def test_uncertain_leading_or_inserted_words_are_retained(self):
+        for confidence in (19.9, -1, 101, "nan", "inf", "-inf", "invalid"):
+            for text, confidences in (
+                    ("Not Saved by", [confidence, 95, 95]),
+                    ("Saved not by", [95, confidence, 95])):
+                with self.subTest(text=text, confidence=confidence), patch.object(
+                        gui.subprocess, "run",
+                        return_value=self.result(text, confidences)):
+                    with self.assertRaises(gui.OcrMismatch) as failure:
+                        gui.local_ocr("unused.png", "Saved by")
+                    self.assertEqual([word["text"] for word in failure.exception.words],
+                                     text.split())
+                    # Evidence must remain valid strict JSON even for invalid TSV confidence.
+                    json.dumps(failure.exception.words, allow_nan=False)
+
+    def test_each_required_prefix_word_needs_finite_bounded_confidence(self):
+        for confidence in (19.9, -1, 100.1, "nan", "inf", "-inf", "invalid"):
+            for confidences in ([confidence, 95], [95, confidence]):
+                with self.subTest(confidences=confidences), patch.object(
+                        gui.subprocess, "run",
+                        return_value=self.result("Saved by", confidences)):
+                    with self.assertRaises(gui.OcrMismatch):
+                        gui.local_ocr("unused.png", "Saved by")
+        for confidences in ([20, 100], [100, 20]):
+            with self.subTest(confidences=confidences), patch.object(
+                    gui.subprocess, "run", return_value=self.result("Saved by", confidences)):
+                self.assertTrue(gui.label_starts_with(
+                    gui.local_ocr("unused.png", "Saved by"), "Saved by"))
+
+    def test_uncertain_trailing_text_does_not_discard_a_known_prefix(self):
+        with patch.object(gui.subprocess, "run", return_value=self.result(
+                "Saved by native", [95, 95, 10])):
+            observed = gui.local_ocr("unused.png", "Saved by")
+        self.assertEqual(observed[-1]["confidence"], 10)
+        self.assertTrue(gui.label_starts_with(observed, "Saved by"))
+
+    def test_invalid_observations_cannot_supply_a_prefix(self):
+        for words in (None, [], [None], [{"text": "Saved"}],
+                      [{"text": 3, "confidence": 95}]):
+            with self.subTest(words=words):
+                self.assertFalse(gui.label_starts_with(words, "Saved"))
+        self.assertFalse(gui.label_starts_with([{"text": "Saved", "confidence": 95}], "|"))
 
     def test_preflight_failure_preserves_evidence(self):
         with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {}, clear=True):

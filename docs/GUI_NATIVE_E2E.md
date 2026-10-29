@@ -24,7 +24,7 @@ line with an ellipsis, so completion text cannot cover the document.
 
 Prerequisites: working real OpenGL/GLFW build, xvfb-run, XTest,
 python3-xlib, Pillow and tesseract-ocr. Product qualification requires
-local OCR of the initial Save and completed Saved states. The screenshot
+local OCR of the initial Save and completed `Saved by` label prefixes. The screenshot
 driver uses no Baidu OCR, network, secrets or HTTP requests.
 
 ~~~sh
@@ -39,7 +39,7 @@ xvfb-run -a -s '-screen 0 1280x900x24 -nolisten tcp' \
     --exe build/bin/flexui_desktop_editor \
     --source-sha "$(git rev-parse HEAD)" \
     --out build/gui-e2e \
-    --ocr-initial Save --ocr-after Saved
+    --ocr-initial Save --ocr-after 'Saved by'
 ~~~
 
 This refuses missing binaries, no X11 display, missing or ambiguous
@@ -68,9 +68,13 @@ The critical screenshot comparison is **hover vs. after real mouse click**,
 not initial vs. hovered: a hover color is not proof of a click handler.
 The button coordinates come from actual rendered blue pixels, never
 from an unverified fixed coordinate. The native GUI workflow requires
-both changed pixels and the whole OCR word Saved. Saving, Unsaved and
-service error text cannot satisfy that completion requirement. An
-uncertain OCR result is a failure, not an automatic pass.
+both changed pixels and the ordered `Saved by` prefix of the real service
+response. The text may be ellipsized after that prefix. `Not Saved`,
+`Never Saved`, `Error Saved`, `Saved failed`, `Saving` and `Unsaved` cannot
+satisfy completion. OCR keeps all observed text in reading order, including
+uncertain words: a low-confidence `Not` before `Saved` cannot be discarded
+to create a successful label. Prefix words must each have finite confidence
+between 20 and 100; punctuation-only border observations do not count as words.
 
 ### Independent Save geometry oracle
 
@@ -117,7 +121,7 @@ a full-screen golden or qualification of other DPI/viewport settings.
 ## Real application negative cases
 
 The CI entry point is `.github/scripts/gui_native_suite.py`. It runs the
-successful application first, then three isolated asset variants, sequentially
+successful application first, then four isolated asset variants, sequentially
 on the same display and runner:
 
 | Scenario | Isolated asset change | Required visible failure |
@@ -125,12 +129,13 @@ on the same display and runner:
 | Initial label | Change the Save button label to `Broken` in copied XML | A rendered blue button with OCR `Broken`; the driver rejects the initial state before clicking |
 | Pending completion | Change the successful completion's displayed text to `Saving...` in copied TurboScript | Initial `Save`, a real click and changed pixels, then OCR `Saving`; the driver rejects the missing `Saved` completion |
 | Misplaced control | Change the copied title width from 680px to 600px | Actual `Save` text and the same button size, but a detected position 80px too far left; the driver rejects the layout before clicking |
+| Negated completion | Change the successful completion's displayed text to `Not Saved` in copied TurboScript | Initial `Save`, a real click and changed pixels, then readable `Not Saved`; the driver rejects completion even though the label contains the word `Saved` |
 
 All variants execute copies of the same native executable and document
 service plugin. Their SHA256 identities must match the successful baseline.
 Each mutation must have exactly one source anchor and change only the named
-asset; the original application and assets must retain their hashes. The
-pending variant preserves the real command, plugin and completion callback.
+asset; the original application and assets must retain their hashes. Both
+completion variants preserve the real command, plugin and completion callback.
 
 ~~~sh
 xvfb-run -a -s '-screen 0 1280x900x24 -nolisten tcp' \
@@ -149,7 +154,7 @@ process or forced cleanup fail the suite.
 The positive evidence remains at the output root. Each negative case keeps
 its own screenshots, application log and `evidence.json` with `result: FAIL`.
 The separate `suite.json` records whether those required failures were
-actually observed. It reports PASS only after the positive and all three real
+actually observed. It reports PASS only after the positive and all four real
 negative cases qualify; it never rewrites failed driver evidence as success.
 
 ## M1 native GUI build / actual-screen CI
@@ -169,7 +174,7 @@ The exact job name is "GUI visible screenshot / Linux X11", selected
 by the trusted exact-head acceptance matrix for changes to the desktop
 editor, the script or GUI build workflow. A CI success requires that
 the actual window opened, rendered blue Save, reacted to mouse input,
-displayed the Saved completion and closed correctly, and that all three wrong
+displayed the `Saved by` completion prefix and closed correctly, and that all four wrong
 visible states were rejected for their expected reason. Native source/UI
 tests are not replaced.
 

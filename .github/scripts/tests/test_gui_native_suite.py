@@ -33,7 +33,7 @@ def negative_evidence(scenario):
         "real_mouse_event": scenario["mouse"], "cleanup_mode": "wm_delete_window",
         "cleanup_exit_code": 0, "changed_button_pixels": 996,
         "initial_ocr": words("Save") if scenario["mouse"] or "layout_offset" in scenario else [],
-        scenario["observation"]: words(scenario["observed_word"]),
+        scenario["observation"]: words(scenario["observed_label"]),
     }
 
 
@@ -41,14 +41,36 @@ def positive_evidence():
     evidence = negative_evidence(suite.SCENARIOS[0])
     evidence.pop("failure_code")
     evidence.pop("application_alive_on_failure")
-    evidence.update(result="PASS", exit_code=0, after_ocr=words("Saved"),
-                    after_ocr_observed=words("Saved"))
+    evidence.update(result="PASS", exit_code=0, after_ocr=words("Saved by native..."),
+                    after_ocr_observed=words("Saved by native..."))
     return evidence
 
 
 class PositiveAdmissionTests(unittest.TestCase):
     def test_normal_geometry_with_actual_save_evidence_is_accepted(self):
         suite.validate_positive(positive_evidence(), IDENTITY, SHA, 38)
+
+    def test_negated_or_incomplete_service_labels_are_rejected(self):
+        for label in ("Not Saved", "Never Saved", "Error Saved", "Saved failed", "Saved"):
+            with self.subTest(label=label):
+                evidence = positive_evidence()
+                evidence.update(after_ocr=words(label), after_ocr_observed=words(label))
+                with self.assertRaisesRegex(suite.SuiteFailure, "Save-to-Saved evidence"):
+                    suite.validate_positive(evidence, IDENTITY, SHA, 38)
+
+    def test_uncertain_leading_negation_is_not_removed_from_success_evidence(self):
+        evidence = positive_evidence()
+        observed = words("Not Saved by")
+        observed[0]["confidence"] = 5.0
+        evidence.update(after_ocr=observed, after_ocr_observed=observed)
+        with self.assertRaisesRegex(suite.SuiteFailure, "Save-to-Saved evidence"):
+            suite.validate_positive(evidence, IDENTITY, SHA, 38)
+
+    def test_initial_save_is_a_label_prefix(self):
+        evidence = positive_evidence()
+        evidence["initial_ocr"] = words("Not Save")
+        with self.assertRaisesRegex(suite.SuiteFailure, "Save-to-Saved evidence"):
+            suite.validate_positive(evidence, IDENTITY, SHA, 38)
 
     def test_loose_detector_location_and_size_are_not_a_valid_layout(self):
         for box in ([641, 25, 775, 59], [550, 70, 750, 130]):
@@ -102,9 +124,9 @@ class NegativeAdmissionTests(unittest.TestCase):
 
     def test_empty_uncertain_and_wrong_ocr_are_rejected(self):
         for scenario in suite.SCENARIOS:
-            uncertain = words(scenario["observed_word"])
+            uncertain = words(scenario["observed_label"])
             uncertain[0]["confidence"] = 19.9
-            nonfinite = words(scenario["observed_word"])
+            nonfinite = words(scenario["observed_label"])
             nonfinite[0]["confidence"] = float("nan")
             for observed in (None, [], words("error"), words("Unsaved"), uncertain, nonfinite):
                 with self.subTest(scenario=scenario["name"], observed=observed):
@@ -113,20 +135,20 @@ class NegativeAdmissionTests(unittest.TestCase):
                     with self.assertRaises(suite.SuiteFailure):
                         self.validate(evidence, scenario)
 
-    def test_pending_requires_initial_save_and_real_pixel_change(self):
-        scenario = suite.SCENARIOS[0]
-        for change in ({"initial_ocr": []}, {"initial_ocr": words("Saving")},
-                       {"changed_button_pixels": 0}, {"changed_button_pixels": 37}):
-            with self.subTest(change=change):
-                evidence = negative_evidence(scenario)
-                evidence.update(change)
-                with self.assertRaises(suite.SuiteFailure):
-                    self.validate(evidence, scenario)
+    def test_completion_negatives_require_initial_save_and_real_pixel_change(self):
+        for scenario in (case for case in suite.SCENARIOS if case["mouse"]):
+            for change in ({"initial_ocr": []}, {"initial_ocr": words("Saving")},
+                           {"changed_button_pixels": 0}, {"changed_button_pixels": 37}):
+                with self.subTest(scenario=scenario["name"], change=change):
+                    evidence = negative_evidence(scenario)
+                    evidence.update(change)
+                    with self.assertRaises(suite.SuiteFailure):
+                        self.validate(evidence, scenario)
 
     def test_conflicting_success_observation_is_not_expected_failure(self):
         for scenario in suite.SCENARIOS:
             evidence = negative_evidence(scenario)
-            evidence[scenario["observation"]] += words(scenario["forbidden_word"])
+            evidence[scenario["observation"]] += words(scenario["forbidden_label"])
             with self.subTest(scenario=scenario["name"]), self.assertRaises(suite.SuiteFailure):
                 self.validate(evidence, scenario)
 
