@@ -9,6 +9,7 @@ import fnmatch
 from pathlib import Path
 
 WORKFLOWS = {
+    "gui-native-e2e.yml": ("GUI visible screenshot / Linux X11",),
     "flexui-tango-headless.yml": (
         "FlexUI/Tango headless / macos-latest",
         "FlexUI/Tango headless / windows-latest",

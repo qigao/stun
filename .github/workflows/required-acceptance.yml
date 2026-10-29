@@ -9,6 +9,7 @@ on:
     workflows:
       - Public dependency compile contract
       - Stun runtime conformance
+      - Stun native GUI screenshot E2E
       - UI C11 Reflection Contract
       - GraphLayout native algorithm qualification
       - gCanvas OpenGLES runtime

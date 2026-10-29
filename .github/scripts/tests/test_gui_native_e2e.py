@@ -1,8 +1,17 @@
 #!/usr/bin/env python3
-"""Deterministic screenshot-oracle tests: NOT a real Stun GUI qualification."""
+"""GUI driver regressions; neither synthetic pixels nor X11 fixtures qualify Stun.
+
+Set STUN_GUI_X11_TESTS=1 under Xvfb to require the real Xlib/capture/input tests.
+"""
+import json
+import os
 from pathlib import Path
 import sys
+import tempfile
+import time
+from types import SimpleNamespace
 import unittest
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import gui_native_e2e as gui
@@ -47,6 +56,28 @@ class GuiPixelTests(unittest.TestCase):
         with self.assertRaises(gui.VisualFailure):
             gui.detect_button(button_frame(x=20, y=25))
 
+    def test_rendered_save_bounds_match_the_independent_layout(self):
+        box = gui.detect_button(button_frame(x=721, y=25, width=134, height=34))
+        layout = gui.button_layout(box)
+        self.assertTrue(layout["matches"])
+        self.assertEqual(layout["edge_deltas"], [1, 1, -1, -1])
+
+    def test_detectable_but_wrong_position_or_size_is_rejected(self):
+        # These pass blue-control discovery, but must not pass product layout.
+        for frame in (button_frame(x=641, y=25, width=134, height=34),
+                      button_frame(x=550, y=70, width=200, height=60)):
+            with self.subTest(frame=frame):
+                self.assertFalse(gui.button_layout(gui.detect_button(frame))["matches"])
+
+    def test_layout_tolerance_is_bounded_on_each_edge(self):
+        for edge in range(4):
+            for sign in (-1, 1):
+                box = list(gui.EXPECTED_SAVE_BOX)
+                box[edge] += sign * gui.SAVE_LAYOUT_TOLERANCE
+                self.assertTrue(gui.button_layout(box)["matches"])
+                box[edge] += sign
+                self.assertFalse(gui.button_layout(box)["matches"])
+
     def test_tiny_blue_noise_is_not_a_button(self):
         with self.assertRaises(gui.VisualFailure):
             gui.detect_button(button_frame(width=8, height=8))
@@ -89,8 +120,8 @@ class GuiPixelTests(unittest.TestCase):
         body = inspect.getsource(gui.run)
         self.assertIn('display.Display()', body)
         self.assertIn('subprocess.Popen(', body)
-        self.assertIn('capture(disp, target)', body)
-        self.assertIn('mouse(disp, target, *center, click=True)', body)
+        self.assertIn('capture(disp, target, expected_rect=expected_rect', body)
+        self.assertIn('disp, target, *center, click=True, expected_rect=expected_rect', body)
         self.assertNotIn('"--smoke"', body)
 
     def test_binary_and_pixel_sources_are_separate(self):
@@ -98,6 +129,279 @@ class GuiPixelTests(unittest.TestCase):
         self.assertTrue(gui.is_button_blue((59, 130, 246)))
         self.assertFalse(gui.is_button_blue((15, 23, 42)))
         self.assertFalse(gui.is_button_blue((255, 255, 255)))
+
+
+class GuiOcrTests(unittest.TestCase):
+    @staticmethod
+    def result(text, confidences=None):
+        header = "level\tpage_num\tblock_num\tpar_num\tline_num\tword_num\tleft\ttop\twidth\theight\tconf\ttext\n"
+        parts = text.split()
+        confidences = confidences if confidences is not None else [95] * len(parts)
+        rows = [f"5\t1\t1\t1\t1\t{i}\t10\t10\t50\t20\t{confidence}\t{word}\n"
+                for i, (word, confidence) in enumerate(zip(parts, confidences), 1)]
+        return SimpleNamespace(returncode=0, stdout=header + "".join(rows), stderr="")
+
+    def test_completed_save_matches_visible_word(self):
+        with patch.object(gui.subprocess, "run", return_value=self.result(
+                "Saved by native document service")):
+            self.assertEqual(gui.local_ocr("unused.png", "Saved")[0]["text"], "Saved")
+
+    def test_pending_error_and_unsaved_are_not_completion(self):
+        for text in ("Saving...", "Save failed", "Unsaved", "Save", "S a v e d"):
+            with self.subTest(text=text), patch.object(
+                    gui.subprocess, "run", return_value=self.result(text)):
+                with self.assertRaises(gui.OcrMismatch) as failure:
+                    gui.local_ocr("unused.png", "Saved")
+                self.assertEqual(failure.exception.code, "ocr_mismatch")
+                self.assertEqual([word["text"] for word in failure.exception.words],
+                                 text.split())
+
+    def test_negated_labels_cannot_match_a_later_success_word(self):
+        for text, expected in (("Not Saved", "Saved"), ("NOT SAVED", "Saved"),
+                               ("Never Saved", "Saved"),
+                               ("Error Saved", "Saved"), ("Not Save", "Save")):
+            with self.subTest(text=text), patch.object(
+                    gui.subprocess, "run", return_value=self.result(text)):
+                with self.assertRaises(gui.OcrMismatch) as failure:
+                    gui.local_ocr("unused.png", expected)
+                self.assertEqual([word["text"] for word in failure.exception.words],
+                                 text.split())
+
+    def test_service_prefix_allows_clipped_tail_and_punctuation(self):
+        for text in ("Saved by native document service", "Saved by...",
+                     "| saved by |", "Saved by"):
+            with self.subTest(text=text), patch.object(
+                    gui.subprocess, "run", return_value=self.result(text)):
+                observed = gui.local_ocr("unused.png", "Saved by")
+                self.assertTrue(gui.label_starts_with(observed, "Saved by"))
+
+    def test_service_prefix_rejects_errors_and_inserted_words(self):
+        for text in ("Saved failed", "Saved nonsense by", "Saved not by", "Saved"):
+            with self.subTest(text=text), patch.object(
+                    gui.subprocess, "run", return_value=self.result(text)):
+                with self.assertRaises(gui.OcrMismatch):
+                    gui.local_ocr("unused.png", "Saved by")
+
+    def test_uncertain_leading_or_inserted_words_are_retained(self):
+        for confidence in (19.9, -1, 101, "nan", "inf", "-inf", "invalid"):
+            for text, confidences in (
+                    ("Not Saved by", [confidence, 95, 95]),
+                    ("Saved not by", [95, confidence, 95])):
+                with self.subTest(text=text, confidence=confidence), patch.object(
+                        gui.subprocess, "run",
+                        return_value=self.result(text, confidences)):
+                    with self.assertRaises(gui.OcrMismatch) as failure:
+                        gui.local_ocr("unused.png", "Saved by")
+                    self.assertEqual([word["text"] for word in failure.exception.words],
+                                     text.split())
+                    # Evidence must remain valid strict JSON even for invalid TSV confidence.
+                    json.dumps(failure.exception.words, allow_nan=False)
+
+    def test_each_required_prefix_word_needs_finite_bounded_confidence(self):
+        for confidence in (19.9, -1, 100.1, "nan", "inf", "-inf", "invalid"):
+            for confidences in ([confidence, 95], [95, confidence]):
+                with self.subTest(confidences=confidences), patch.object(
+                        gui.subprocess, "run",
+                        return_value=self.result("Saved by", confidences)):
+                    with self.assertRaises(gui.OcrMismatch):
+                        gui.local_ocr("unused.png", "Saved by")
+        for confidences in ([20, 100], [100, 20]):
+            with self.subTest(confidences=confidences), patch.object(
+                    gui.subprocess, "run", return_value=self.result("Saved by", confidences)):
+                self.assertTrue(gui.label_starts_with(
+                    gui.local_ocr("unused.png", "Saved by"), "Saved by"))
+
+    def test_uncertain_trailing_text_does_not_discard_a_known_prefix(self):
+        with patch.object(gui.subprocess, "run", return_value=self.result(
+                "Saved by native", [95, 95, 10])):
+            observed = gui.local_ocr("unused.png", "Saved by")
+        self.assertEqual(observed[-1]["confidence"], 10)
+        self.assertTrue(gui.label_starts_with(observed, "Saved by"))
+
+    def test_invalid_observations_cannot_supply_a_prefix(self):
+        for words in (None, [], [None], [{"text": "Saved"}],
+                      [{"text": 3, "confidence": 95}]):
+            with self.subTest(words=words):
+                self.assertFalse(gui.label_starts_with(words, "Saved"))
+        self.assertFalse(gui.label_starts_with([{"text": "Saved", "confidence": 95}], "|"))
+
+    def test_preflight_failure_preserves_evidence(self):
+        with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {}, clear=True):
+            args = SimpleNamespace(exe="/missing/native-gui", source_sha="a" * 40,
+                                   out=directory, timeout=1, minimum_changed=38)
+            with self.assertRaises(gui.VisualFailure):
+                gui.run(args)
+            evidence = json.loads((Path(directory) / "evidence.json").read_text())
+            self.assertEqual(evidence["result"], "FAIL")
+            self.assertFalse(evidence["real_mouse_event"])
+            self.assertFalse(evidence["application_alive_on_failure"])
+            self.assertEqual(evidence["failure_code"], "gui_failure")
+            self.assertIn("error", evidence)
+
+    def test_display_close_error_preserves_original_failure_evidence(self):
+        class Display:
+            def close(self):
+                raise RuntimeError("X11 transport closed during flush")
+        xlib = SimpleNamespace(display=SimpleNamespace(Display=Display), X=object())
+        pil = SimpleNamespace(ImageStat=object())
+        with tempfile.TemporaryDirectory() as directory:
+            exe = Path(directory) / "native-gui"
+            exe.write_text("not launched: pre-existing window must reject admission\n")
+            exe.chmod(0o755)
+            args = SimpleNamespace(exe=str(exe), source_sha="a" * 40,
+                                   out=str(Path(directory) / "evidence"),
+                                   timeout=1, minimum_changed=38)
+            with patch.dict(sys.modules, {"Xlib": xlib, "PIL": pil}), \
+                 patch.dict(os.environ, {"DISPLAY": ":test"}), \
+                 patch.object(gui, "find_titled_windows",
+                              return_value=[SimpleNamespace(id=1)]):
+                with self.assertRaisesRegex(gui.VisualFailure, "existing same-title GUI"):
+                    gui.run(args)
+            evidence = json.loads((Path(args.out) / "evidence.json").read_text())
+            self.assertEqual(evidence["result"], "FAIL")
+            self.assertEqual(evidence["failure_code"], "gui_failure")
+            self.assertIn("existing same-title GUI", evidence["error"])
+            self.assertIn("closed during flush", evidence["cleanup_error"])
+            self.assertFalse(evidence["application_alive_on_failure"])
+
+
+class WindowPlacementTests(unittest.TestCase):
+    def fixture(self, *, screen_size=(1280, 900), move_error=None):
+        requests = []
+
+        def configure(**request):
+            requests.append(request)
+            if move_error:
+                request["onerror"](move_error, None)
+
+        root = SimpleNamespace(get_geometry=lambda: SimpleNamespace(
+            width=screen_size[0], height=screen_size[1]))
+        disp = SimpleNamespace(screen=lambda: SimpleNamespace(root=root), sync=lambda: None)
+        window = SimpleNamespace(get_geometry=lambda: SimpleNamespace(x=0, y=0),
+                                 configure=configure)
+        return disp, window, requests
+
+    def test_ignored_native_move_is_a_bounded_failure(self):
+        disp, window, requests = self.fixture()
+        report = {}
+        with patch.object(gui, "window_rect", return_value=(0, 0, 928, 608)), \
+             patch.object(gui.time, "monotonic", side_effect=[0, 0, 3]), \
+             patch.object(gui.time, "sleep"):
+            with self.assertRaises(gui.VisualFailure) as failure:
+                gui.place_window(disp, window, report, deadline=10)
+        self.assertEqual(failure.exception.code, "window_placement_failed")
+        self.assertEqual(len(requests), 1)
+        self.assertEqual(report["observed_rect"], [0, 0, 928, 608])
+        self.assertEqual(report["requested_origin"], [127, 83])
+
+    def test_async_x11_move_error_is_not_silently_accepted(self):
+        disp, window, requests = self.fixture(move_error="BadMatch")
+        with patch.object(gui, "window_rect", return_value=(0, 0, 928, 608)):
+            with self.assertRaisesRegex(gui.VisualFailure, "X11 rejected.*BadMatch") as failure:
+                gui.place_window(disp, window, {}, deadline=10)
+        self.assertEqual(failure.exception.code, "window_placement_failed")
+        self.assertEqual(len(requests), 1)
+
+    def test_incomplete_visibility_rejects_placement_before_moving(self):
+        disp, window, requests = self.fixture(screen_size=(1000, 650))
+        with patch.object(gui, "window_rect", return_value=(0, 0, 928, 608)):
+            with self.assertRaisesRegex(gui.VisualFailure, "does not fit"):
+                gui.place_window(disp, window, {}, deadline=10)
+        self.assertEqual(requests, [])
+
+    def test_move_cannot_silently_resize_the_client(self):
+        disp, window, requests = self.fixture()
+        with patch.object(gui, "window_rect", side_effect=[
+                (0, 0, 928, 608), (127, 83, 927, 608)]), \
+             patch.object(gui.time, "monotonic", return_value=0):
+            with self.assertRaisesRegex(gui.VisualFailure, "changed its client size"):
+                gui.place_window(disp, window, {}, deadline=10)
+        self.assertEqual(len(requests), 1)
+
+
+@unittest.skipUnless(os.environ.get("STUN_GUI_X11_TESTS") == "1",
+                     "native X11 driver checks require STUN_GUI_X11_TESTS=1 and Xvfb")
+class NativeX11DriverTests(unittest.TestCase):
+    def setUp(self):
+        from Xlib import X, display
+        self.disp = display.Display()
+        self.addCleanup(self.disp.close)
+        screen = self.disp.screen()
+        # A parent at a nonzero origin also catches accidentally using the
+        # child geometry's parent-relative x/y as screen coordinates.
+        parent = screen.root.create_window(
+            47, 29, 1100, 800, 0, screen.root_depth,
+            X.InputOutput, X.CopyFromParent, background_pixel=0xFF00FF)
+        self.addCleanup(parent.destroy)
+        self.window = parent.create_window(
+            80, 54, 928, 608, 0, screen.root_depth,
+            X.InputOutput, X.CopyFromParent, background_pixel=0x2563EB,
+            event_mask=X.ButtonPressMask | X.ButtonReleaseMask)
+        self.window.set_wm_name("Stun GUI driver protocol test")
+        self.window.map()
+        parent.map()
+        self.disp.sync()
+
+    def test_native_client_origin_and_screen_capture(self):
+        self.assertEqual(gui.window_rect(self.disp, self.window), (127, 83, 928, 608))
+        frame = gui.capture(self.disp, self.window)
+        self.assertEqual(frame.size, (928, 608))
+        self.assertEqual(frame.getpixel((10, 10)), (37, 99, 235))
+
+    def test_move_nested_bordered_client_and_preserve_root_frame(self):
+        from PIL import Image
+        self.window.configure(x=210, y=130, border_width=2)
+        self.disp.sync()
+        self.assertEqual(gui.window_rect(self.disp, self.window), (259, 161, 928, 608))
+        placement = {}
+        rect = gui.place_window(self.disp, self.window, placement,
+                                deadline=time.monotonic() + 2)
+        self.assertEqual(rect, (127, 83, 928, 608))
+        self.assertEqual(placement["initial_rect"], [259, 161, 928, 608])
+        self.assertEqual(placement["observed_rect"], list(rect))
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "desktop.png"
+            frame = gui.capture(self.disp, self.window, expected_rect=rect, desktop_path=path)
+            with Image.open(path) as desktop:
+                self.assertEqual(list(desktop.size), placement["screen_size"])
+                self.assertEqual(desktop.mode, "RGB")
+                crop = desktop.crop((127, 83, 1055, 691))
+                self.assertEqual(crop.tobytes(), frame.tobytes())
+            self.assertEqual(frame.getpixel((10, 10)), (37, 99, 235))
+
+    def test_capture_rejects_stale_window_geometry(self):
+        with self.assertRaises(gui.VisualFailure) as failure:
+            gui.capture(self.disp, self.window, expected_rect=(0, 0, 928, 608))
+        self.assertEqual(failure.exception.code, "window_geometry_changed")
+
+    def test_real_mouse_click_reaches_client_coordinates(self):
+        from Xlib import X
+        evidence = gui.mouse(self.disp, self.window, 37, 41, click=True)
+        pointer = self.disp.screen().root.query_pointer()
+        self.assertEqual((pointer.root_x, pointer.root_y), (164, 124))
+        self.assertEqual(evidence, {
+            "action": "left_click", "window_rect": [127, 83, 928, 608],
+            "client": [37, 41], "screen": [164, 124],
+            "observed_screen": [164, 124], "observed_client": [37, 41]})
+        buttons = []
+        while self.disp.pending_events():
+            event = self.disp.next_event()
+            if event.type in (X.ButtonPress, X.ButtonRelease):
+                buttons.append((event.type, event.event_x, event.event_y))
+        self.assertEqual(buttons, [(X.ButtonPress, 37, 41), (X.ButtonRelease, 37, 41)])
+
+    def test_wrong_root_translation_never_sends_a_click(self):
+        from Xlib import X
+        with patch.object(gui, "window_rect", return_value=(0, 0, 928, 608)):
+            with self.assertRaises(gui.VisualFailure) as failure:
+                gui.mouse(self.disp, self.window, 37, 41, click=True)
+        self.assertEqual(failure.exception.code, "mouse_target_mismatch")
+        buttons = []
+        while self.disp.pending_events():
+            event = self.disp.next_event()
+            if event.type in (X.ButtonPress, X.ButtonRelease):
+                buttons.append(event.type)
+        self.assertEqual(buttons, [])
 
 
 if __name__ == "__main__":
