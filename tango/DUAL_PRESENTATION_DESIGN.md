@@ -79,7 +79,10 @@ rasterization pipeline:
 
 The cell-to-pixel projection itself must declare its font metrics, scale,
 integer grid dimensions, viewport and source revision. **This M2
-effect-admission slice does not implement that projection.**
+effect-admission slice does not implement that projection.** A qualified
+TangoOpenGL NativePixel effect must consume the projected texture/content;
+a raw `EffectInput::Cells` is rejected rather than relabeled as an RGBA
+surface.
 `BackendApi::TangoOpenGL` admits only an explicitly selected **NativePixel
 effect** applied after the projection, with a qualified desktop GLSL
 artifact, GPU stage, installed-program observation, device limits and

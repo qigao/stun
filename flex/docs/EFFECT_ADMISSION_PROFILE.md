@@ -64,8 +64,10 @@ TerminalCell with no GPU stages. The separate `BackendApi::TangoOpenGL`
 identifies a GPU pixel stage **after** the Tango cell grid has been explicitly
 projected into NativePixel; it accepts GLSL only when an independently
 qualified adapter/device/loader contract exists. The projection itself is
-outside this validator and is not implemented. General OpenGL cannot impersonate
-TangoOpenGL. The other API families also require NativePixel. Parameter
+outside this validator and is not implemented; a direct
+`EffectInput::Cells` is rejected for TangoOpenGL pixel effects until an
+explicit projection has produced NativePixel texture/content. General OpenGL
+cannot impersonate TangoOpenGL. The other API families also require NativePixel. Parameter
 ranges carry their own units and binding classification
 (uniform, specialization or structural). Cell units cannot enter a pixel target,
 and pixel units cannot enter a cell target. Other unit or binding differences

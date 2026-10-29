@@ -410,6 +410,13 @@ EffectValidationResult validate_effect_contract(
             return fail(EffectError::InvalidValue, "unknown effect input or compositing mode");
         if (req.input != m.input || req.compositing != m.compositing)
             return fail(EffectError::UnsupportedEffect, "input or compositing semantics differ from the selected implementation");
+        // A Tango cell grid is NOT an RGBA texture. The future TangoOpenGL
+        // presenter must first project a versioned cell snapshot into a
+        // NativePixel input; this validator must not claim that operation.
+        if (m.backend.api == BackendApi::TangoOpenGL &&
+            req.input == EffectInput::Cells)
+            return fail(EffectError::UnsupportedEffect,
+                        "TangoOpenGL pixel effects require an explicit cell-to-pixel projection");
         if (req.expanded_width == 0 || req.expanded_height == 0)
             return fail(EffectError::InvalidValue, "expanded reachable output extent must be nonzero");
         if (!surface_valid(req.input_surface, req.target.kind) ||

@@ -360,7 +360,20 @@ spec("Effect metadata admission keeps backend profiles and semantic contracts di
         // The already-projected cell buffer is not implicitly converted by
         // this admission code, and the test fixture is not a real GL loader.
         auto gpu = effect_graphics_fixture(fx::BackendApi::TangoOpenGL);
+        // A Tango GL pixel effect consumes the explicitly rasterized texture,
+        // not raw terminal cells. This fixture does not implement rasterization.
+        gpu.requirement.input = fx::EffectInput::Texture;
+        gpu.manifest.input = fx::EffectInput::Texture;
+        gpu.capabilities.effects.front().input = fx::EffectInput::Texture;
         check(bool(effect_validate(gpu)));
+
+        auto unprojected_cells = gpu;
+        unprojected_cells.requirement.input = fx::EffectInput::Cells;
+        unprojected_cells.manifest.input = fx::EffectInput::Cells;
+        unprojected_cells.capabilities.effects.front().input =
+            fx::EffectInput::Cells;
+        check(effect_validation_error(effect_validate(unprojected_cells),
+                                      fx::EffectError::UnsupportedEffect));
 
         auto tty_target = gpu;
         tty_target.requirement.target.kind = fx::TargetKind::TerminalCell;
