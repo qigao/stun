@@ -156,7 +156,8 @@ class GuiOcrTests(unittest.TestCase):
                                  text.split())
 
     def test_negated_labels_cannot_match_a_later_success_word(self):
-        for text, expected in (("Not Saved", "Saved"), ("Never Saved", "Saved"),
+        for text, expected in (("Not Saved", "Saved"), ("NOT SAVED", "Saved"),
+                               ("Never Saved", "Saved"),
                                ("Error Saved", "Saved"), ("Not Save", "Save")):
             with self.subTest(text=text), patch.object(
                     gui.subprocess, "run", return_value=self.result(text)):

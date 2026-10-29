@@ -41,8 +41,8 @@ SCENARIOS = (
      "observation": "initial_ocr_observed", "forbidden_label": "Saved", "mouse": False,
      "layout_offset": [-80, 0, -80, 0]},
     {"name": "negative-not-saved", "asset": "editor.tbs",
-     "old": "text: value.payload", "new": 'text: "Not Saved"',
-     "failure_code": "completion_not_reached", "observed_label": "Not Saved",
+     "old": "text: value.payload", "new": 'text: "NOT SAVED"',
+     "failure_code": "completion_not_reached", "observed_label": "NOT SAVED",
      "observation": "after_ocr_observed", "forbidden_label": COMPLETION_LABEL, "mouse": True},
 )
 

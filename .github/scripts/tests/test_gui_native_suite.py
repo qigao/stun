@@ -51,7 +51,7 @@ class PositiveAdmissionTests(unittest.TestCase):
         suite.validate_positive(positive_evidence(), IDENTITY, SHA, 38)
 
     def test_negated_or_incomplete_service_labels_are_rejected(self):
-        for label in ("Not Saved", "Never Saved", "Error Saved", "Saved failed", "Saved"):
+        for label in ("Not Saved", "NOT SAVED", "Never Saved", "Error Saved", "Saved failed", "Saved"):
             with self.subTest(label=label):
                 evidence = positive_evidence()
                 evidence.update(after_ocr=words(label), after_ocr_observed=words(label))

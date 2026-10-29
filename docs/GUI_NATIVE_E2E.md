@@ -129,7 +129,13 @@ on the same display and runner:
 | Initial label | Change the Save button label to `Broken` in copied XML | A rendered blue button with OCR `Broken`; the driver rejects the initial state before clicking |
 | Pending completion | Change the successful completion's displayed text to `Saving...` in copied TurboScript | Initial `Save`, a real click and changed pixels, then OCR `Saving`; the driver rejects the missing `Saved` completion |
 | Misplaced control | Change the copied title width from 680px to 600px | Actual `Save` text and the same button size, but a detected position 80px too far left; the driver rejects the layout before clicking |
-| Negated completion | Change the successful completion's displayed text to `Not Saved` in copied TurboScript | Initial `Save`, a real click and changed pixels, then readable `Not Saved`; the driver rejects completion even though the label contains the word `Saved` |
+| Negated completion | Change the successful completion's displayed text to `NOT SAVED` in copied TurboScript | Initial `Save`, a real click and changed pixels, then readable `NOT SAVED`; the driver rejects completion even though the label contains the word `Saved` (case-insensitive) |
+
+The negated fixture uses uppercase letters to make the short label clearer
+to offline OCR at the fixed native font size. Its whole phrase must still be
+recognized exactly (case-insensitive); an OCR misspelling does not qualify.
+Both `Not Saved` and `NOT SAVED` remain rejection regressions for the driver
+and the suite's success check.
 
 All variants execute copies of the same native executable and document
 service plugin. Their SHA256 identities must match the successful baseline.
