@@ -362,6 +362,43 @@ Dedicated App installation, securely deployed worker, new App-owned
 `Stun attested acceptance` context and the two-context Ruleset migration
 remain in [Issue #322](https://github.com/qigao/stun/issues/322).
 
+## External dedicated-App one-shot worker (Issue #322; preparatory M2)
+
+`.github/scripts/attestor_worker.py` is an **offline-callable one-shot
+worker contract**, NOT a hosted service. It consumes only envelopes that
+were HMAC-verified by the admission module and durably queued in the SQLite
+inbox, claims one work item under a bounded owner, and reuses the trusted
+default-branch M0/M1/M2 `evaluate_event` source-HEAD/native-job verifier.
+
+The external launcher must inject: its pinned trusted policy directory,
+read-only GitHub App installation REST client, repository/installation IDs,
+expected **dedicated App Bot user ID**, and an App-installation-token-backed
+status writer. The worker requests only the **new**
+`Stun attested acceptance` context and checks the actual API response's
+SHA, state, context, Bot type and configured issuer Bot ID. A wrong issuer,
+missing credential, API error or malformed response makes the work item
+terminal `failed`, with **no GITHUB_TOKEN fallback** and no automatic retry.
+A genuine negative CI finding (failed/skipped/pending native job) is a
+*completed, correctly published failure*, not a worker error. A stale or
+closed PR event is completed without publishing any status.
+
+The worker serializes through the inbox's single-claimed-item contract.
+An external service must still implement HTTPS, authenticated webhook
+receiving, App private-key storage, installation-token minting/rotation,
+durable delivery acknowledgements, run/process supervision, monitoring,
+manual recovery and explicit deployment approval. The current repository
+code neither mints App tokens nor deploys anything. The offline
+`test_attestor_worker.py` fixtures verify both positive and negative
+status decisions, wrong App Bot source, incorrect status context,
+credential/API failures and stale events in the existing Public CI job.
+
+Deployment must load pinned reviewed default-branch policy *from a
+controlled external release*, not live PR files or an automatically
+deployed, unreviewed branch. See [Issue #322](https://github.com/qigao/stun/issues/322).
+Until a dedicated App is installed and its own status tested, the active
+master Ruleset must continue to require the old GitHub Actions context.
+No dual-context Ruleset migration is performed by this PR.
+
 ## Maintenance
 
 - Add new files/paths to both the top-level trigger and
