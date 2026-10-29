@@ -256,6 +256,11 @@ def main():
         sys.executable,
         str(Path(__file__).with_name("test_publish_required_acceptance.py"))
     ], check=True)
+    # No additional runner: authenticate external-App webhook boundary offline.
+    subprocess.run([
+        sys.executable,
+        str(Path(__file__).with_name("test_attestor_webhook.py"))
+    ], check=True)
     print("CI PR/master-push scope: all targeted and fail-open cases passed")
 
 
