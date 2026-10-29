@@ -1,4 +1,5 @@
 #include <flex/render/effect_admission.h>
+#include <flex/render/effect_resource_owner.h>
 
 #include <tinytest.hpp>
 
@@ -7,6 +8,7 @@
 #include <cstdint>
 #include <limits>
 #include <memory>
+#include <new>
 #include <mutex>
 #include <stdexcept>
 #include <string>
@@ -1176,5 +1178,326 @@ spec("Effect reservations enforce one real shared resource ledger") {
         prepared[1].reservation.release();
         check(budget.snapshot().reservations == 0);
         check(effect_cost_equal(budget.snapshot().reserved, {}));
+    }
+}
+
+
+namespace {
+
+struct NativeOwnerTestState {
+    fx::SharedResourceBudget budget;
+    int prepare_attempts = 0;
+    int constructed = 0;
+    int released = 0;
+    int released_while_charged = 0;
+
+    explicit NativeOwnerTestState(fx::SharedResourceBudget ledger)
+        : budget(std::move(ledger)) {}
+};
+
+fx::NativeEffectResourceIdentity native_test_identity(
+    const fx::ValidatedEffectContract& contract) {
+    return {contract.scope(), contract.backend(), contract.target(),
+            contract.variant_id(), contract.implementation_hash(),
+            contract.parameter_abi_hash(), contract.cost()};
+}
+
+class CountingNativeResources final : public fx::NativeEffectResources {
+public:
+    CountingNativeResources(fx::NativeEffectResourceIdentity id,
+                            std::shared_ptr<NativeOwnerTestState> state)
+        : identity_(std::move(id)), state_(std::move(state)) {
+        ++state_->constructed;
+    }
+    ~CountingNativeResources() noexcept override {
+        const auto remaining = state_->budget.snapshot();
+        if (remaining.reservations > 0 &&
+            remaining.reserved.allocations >= identity_.charged_cost.allocations) {
+            ++state_->released_while_charged;
+        }
+        ++state_->released;
+    }
+    const fx::NativeEffectResourceIdentity& identity() const noexcept override {
+        return identity_;
+    }
+private:
+    fx::NativeEffectResourceIdentity identity_;
+    std::shared_ptr<NativeOwnerTestState> state_;
+};
+
+enum class NativeOwnerMode {
+    Good, NullResult, ThrowRuntime, ThrowAlloc,
+    WrongScope, WrongGeneration, WrongVariant, WrongBackend,
+    WrongHash, WrongAbi, WrongCost,
+    ChangeRevision, ChangeGeneration, DeviceLost, LedgerLost
+};
+
+class CountingNativeOwner final : public fx::NativeEffectResourceOwner {
+public:
+    fx::BackendCapabilitySnapshot current;
+    std::shared_ptr<NativeOwnerTestState> state;
+    NativeOwnerMode mode = NativeOwnerMode::Good;
+    mutable unsigned snapshot_calls = 0;
+    const std::thread::id owning_thread = std::this_thread::get_id();
+
+    CountingNativeOwner(fx::BackendCapabilitySnapshot capabilities,
+                        std::shared_ptr<NativeOwnerTestState> shared,
+                        NativeOwnerMode action = NativeOwnerMode::Good)
+        : current(std::move(capabilities)), state(std::move(shared)), mode(action) {}
+
+    bool on_owner_thread() const noexcept override {
+        return std::this_thread::get_id() == owning_thread;
+    }
+
+    fx::BackendCapabilitySnapshot capabilities() const override {
+        ++snapshot_calls;
+        auto result = current;
+        if (snapshot_calls > 1) {
+            if (mode == NativeOwnerMode::ChangeRevision)
+                ++result.capability_revision;
+            if (mode == NativeOwnerMode::ChangeGeneration)
+                ++result.scope.device_generation;
+            if (mode == NativeOwnerMode::DeviceLost)
+                result.status = fx::DeviceStatus::Lost;
+        }
+        return result;
+    }
+
+    std::unique_ptr<fx::NativeEffectResources> prepare_resources(
+        const fx::ValidatedEffectContract& contract) override {
+        ++state->prepare_attempts;
+        check(state->budget.snapshot().reservations > 0);
+        auto id = native_test_identity(contract);
+        switch (mode) {
+        case NativeOwnerMode::WrongScope: ++id.scope.domain_id; break;
+        case NativeOwnerMode::WrongGeneration: ++id.scope.device_generation; break;
+        case NativeOwnerMode::WrongVariant: id.variant_id += ".wrong"; break;
+        case NativeOwnerMode::WrongBackend: id.backend.profile += ".wrong"; break;
+        case NativeOwnerMode::WrongHash: id.implementation_hash.bytes[0] ^= 0x42; break;
+        case NativeOwnerMode::WrongAbi: id.parameter_abi_hash.bytes[0] ^= 0x24; break;
+        case NativeOwnerMode::WrongCost: ++id.charged_cost.bytes; break;
+        default: break;
+        }
+        if (mode == NativeOwnerMode::NullResult) return {};
+        if (mode == NativeOwnerMode::ThrowAlloc) throw std::bad_alloc();
+        if (mode == NativeOwnerMode::ThrowRuntime) {
+            // Partial allocations must be reclaimed by the backend owner itself
+            // before the exception crosses the generic preparation boundary.
+            auto partial = std::make_unique<CountingNativeResources>(id, state);
+            (void)partial;
+            throw std::runtime_error("native artifact loader failed after allocation");
+        }
+        auto resources = std::make_unique<CountingNativeResources>(
+            std::move(id), state);
+        if (mode == NativeOwnerMode::LedgerLost) {
+            state->budget.mark_device_lost();
+        }
+        return resources;
+    }
+};
+
+std::shared_ptr<NativeOwnerTestState> native_test_state(
+    const fx::ValidatedEffectContract& contract, std::uint64_t copies = 1) {
+    return std::make_shared<NativeOwnerTestState>(effect_test_budget(contract, copies));
+}
+
+bool native_prep_error(const fx::NativeEffectPreparationResult& result,
+                       fx::EffectError error) {
+    return !result && result.diagnostic.code == error &&
+           !result.diagnostic.message.empty() &&
+           !result.prepared;
+}
+
+} // namespace
+
+spec("Native backend effect resources preserve admission lease ownership") {
+    it("owns the resource and shared cost until explicit pre-submission cleanup") {
+        for (auto api : {fx::BackendApi::OpenGL, fx::BackendApi::OpenGLES,
+                         fx::BackendApi::Vulkan, fx::BackendApi::Direct2D,
+                         fx::BackendApi::Tango}) {
+            auto fixture = api == fx::BackendApi::OpenGL ||
+                                   api == fx::BackendApi::OpenGLES ||
+                                   api == fx::BackendApi::Vulkan
+                ? effect_graphics_fixture(api) : effect_builtin_fixture(api);
+            const auto validated = effect_validate(fixture);
+            check(bool(validated));
+            if (!validated) continue;
+            auto shared = native_test_state(*validated.contract);
+            CountingNativeOwner owner(fixture.capabilities, shared);
+            auto prepared = fx::prepare_native_effect(
+                validated.contract, shared->budget, owner);
+            check(bool(prepared));
+            check(prepared.prepared.contract() == validated.contract.get());
+            check(prepared.prepared.identity() != nullptr);
+            check(prepared.prepared.scope() == fixture.capabilities.scope);
+            check(shared->prepare_attempts == 1);
+            check(shared->budget.snapshot().reservations == 1);
+            check(effect_cost_equal(shared->budget.snapshot().reserved,
+                                    validated.contract->cost()));
+            prepared.prepared.reset();
+            prepared.prepared.reset();
+            check(shared->released == 1);
+            check(shared->released_while_charged == 1);
+            check(shared->budget.snapshot().reservations == 0);
+            check(effect_cost_equal(shared->budget.snapshot().reserved, {}));
+        }
+    }
+
+    it("rejects incomplete owner results without minting successful resources") {
+        const auto fixture = effect_graphics_fixture();
+        const auto checked = effect_validate(fixture);
+        check(bool(checked));
+        if (!checked) return;
+        for (auto mode : {NativeOwnerMode::NullResult, NativeOwnerMode::ThrowRuntime,
+                          NativeOwnerMode::ThrowAlloc}) {
+            auto shared = native_test_state(*checked.contract);
+            CountingNativeOwner owner(fixture.capabilities, shared, mode);
+            const auto result =
+                fx::prepare_native_effect(checked.contract, shared->budget, owner);
+            check(native_prep_error(result, mode == NativeOwnerMode::ThrowAlloc
+                ? fx::EffectError::AllocationFailure : fx::EffectError::NativePreparationFailed));
+            check(shared->budget.snapshot().reservations == 0);
+            check(effect_cost_equal(shared->budget.snapshot().reserved, {}));
+            check(shared->constructed == shared->released);
+            check(shared->released_while_charged == shared->released);
+        }
+        auto shared = native_test_state(*checked.contract);
+        CountingNativeOwner owner(fixture.capabilities, shared);
+        const auto missing = fx::prepare_native_effect({}, shared->budget, owner);
+        check(native_prep_error(missing, fx::EffectError::InvalidValue));
+        check(shared->prepare_attempts == 0);
+        check(owner.snapshot_calls == 0);
+    }
+
+    it("rejects every mismatched native scope, variant, ABI, digest or cost") {
+        const auto fixture = effect_graphics_fixture();
+        const auto checked = effect_validate(fixture);
+        check(bool(checked));
+        if (!checked) return;
+        for (auto mode : {NativeOwnerMode::WrongScope, NativeOwnerMode::WrongGeneration,
+                          NativeOwnerMode::WrongVariant, NativeOwnerMode::WrongBackend,
+                          NativeOwnerMode::WrongHash, NativeOwnerMode::WrongAbi,
+                          NativeOwnerMode::WrongCost}) {
+            auto shared = native_test_state(*checked.contract);
+            CountingNativeOwner owner(fixture.capabilities, shared, mode);
+            const auto result =
+                fx::prepare_native_effect(checked.contract, shared->budget, owner);
+            auto expected = fx::EffectError::NativeIdentityMismatch;
+            if (mode == NativeOwnerMode::WrongScope) expected = fx::EffectError::ScopeMismatch;
+            if (mode == NativeOwnerMode::WrongGeneration) expected = fx::EffectError::StaleGeneration;
+            if (mode == NativeOwnerMode::WrongHash) expected = fx::EffectError::ArtifactHashMismatch;
+            if (mode == NativeOwnerMode::WrongAbi) expected = fx::EffectError::ProgramAbiMismatch;
+            check(native_prep_error(result, expected));
+            check(shared->constructed == 1);
+            check(shared->released == 1);
+            check(shared->released_while_charged == 1);
+            check(shared->budget.snapshot().reservations == 0);
+        }
+    }
+
+    it("destroys a candidate before releasing its budget after device changes") {
+        const auto fixture = effect_graphics_fixture();
+        const auto checked = effect_validate(fixture);
+        check(bool(checked));
+        if (!checked) return;
+        for (auto mode : {NativeOwnerMode::ChangeRevision,
+                          NativeOwnerMode::ChangeGeneration,
+                          NativeOwnerMode::DeviceLost,
+                          NativeOwnerMode::LedgerLost}) {
+            auto shared = native_test_state(*checked.contract);
+            CountingNativeOwner owner(fixture.capabilities, shared, mode);
+            const auto result =
+                fx::prepare_native_effect(checked.contract, shared->budget, owner);
+            auto expected = mode == NativeOwnerMode::ChangeRevision ?
+                fx::EffectError::StaleCapabilities :
+                mode == NativeOwnerMode::ChangeGeneration ?
+                    fx::EffectError::StaleGeneration : fx::EffectError::DeviceLost;
+            check(native_prep_error(result, expected));
+            check(shared->constructed == 1);
+            check(shared->released == 1);
+            check(shared->released_while_charged == 1);
+            check(shared->budget.snapshot().reservations == 0);
+            if (mode == NativeOwnerMode::LedgerLost)
+                check(shared->budget.snapshot().status == fx::DeviceStatus::Lost);
+        }
+    }
+
+    it("refuses insufficient budgets before invoking the native owner") {
+        const auto fixture = effect_graphics_fixture();
+        const auto checked = effect_validate(fixture);
+        check(bool(checked));
+        if (!checked) return;
+        fx::SharedResourceBudget ledger(checked.contract->scope(),
+                                        {{0, 0, 0, 0}, 1});
+        auto shared = std::make_shared<NativeOwnerTestState>(ledger);
+        CountingNativeOwner owner(fixture.capabilities, shared);
+        const auto result = fx::prepare_native_effect(checked.contract, ledger, owner);
+        check(native_prep_error(result, fx::EffectError::BudgetExceeded));
+        check(shared->prepare_attempts == 0);
+        check(shared->budget.snapshot().reservations == 0);
+    }
+
+    it("holds both old and candidate costs until each native owner retires") {
+        const auto fixture = effect_graphics_fixture();
+        const auto checked = effect_validate(fixture);
+        check(bool(checked));
+        if (!checked) return;
+        auto shared = native_test_state(*checked.contract, 2);
+        CountingNativeOwner owner(fixture.capabilities, shared);
+        auto active = fx::prepare_native_effect(checked.contract, shared->budget, owner);
+        auto candidate = fx::prepare_native_effect(checked.contract, shared->budget, owner);
+        check(bool(active));
+        check(bool(candidate));
+        check(shared->budget.snapshot().reservations == 2);
+        active.prepared = std::move(candidate.prepared);
+        check(bool(active));
+        check(!candidate.prepared);
+        check(shared->released == 1);
+        check(shared->released_while_charged == 1);
+        check(shared->budget.snapshot().reservations == 1);
+        auto& self = active.prepared;
+        active.prepared = std::move(self);
+        check(bool(active.prepared));
+        active.prepared.reset();
+        check(shared->released == 2);
+        check(shared->released_while_charged == 2);
+        check(shared->budget.snapshot().reservations == 0);
+    }
+
+    it("rejects a call from a non-owner thread before querying or reserving") {
+        const auto fixture = effect_graphics_fixture();
+        const auto checked = effect_validate(fixture);
+        check(bool(checked));
+        if (!checked) return;
+        auto shared = native_test_state(*checked.contract);
+        CountingNativeOwner owner(fixture.capabilities, shared);
+        fx::NativeEffectPreparationResult result;
+        std::thread foreign([&] {
+            result = fx::prepare_native_effect(
+                checked.contract, shared->budget, owner);
+        });
+        foreign.join();
+        check(native_prep_error(result, fx::EffectError::WrongOwnerThread));
+        check(owner.snapshot_calls == 0);
+        check(shared->prepare_attempts == 0);
+        check(shared->budget.snapshot().reservations == 0);
+    }
+
+    it("keeps resources independently alive after the temporary factory dies") {
+        const auto fixture = effect_graphics_fixture();
+        const auto checked = effect_validate(fixture);
+        check(bool(checked));
+        if (!checked) return;
+        auto shared = native_test_state(*checked.contract);
+        fx::NativeEffectPreparationResult result;
+        {
+            CountingNativeOwner owner(fixture.capabilities, shared);
+            result = fx::prepare_native_effect(checked.contract, shared->budget, owner);
+        }
+        check(bool(result));
+        check(shared->released == 0);
+        result.prepared.reset();
+        check(shared->released == 1);
+        check(shared->budget.snapshot().reservations == 0);
     }
 }

@@ -288,6 +288,7 @@ enum class EffectError : std::uint8_t {
     InvalidPassGraph, MissingProgramVariant, ArtifactHashMismatch,
     ProgramAbiMismatch, ResourceLimit, BudgetExceeded, ScopeMismatch,
     StaleGeneration, StaleCapabilities, DeviceLost, AllocationFailure,
+    NativePreparationFailed, NativeIdentityMismatch, WrongOwnerThread,
 };
 struct EffectDiagnostic {
     EffectError code = EffectError::None;
