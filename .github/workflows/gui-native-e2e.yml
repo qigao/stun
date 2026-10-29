@@ -157,8 +157,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          echo "VCPKG_DEFAULT_BINARY_CACHE=$RUNNER_TEMP/stun-gui-vcpkg-cache" >> "$GITHUB_ENV"
-          mkdir -p "$RUNNER_TEMP/stun-gui-vcpkg-cache"
+          export VCPKG_DEFAULT_BINARY_CACHE="$RUNNER_TEMP/stun-gui-vcpkg-cache"
+          echo "VCPKG_DEFAULT_BINARY_CACHE=$VCPKG_DEFAULT_BINARY_CACHE" >> "$GITHUB_ENV"
+          mkdir -p "$VCPKG_DEFAULT_BINARY_CACHE"
           .ci/vcpkg/bootstrap-vcpkg.sh -disableMetrics
           .ci/vcpkg/vcpkg install --classic --triplet x64-linux \
             nlohmann-json pugixml freetype stb zlib glfw3 glad plutosvg vulkan-headers

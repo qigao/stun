@@ -60,6 +60,19 @@ add_subdirectory("${STUN_ROOT}/flex" flex)
 add_subdirectory("${STUN_ROOT}/flexUI" flexUI)
 target_link_libraries(flexUI PRIVATE Stun::UICore)
 
+# The official TurboScript.Native SDK depends on the ONE canonical
+# SaltsUtils DataBind DSO. Linux linkers reject its unresolved data_bind_*
+# and cserde_* symbols unless that published provider is on the consumer
+# link line. Never fake, vendor or ignore missing SDK symbols.
+if(NOT TARGET Salts::DataBind)
+  message(FATAL_ERROR "TurboScript Host ABI requires the published Salts::DataBind target from SaltsUtils")
+endif()
+get_target_property(_stun_gui_databind_imported Salts::DataBind IMPORTED)
+if(NOT _stun_gui_databind_imported)
+  message(FATAL_ERROR "GUI requires an imported Salts::DataBind from the installed SDK")
+endif()
+target_link_libraries(flexui_desktop_editor PRIVATE Salts::DataBind)
+
 if(NOT TARGET gCanvas::Window OR NOT TARGET gCanvas::OpenGL OR
    NOT TARGET FlexUI::GCanvasPluginWindowHost OR
    NOT TARGET FlexUI::ControllerTurboScript OR
