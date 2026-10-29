@@ -199,6 +199,10 @@ def button_ocr(frame, roi, path, expected):
     box = (max(0, roi[0] - 12), max(0, roi[1] - 9),
            min(frame.width, roi[2] + 30), min(frame.height, roi[3] + 10))
     crop = frame.crop(box)
+    # Isolate the real light glyphs from the blue control before Tesseract's
+    # line segmentation. Use the same transform for every expected label;
+    # retain the unmodified full-window frames as the visual/layout evidence.
+    crop = ImageOps.grayscale(crop).point(lambda value: 0 if value >= 180 else 255)
     crop = ImageOps.expand(crop.resize((crop.width * 3, crop.height * 3)),
                            border=20, fill="white")
     crop.save(path)
