@@ -161,7 +161,7 @@ jobs:
           mkdir -p "$RUNNER_TEMP/stun-gui-vcpkg-cache"
           .ci/vcpkg/bootstrap-vcpkg.sh -disableMetrics
           .ci/vcpkg/vcpkg install --classic --triplet x64-linux \
-            nlohmann-json pugixml freetype stb zlib glfw3 glad plutosvg
+            nlohmann-json pugixml freetype stb zlib glfw3 glad plutosvg vulkan-headers
 
       - name: Cache actual Lexbor / Box2D / Tree-sitter source builds
         id: xml_deps
