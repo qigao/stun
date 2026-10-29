@@ -35,6 +35,36 @@ class RequirementTests(unittest.TestCase):
                     ["GUI visible screenshot / Linux X11"])
                 self.assertIn(policy.RUNTIME, result)
 
+    def test_required_workflows_have_completion_publication_triggers(self):
+        directory = ROOT / ".github/workflows"
+        lines = (directory / "required-acceptance.yml").read_text(
+            encoding="utf-8").splitlines()
+        start = lines.index("  workflow_run:") + 1
+        end = next((i for i in range(start, len(lines))
+                    if lines[i] and not lines[i].startswith("    ")
+                    and not lines[i].lstrip().startswith("#")), len(lines))
+        event = lines[start:end]
+        names = []
+        for line in event[event.index("    workflows:") + 1:]:
+            if not line.startswith("      - "):
+                if line.strip():
+                    break
+                continue
+            names.append(line.strip()[2:].strip().strip("'\""))
+        types = next(line for line in event if line.startswith("    types: ["))
+        self.assertIn("completed", [item.strip(" '\"") for item in
+                                    types.split("[", 1)[1].rstrip("]").split(",")])
+        # A required workflow may finish last. Its completion must itself
+        # refresh the status; unrelated workflow completions cannot be assumed.
+        paths = [policy.PUBLIC, policy.RUNTIME] + [
+            ".github/workflows/" + filename for filename in policy.WORKFLOWS]
+        for path in paths:
+            source = (ROOT / path).read_text(encoding="utf-8")
+            name = next(line[6:].strip().strip("'\"") for line in source.splitlines()
+                        if line.startswith("name: "))
+            with self.subTest(workflow=path):
+                self.assertIn(name, names, "required workflow completion cannot refresh status")
+
     def test_documentation_only_avoids_native_matrix(self):
         result = matrix("docs/CI_SCOPE.md", "README.md")
         self.assertEqual(result, {policy.PUBLIC: [policy.PARSER]})
