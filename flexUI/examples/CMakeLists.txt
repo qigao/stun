@@ -39,6 +39,15 @@ if(TARGET flex_backend_opengl AND TARGET glfw AND TARGET glad::glad AND FLEXUI_E
   set_target_properties(opengl_demo PROPERTIES FOLDER flexUI/)
 endif()
 
+# Separate Tango C11 grid -> gCanvas GL presenter; the generic Flex
+# OpenGL application renderer is not registered as TangoOpenGL.
+if(TARGET flex_backend_tango_opengl AND TARGET glfw)
+  add_executable(tango_opengl_demo tango_opengl_demo.cpp)
+  target_link_libraries(tango_opengl_demo
+    PRIVATE flex_backend_tango_opengl glfw)
+  set_target_properties(tango_opengl_demo PROPERTIES FOLDER flexUI/)
+endif()
+
 if(TARGET flex_backend_d2d)
   add_executable(direct2d_demo direct2d_demo.cpp)
   target_link_libraries(direct2d_demo PRIVATE flexUI flex_backend_d2d)

@@ -46,6 +46,8 @@ option(FLEX_BUILD_RENDER_ENGINE_NANOVG
 
 option(FLEX_BUILD_BACKEND_OPENGL "Build OpenGL renderer backend" ON)
 option(FLEX_BUILD_BACKEND_TUI "Build terminal UI renderer backend" ON)
+option(FLEX_BUILD_BACKEND_TANGO_OPENGL
+       "Build the separately selected Tango cell-grid OpenGL presenter" OFF)
 option(FLEX_BUILD_BACKEND_D2D "Build Direct2D renderer backend" ON)
 option(FLEX_BUILD_BACKEND_VULKAN "Build native Vulkan renderer backend" ON)
 
@@ -63,6 +65,11 @@ if(FLEX_BUILD_BACKEND_OPENGL)
 endif()
 if(FLEX_BUILD_BACKEND_TUI)
   add_subdirectory(backends/tui)
+  # The CPU cell/pixel plan builds headless with Tango and Flex::Render.
+  # Its GL host only builds under an explicitly requested, real gCanvas GL.
+  add_subdirectory(backends/tango_opengl)
+elseif(FLEX_BUILD_BACKEND_TANGO_OPENGL)
+  message(FATAL_ERROR "TangoOpenGL requires the canonical Tango C11 core")
 endif()
 if(FLEX_BUILD_BACKEND_D2D)
   add_subdirectory(backends/d2d)

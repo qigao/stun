@@ -22,6 +22,14 @@ target_link_libraries(test_render PRIVATE flex_render Salts::TinyTest)
 set_target_properties(test_render PROPERTIES FOLDER "flex/tests")
 add_test(NAME test_render COMMAND test_render)
 
+if(TARGET flex_tango_gl_frame)
+  add_executable(test_tango_gl_frame test_tango_gl_frame.cpp)
+  target_link_libraries(test_tango_gl_frame PRIVATE
+    flex_tango_gl_frame Salts::TinyTest)
+  set_target_properties(test_tango_gl_frame PROPERTIES FOLDER "flex/tests")
+  add_test(NAME test_tango_gl_frame COMMAND test_tango_gl_frame)
+endif()
+
 add_executable(test_effect_admission test_effect_admission.cpp)
 target_link_libraries(test_effect_admission
                      PRIVATE Flex::Render Salts::TinyTest Threads::Threads)

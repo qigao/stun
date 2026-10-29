@@ -90,6 +90,36 @@ add_test(NAME test_effect_admission COMMAND test_effect_admission)
 set_tests_properties(test_effect_admission PROPERTIES TIMEOUT 120)
 add_dependencies(stun_xml_runtime_qualification test_effect_admission)
 
+# Exercise the real Tango C11 grid-to-pixel compositor recipe with a strict
+# recording pixel renderer; no GL/window dependency for this qualification.
+if(TARGET flex_tango_gl_frame)
+  add_executable(test_tango_gl_frame
+    "${STUN_ROOT}/flex/tests/test_tango_gl_frame.cpp")
+  target_link_libraries(test_tango_gl_frame
+    PRIVATE flex_tango_gl_frame Salts::TinyTest)
+  add_test(NAME test_tango_gl_frame COMMAND test_tango_gl_frame)
+  set_tests_properties(test_tango_gl_frame PROPERTIES TIMEOUT 120)
+  add_dependencies(stun_xml_runtime_qualification test_tango_gl_frame)
+endif()
+
+# Compile the ACTUAL OpenGL presenter integration source with its real
+# gCanvas/OpenGL public headers on all three headless platforms. This is a
+# SOURCE/ABI qualification, not a GPU-context or screenshot runtime claim.
+if(TARGET flex_tango_gl_frame)
+  add_library(stun_tango_gl_presenter_source_compile OBJECT
+    "${STUN_ROOT}/flex/backends/tango_opengl/gl_presenter.cpp")
+  target_include_directories(stun_tango_gl_presenter_source_compile PRIVATE
+    "${STUN_ROOT}/flex/backends/opengl/include"
+    "${STUN_ROOT}/flex/render/engines/gcanvas/include"
+    "${STUN_ROOT}/shared/gcanvas/include")
+  target_link_libraries(stun_tango_gl_presenter_source_compile
+    PRIVATE flex_tango_gl_frame)
+  target_compile_features(stun_tango_gl_presenter_source_compile
+    PRIVATE cxx_std_17)
+  add_dependencies(stun_xml_runtime_qualification
+    stun_tango_gl_presenter_source_compile)
+endif()
+
 # Exercise the production command replay and preflight code with a recording
 # renderer, then the same command path with the real Tango cell renderer.
 foreach(test IN ITEMS test_render_command test_render_command_tango)
