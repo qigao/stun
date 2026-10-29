@@ -10,6 +10,8 @@
 #include "render_frame.h"
 #include <flex/runtime/renderer.h>
 #include <cstdint>
+#include <cstddef>
+#include <stdexcept>
 #include <string>
 #include <utility>
 #include <variant>
@@ -172,6 +174,40 @@ using RenderCommand =
                  DrawRectCommand, DrawLineCommand, DrawCircleCommand, DrawEllipseCommand, DrawTextCommand,
                  DrawImageCommand, DrawSvgCommand, DrawSvgDataCommand>;
 
+// Checks the recorded command snapshot. This is not qualified shader admission:
+// old capability flags can reject operations, but cannot prove native readiness.
+enum class RenderValidationScope : std::uint8_t { Commands, CompleteFrame };
+enum class RenderValidationError : std::uint8_t {
+  None, InvalidLimits, ResourceLimit, InvalidValue, UnsupportedOperation,
+  InvalidSequence,
+};
+
+struct RenderValidationLimits {
+  std::size_t max_commands = 65536;
+  std::size_t max_payload_bytes = 8 * 1024 * 1024;
+  std::size_t max_string_bytes = 1024 * 1024;
+  std::size_t max_gradient_stops = 256;
+  std::size_t max_state_depth = 256;
+};
+
+struct RenderValidationResult {
+  RenderValidationError code = RenderValidationError::None;
+  std::size_t command_index = 0;
+  // Points to a static diagnostic literal; no input string is borrowed.
+  const char* message = "";
+  explicit operator bool() const noexcept { return code == RenderValidationError::None; }
+};
+
+class RenderValidationException final : public std::logic_error {
+public:
+  explicit RenderValidationException(RenderValidationResult diagnostic)
+      : std::logic_error(diagnostic.message ? diagnostic.message :
+                         "render command validation failed"), diagnostic_(diagnostic) {}
+  const RenderValidationResult& diagnostic() const noexcept { return diagnostic_; }
+private:
+  RenderValidationResult diagnostic_;
+};
+
 class RenderCommandList {
 public:
   RenderCommandList() = delete;
@@ -215,8 +251,25 @@ public:
   void draw_svg_data(std::string data, float x, float y, float width,
                      float height);
 
+  // Uses the executing renderer's capabilities, not the recording-time copy.
+  // CompleteFrame additionally requires one Begin/End pair and balanced saves.
+  // Commands preserves existing fragment replay, including inherited state.
+  // The owner must not mutate this list or its renderer concurrently with calls.
+  // O(commands + retained gradient stops); O(1) auxiliary space, no allocation.
+  RenderValidationResult validate_replay(
+      const Renderer& renderer,
+      RenderValidationScope scope = RenderValidationScope::Commands,
+      const RenderValidationLimits& limits = {}) const;
+  void require_valid_replay(
+      const Renderer& renderer,
+      RenderValidationScope scope = RenderValidationScope::Commands,
+      const RenderValidationLimits& limits = {}) const;
+
   void replay(Renderer& renderer) const;
+  void replay(Renderer& renderer, const RenderValidationLimits& limits) const;
   void replay_retained(Renderer& renderer, RenderCommandCache& cache) const;
+  void replay_retained(Renderer& renderer, RenderCommandCache& cache,
+                       const RenderValidationLimits& limits) const;
   uint64_t signature() const;
   void reset();
   void reserve(size_t capacity);

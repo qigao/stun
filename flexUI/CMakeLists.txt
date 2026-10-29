@@ -117,6 +117,7 @@ set(FLEXUI_SOURCES
   src/layout_manager.cpp
   src/render_manager.cpp
   src/render_command.cpp
+  src/render_command_validation.cpp
   src/shadcn_ir.cpp
   src/syntax_highlighter.cpp
   src/highlighters/treesitter_highlighter.cpp

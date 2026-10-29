@@ -1,4 +1,5 @@
 #include "flex/render/engines/gcanvas.h"
+#include "flex/core/render_value_validation.h"
 
 #include <gcanvas/context.hpp>
 #include <gcanvas/backends/opengl.hpp>
@@ -339,11 +340,7 @@ public:
 
   void set_shadow(const Shadow& shadow) override {
     require_frame();
-    if (!std::isfinite(shadow.offset_x) || !std::isfinite(shadow.offset_y) ||
-        !std::isfinite(shadow.blur) || !std::isfinite(shadow.spread) ||
-        !std::isfinite(shadow.color.r) || !std::isfinite(shadow.color.g) ||
-        !std::isfinite(shadow.color.b) || !std::isfinite(shadow.color.a) ||
-        shadow.blur < 0.0f) {
+    if (!render_values::valid_shadow(shadow)) {
       throw std::invalid_argument(
           "gCanvas renderer shadow values must be finite with non-negative blur");
     }
@@ -357,7 +354,7 @@ public:
 
   void set_blur(const BlurFilter& blur) override {
     require_frame();
-    if (!std::isfinite(blur.radius) || blur.radius < 0.0f) {
+    if (!render_values::valid_blur(blur)) {
       throw std::invalid_argument(
           "gCanvas renderer blur radius must be finite and non-negative");
     }

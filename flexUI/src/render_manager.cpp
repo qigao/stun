@@ -19,6 +19,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstdlib>
+#include <exception>
 #include <iostream>
 #include <sstream>
 #include <tlog.h>
@@ -186,6 +187,93 @@ struct RenderProfile {
 };
 
 thread_local RenderProfile* active_render_profile = nullptr;
+
+class ScopedRenderProfile {
+ public:
+  explicit ScopedRenderProfile(RenderProfile* profile)
+      : previous_(active_render_profile) {
+    active_render_profile = profile;
+  }
+  ~ScopedRenderProfile() { active_render_profile = previous_; }
+  ScopedRenderProfile(const ScopedRenderProfile&) = delete;
+  ScopedRenderProfile& operator=(const ScopedRenderProfile&) = delete;
+
+ private:
+  RenderProfile* previous_;
+};
+
+class VisualDirtyRollback;
+thread_local VisualDirtyRollback* active_visual_dirty_rollback = nullptr;
+
+// Recording keeps its existing clear timing, so a later widget or renderer
+// callback can mark an already recorded element dirty again. On failure only
+// the flags cleared here are restored; no later dirty flag is ever cleared.
+// Like command recording/replay, this scope runs on the synchronous tree owner.
+class VisualDirtyRollback {
+ public:
+  VisualDirtyRollback()
+      : previous_(active_visual_dirty_rollback),
+        limit_(RenderValidationLimits{}.max_commands) {
+    active_visual_dirty_rollback = this;
+  }
+
+  ~VisualDirtyRollback() noexcept {
+    active_visual_dirty_rollback = previous_;
+    if (!committed_) {
+      // Normal returns explicitly commit or roll back. During exception
+      // unwinding, restore every flag while preserving the original error.
+      (void)restore_flags();
+    }
+  }
+
+  VisualDirtyRollback(const VisualDirtyRollback&) = delete;
+  VisualDirtyRollback& operator=(const VisualDirtyRollback&) = delete;
+
+  void record(Element& element, std::size_t command_index) {
+    if (!element.is_dirty(flex::DirtyFlags::Visual)) return;
+    if (entries_.size() >= limit_) {
+      throw RenderValidationException(
+          {RenderValidationError::ResourceLimit, command_index,
+           "render visual-dirty rollback record limit exceeded"});
+    }
+    entries_.push_back({&element, element.lifetime_token()});
+  }
+
+  void commit() noexcept { committed_ = true; }
+
+  void rollback() {
+    // A normal diagnostic build must surface a parent propagation exception,
+    // but only after all still-live elements have had their flags restored.
+    committed_ = true;
+    const auto error = restore_flags();
+    if (error) std::rethrow_exception(error);
+  }
+
+ private:
+  struct Entry {
+    flex::Node* node;
+    flex::Node::LifetimeToken lifetime;
+  };
+
+  std::exception_ptr restore_flags() noexcept {
+    std::exception_ptr first_error;
+    for (const auto& entry : entries_) {
+      if (entry.lifetime.expired()) continue;
+      try {
+        // Node restores its own flag before invoking parent propagation.
+        entry.node->flex::Node::mark_dirty(flex::DirtyFlags::Visual);
+      } catch (...) {
+        if (!first_error) first_error = std::current_exception();
+      }
+    }
+    return first_error;
+  }
+
+  VisualDirtyRollback* previous_;
+  const std::size_t limit_;
+  std::vector<Entry> entries_;
+  bool committed_ = false;
+};
 
 bool render_profile_enabled() {
   static const bool enabled = [] {
@@ -1761,6 +1849,8 @@ void draw_background_image_layer(RenderCommandList& commands,
 RenderCommandList RenderManager::build_frame_commands(
     const RenderFrame& frame,
     const flex::RendererCapabilities& capabilities) {
+  // Building a diagnostic/offscreen command list does not complete a render.
+  VisualDirtyRollback visual_dirty;
   RenderCommandList commands = make_render_commands(capabilities);
   commands.reserve(512);
   commands.begin_frame(frame.viewport);
@@ -1773,6 +1863,7 @@ RenderCommandList RenderManager::build_frame_commands(
     render_overlays(frame.root, capabilities, commands);
   }
   commands.end_frame();
+  visual_dirty.rollback();
   return commands;
 }
 
@@ -1781,10 +1872,9 @@ void RenderManager::render_frame(const RenderFrame& frame) {
   const bool profile_enabled = render_profile_enabled();
   if (profile_enabled) {
     profile.start = std::chrono::high_resolution_clock::now();
-    active_render_profile = &profile;
-  } else {
-    active_render_profile = nullptr;
   }
+  ScopedRenderProfile profile_scope(profile_enabled ? &profile : nullptr);
+  VisualDirtyRollback visual_dirty;
 
   const auto caps = renderer_->capabilities();
   RenderCommandList frame_start = make_render_commands(caps);
@@ -1824,6 +1914,11 @@ void RenderManager::render_frame(const RenderFrame& frame) {
   frame_signature.append(frame_commands);
   frame_signature.append(frame_end);
 
+  // Check the entire frame before clear, surface/cache mutation or replay.
+  // Checking the three immediate-mode fragments separately is too late.
+  frame_signature.require_valid_replay(*renderer_,
+                                       RenderValidationScope::CompleteFrame);
+
   const bool force_repaint = renderer_->requires_surface_recreation();
   if (force_repaint && !retained_cache_.empty()) {
     retained_cache_.clear(*renderer_);
@@ -1862,6 +1957,8 @@ void RenderManager::render_frame(const RenderFrame& frame) {
     }
   }
 
+  visual_dirty.commit();
+
   if (profile_enabled && elapsed_ms(profile.start) > 32.0) {
     const double total_ms = elapsed_ms(profile.start);
     TLOG_INFOF("[RenderManager] Frame | total: {:.1f}ms | begin: {:.1f}ms | tree: {:.1f}ms | overlays: {:.1f}ms | end: {:.1f}ms | replay({}): {:.1f}ms | element-self({}): {:.1f}ms | effects: {:.1f}ms | bg: {:.1f}ms | stroke: {:.1f}ms | content: {:.1f}ms | pseudo: {:.1f}ms | widgets({}): {:.1f}ms | text({}): {:.1f}ms | sort: {:.1f}ms",
@@ -1891,17 +1988,18 @@ void RenderManager::render_frame(const RenderFrame& frame) {
       TLOG_INFOF("[RenderManager]   widget detail | {}", out.str());
     }
   }
-  active_render_profile = nullptr;
 }
 
 void RenderManager::render_tree(Element* root) {
   if (!root || !renderer_) return;
+  VisualDirtyRollback visual_dirty;
   const auto caps = renderer_->capabilities();
   const Bounds viewport = renderer_->viewport();
   RenderCommandList frame_commands = make_render_commands(caps);
   frame_commands.reserve(512);
   render_element(root, flex::make_identity(), caps, viewport, frame_commands);
   replay_render_commands(*renderer_, frame_commands);
+  visual_dirty.commit();
 }
 
 void RenderManager::render_element(Element* elem,
@@ -2826,6 +2924,10 @@ void RenderManager::render_element(Element* elem,
   }
   frame_commands.restore();
 
+  if (active_visual_dirty_rollback) {
+    active_visual_dirty_rollback->record(
+        *elem, frame_commands.commands().size());
+  }
   elem->clear_dirty(flex::DirtyFlags::Visual);
   if (active_render_profile) {
     active_render_profile->element_ms +=
