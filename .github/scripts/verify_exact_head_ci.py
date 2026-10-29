@@ -131,8 +131,15 @@ def collect_snapshot(get, pr_number, requirements):
         if candidates:
             latest = max(candidates, key=lambda r: (int(r.get("id", 0)),
                                                      int(r.get("run_attempt", 0))))
-            run_id = int(latest["id"])
-            latest["jobs"] = pages(get, f"/actions/runs/{run_id}/jobs?filter=latest", "jobs")
+            # A newly requested/queued run supersedes an older green
+            # attempt. Do not fetch jobs for a run that has not completed:
+            # GitHub may not have materialized its job list yet.
+            if (latest.get("status") == "completed" and
+                    latest.get("conclusion") == "success"):
+                run_id = int(latest["id"])
+                latest["jobs"] = pages(
+                    get, f"/actions/runs/{run_id}/jobs?filter=latest", "jobs"
+                )
     after = get(f"/pulls/{pr_number}").get("head", {}).get("sha")
     return {
         "head_sha": sha,
