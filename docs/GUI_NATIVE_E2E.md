@@ -53,9 +53,10 @@ Evidence files:
 
 - before.png, hover.png, after.png: real X11 root framebuffer cropped to
   the visible client window, not generated from an internal widget tree
-- *_button_ocr.png: derived button crops with a fixed luminance threshold
-  (180), black text on white, 3x scaling and a white border. Every label
-  uses the same preprocessing; the full-window frames remain unmodified.
+- *_ocr.png: derived crops inside the detected button (2px inset), with
+  grayscale contrast normalization, inversion, 3x bicubic scaling and a
+  white border. Every label uses the same preprocessing, preserving
+  antialiased text strokes; the full-window frames remain unmodified.
 - application.log: actual native process stderr/stdout
 - evidence.json: exact source HEAD, native binary SHA256, PID, window ID,
   client rectangle, mouse action, changed pixel count, result/failure

@@ -127,7 +127,7 @@ def verify_negative_screenshots(directory, evidence, scenario, minimum_changed):
         observed_frame = after
     # Recompute the crop from retained native screenshots, not just a failure
     # string, JSON word list or potentially stale standalone OCR crop.
-    return gui.button_ocr(observed_frame, roi, directory / "verified_wrong_label_ocr.png",
+    return gui.button_ocr(observed_frame, box, directory / "verified_wrong_label_ocr.png",
                           scenario["observed_word"])
 
 

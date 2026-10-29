@@ -194,17 +194,17 @@ def local_ocr(path, expected):
     return words
 
 
-def button_ocr(frame, roi, path, expected):
-    from PIL import ImageOps
-    box = (max(0, roi[0] - 12), max(0, roi[1] - 9),
-           min(frame.width, roi[2] + 30), min(frame.height, roi[3] + 10))
-    crop = frame.crop(box)
-    # Isolate the real light glyphs from the blue control before Tesseract's
-    # line segmentation. Use the same transform for every expected label;
-    # retain the unmodified full-window frames as the visual/layout evidence.
-    crop = ImageOps.grayscale(crop).point(lambda value: 0 if value >= 180 else 255)
-    crop = ImageOps.expand(crop.resize((crop.width * 3, crop.height * 3)),
-                           border=20, fill="white")
+def button_ocr(frame, box, path, expected):
+    from PIL import Image, ImageOps
+    # Exclude the control border while preserving antialiased glyph strokes.
+    # Every label uses this same transform; full-window frames and the larger
+    # hover/after pixel comparison region remain the visual/layout evidence.
+    inner = (box[0] + 2, box[1] + 2, box[2] - 2, box[3] - 2)
+    crop = frame.crop(inner)
+    crop = ImageOps.invert(ImageOps.autocontrast(ImageOps.grayscale(crop)))
+    crop = ImageOps.expand(
+        crop.resize((crop.width * 3, crop.height * 3), Image.Resampling.BICUBIC),
+        border=20, fill="white")
     crop.save(path)
     return local_ocr(path, expected)
 
@@ -301,7 +301,7 @@ def run(args):
                 if args.ocr_initial:
                     try:
                         metadata["initial_ocr"] = button_ocr(
-                            before, roi, out / "before_button_ocr.png",
+                            before, box, out / "before_button_ocr.png",
                             args.ocr_initial)
                         metadata["initial_ocr_observed"] = metadata["initial_ocr"]
                     except OcrMismatch as exc:
@@ -337,7 +337,7 @@ def run(args):
                 if matched and args.ocr_after:
                     try:
                         metadata["after_ocr"] = button_ocr(
-                            frame, roi, out / "after_button_ocr.png", args.ocr_after)
+                            frame, box, out / "after_button_ocr.png", args.ocr_after)
                         metadata["after_ocr_observed"] = metadata["after_ocr"]
                     except OcrMismatch as exc:
                         metadata["after_ocr_last_mismatch"] = str(exc)
