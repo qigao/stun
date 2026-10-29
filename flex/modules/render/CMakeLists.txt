@@ -1,5 +1,7 @@
 # Flex backend-neutral render contracts and renderer registry
 
+find_package(Threads REQUIRED)
+
 add_library(flex_stb_sprintf OBJECT stb_sprintf.cpp)
 target_include_directories(flex_stb_sprintf PRIVATE ${Stb_INCLUDE_DIR})
 target_compile_features(flex_stb_sprintf PRIVATE cxx_std_17)
@@ -15,8 +17,11 @@ set_target_properties(
 add_library(
   flex_render STATIC
   renderer_factory.cpp
+  effect_admission.cpp
+  effect_budget.cpp
   $<TARGET_OBJECTS:flex_stb_sprintf>
   ${FLEX_ENGINE_INCLUDE_DIR}/flex/render.h
+  ${FLEX_ENGINE_INCLUDE_DIR}/flex/render/effect_admission.h
   ${FLEX_ENGINE_INCLUDE_DIR}/flex/core/renderer.h
   ${FLEX_ENGINE_INCLUDE_DIR}/flex/bridge/renderer.h)
 target_include_directories(
@@ -25,6 +30,7 @@ target_include_directories(
          $<INSTALL_INTERFACE:include>
   PRIVATE ${Stb_INCLUDE_DIR})
 target_compile_features(flex_render PUBLIC cxx_std_17)
+target_link_libraries(flex_render PUBLIC Threads::Threads)
 set_target_properties(
   flex_render PROPERTIES FOLDER "flex/render" POSITION_INDEPENDENT_CODE ON)
 

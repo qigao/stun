@@ -249,6 +249,12 @@ M1 首个实现切片见 [原生 paint profile](TAILWIND_NATIVE_PAINT_PROFILE.md
 opacity/颜色与有限状态条件，经现有属性 registry 生成 CPU 样式候选，不生成或解析 CSS。
 这尚未替换默认 Box/XML 路径，也未完成后端效果准入或完整 Tailwind profile。
 
+M2 的首个 CPU 基础切片见 [效果准入 profile](../../flex/docs/EFFECT_ADMISSION_PROFILE.md)：
+`Flex::Render` 分别验证 adapter、设备与产物声明，冻结完整 requirement/manifest，
+再以共享账本原子预留资源额度。D2D pixel effect、GLSL、ESSL、SPIR-V 和 Tango
+原生操作具有不同契约；该切片没有登记生产后端支持，也未创建 native 资源或发布 RenderPlan。
+真实成本、全状态需求提取、原子 UI/几何/计划发布与后端验收仍是 M2/M3 门槛。
+
 | 当前入口/资源 | 目标处理 |
 | --- | --- |
 | `emit_css()`、`UtilityCompileResult.stylesheet`、CSS token cache | 原生 Tailwind 程序和规则缓存 |
