@@ -53,14 +53,40 @@ RUNTIME_FILES = {"CMakeLists.txt", "vcpkg.json", "vcpkg-configuration.json"}
 # CI governance scripts are independently exercised by the unfiltered
 # public-dependency parser job. Source-level changes also require Runtime.
 CI_INFRA_ROOTS = (".github/workflows/", ".github/actions/", ".github/scripts/")
+# Only *unambiguously* non-executable documentation qualifies for the
+# documentation-only gate. A source-owned *.md fixture may drive renderer,
+# parser, GraphLayout or Tango tests; extension alone is NOT admission proof.
 DOC_ROOTS = ("docs/", "documentation/")
-DOC_FILES = {"LICENSE", "LICENSE.txt", "NOTICE", "README", ".editorconfig"}
-DOC_SUFFIXES = (".md", ".rst", ".adoc")
+DOC_FILES = {
+    "LICENSE", "LICENSE.txt", "NOTICE", "README", ".editorconfig",
+    ".github/CI_SCOPE.md", ".github/CCACHE.md",
+}
+DOC_SUFFIXES = (".md", ".rst", ".adoc", ".txt", ".pdf", ".png",
+                ".jpg", ".jpeg", ".webp", ".svg", ".gif")
 
 
 def is_doc(path):
-    return (path.startswith(DOC_ROOTS) or path in DOC_FILES
-            or path.endswith(DOC_SUFFIXES))
+    if (not isinstance(path, str) or not path or path.startswith("/")
+            or "\\" in path or "\x00" in path or ".." in path.split("/")):
+        return False
+    if path in DOC_FILES:
+        return True
+    if path.startswith(DOC_ROOTS):
+        return path.endswith(DOC_SUFFIXES)
+    # Root-level documentation, not *.md inside source/test modules.
+    return "/" not in path and path.endswith((".md", ".rst", ".adoc"))
+
+
+def only_documentation_paths_z(filename):
+    """Check NUL-delimited exact git diff paths, failing closed on ambiguity."""
+    try:
+        value = Path(filename).read_bytes()
+        if not value or not value.endswith(b"\x00"):
+            return False
+        names = [segment.decode("utf-8") for segment in value[:-1].split(b"\x00")]
+    except (OSError, UnicodeDecodeError):
+        return False
+    return bool(names) and all(is_doc(name) for name in names)
 
 
 def known_source(path):
@@ -158,3 +184,9 @@ def pr_changed_paths(get, number, fetch_pages):
                 raise ValueError("missing renamed source path")
             paths.append(previous)
     return paths
+
+if __name__ == "__main__":
+    import sys
+    if len(sys.argv) != 3 or sys.argv[1] != "--doc-only-z":
+        sys.exit(2)
+    sys.exit(0 if only_documentation_paths_z(sys.argv[2]) else 1)

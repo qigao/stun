@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Offline, deterministic tests for trusted module ownership / CI policy."""
 import importlib.util
+import tempfile
 from pathlib import Path
 import unittest
 
@@ -19,6 +20,36 @@ class RequirementTests(unittest.TestCase):
     def test_documentation_only_avoids_native_matrix(self):
         result = matrix("docs/CI_SCOPE.md", "README.md")
         self.assertEqual(result, {policy.PUBLIC: [policy.PARSER]})
+
+    def test_docs_are_explicitly_scoped_not_any_markdown_suffix(self):
+        for path in ("README.md", ".github/CI_SCOPE.md", ".github/CCACHE.md",
+                     "docs/architecture.md", "documentation/guide.pdf"):
+            self.assertTrue(policy.is_doc(path), path)
+        for path in ("shared/markdown/tests/fixtures/table.md",
+                     "flexUI/tests/fixtures/cjk.md",
+                     "charts/mermaid/flowchart/examples/case.md",
+                     "docs/scripts/build.py", "../docs/README.md"):
+            self.assertFalse(policy.is_doc(path), path)
+
+    def test_markdown_source_fixture_requires_native_runtime(self):
+        result = matrix("shared/markdown/tests/fixtures/parser.md")
+        self.assertIn(policy.RUNTIME, result)
+        self.assertIn(".github/workflows/ui-core-c11.yml", result)
+        self.assertIn(".github/workflows/flexui-tango-headless.yml", result)
+
+    def test_doc_only_nul_scope_classifier_is_fail_closed(self):
+        with tempfile.TemporaryDirectory(prefix="stun-doc-scope-") as temp:
+            fixture = Path(temp) / "changed-paths.z"
+            fixture.write_bytes(b".github/CI_SCOPE.md\\x00docs/intro.md\\x00".replace(b"\\x00", b"\x00"))
+            self.assertTrue(policy.only_documentation_paths_z(fixture))
+            for data in (
+                b"", b"README.md", b"docs/guide.md\\x00shared/markdown/tests/fixtures/one.md\\x00".replace(b"\\x00", b"\x00"),
+                b"docs/README.md\\x00docs/tests/run.py\\x00".replace(b"\\x00", b"\x00"),
+                b"docs/README.md\\x00docs/../modules/danger.md\\x00".replace(b"\\x00", b"\x00"),
+            ):
+                fixture.write_bytes(data)
+                self.assertFalse(policy.only_documentation_paths_z(fixture))
+            self.assertFalse(policy.only_documentation_paths_z(Path(temp) / "missing"))
 
     def test_gcanvas_selects_all_real_native_targets(self):
         result = matrix("shared/gcanvas/src/platform/android/egl_host.cpp")

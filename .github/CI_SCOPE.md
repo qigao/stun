@@ -83,7 +83,14 @@ The `golden` job is a conformance check on its own, not a replacement for
 complete released-SDK/FlexUI/Mesa integration on the final exact HEAD.
 
 The `ci-affected.sh` helper accepts a leading `!` to exclude specific
-parser-only paths from the expensive runtime gate. Mixed commits that also
+parser-only paths from the expensive runtime gate. When `ci/full` is set,
+`ci-affected.sh` compares the **entire PR base-to-head diff** using the same
+conservative, path-scoped M1 documentation classifier. If and only if the
+diff is unambiguously documentation-only, it skips unrelated native suites;
+the repository-wide parser contract still executes and remains required.
+For any changed source, missing history, invalid path, or unavailable policy,
+`ci/full` still forces all applicable real native suites (fail open).
+No fixture in a source-owned tree is discarded because of a `.md` suffix. Mixed commits that also
 touch integration files still run the full check; invalid event metadata,
 missing history and missing include patterns fail open. All exclusions are
 ignored when `ci/full` is present.
@@ -191,7 +198,12 @@ Non-documentation changes require real Linux installed-SDK Runtime
 Conformance; affected focused workflows add Windows/macOS C11, GraphLayout,
 GLES/NDK, native Android emulator, TSan, Tango and other exact host gates as
 applicable. Documentation-only changes do not require irrelevant native
-matrices. Missing/renamed workflow evidence, malformed paths, unknown source
+matrices. Documentation classification is **path-scoped**, not extension-only:
+root documentation, the dedicated `docs/` and `documentation/` trees and the
+explicit `.github/CCACHE.md` / `.github/CI_SCOPE.md` policy documents are
+recognized. A `*.md` test fixture inside `shared/markdown/`, `charts/`,
+`flexUI/`, or any other source module still requires actual native acceptance.
+Missing/renamed workflow evidence, malformed paths, unknown source
 roots, empty PR deltas and truncated API pages fail closed rather than
 succeed with a reduced gate.
 

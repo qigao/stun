@@ -41,12 +41,19 @@ else
         emit false "unrelated pull request label"
         exit 0
     fi
-    if jq -e '[.pull_request.labels[]?.name] | index("ci/full") != null' \
+    full_requested=false
+    if [[ "$action" == "labeled" ]] && \
+        [[ "$(jq -r '.label.name // empty' "$GITHUB_EVENT_PATH")" == "ci/full" ]]; then
+        full_requested=true
+    elif jq -e '[.pull_request.labels[]?.name] | index("ci/full") != null' \
         "$GITHUB_EVENT_PATH" >/dev/null 2>&1; then
-        emit true "ci/full label requires exact-HEAD requalification"
-        exit 0
+        full_requested=true
     fi
-
+    if [[ "$full_requested" == true ]]; then
+        before="$(jq -r '.pull_request.base.sha // empty' "$GITHUB_EVENT_PATH")"
+        after="$(jq -r '.pull_request.head.sha // empty' "$GITHUB_EVENT_PATH")"
+        diff_kind="ci/full cumulative pull request"
+    else
     case "$action" in
         synchronize)
             before="$(jq -r '.before // empty' "$GITHUB_EVENT_PATH")"
@@ -67,6 +74,7 @@ else
             exit 0
             ;;
     esac
+    fi
 fi
 sha='^[0-9a-fA-F]{40}$'
 if [[ ! "$before" =~ $sha || ! "$after" =~ $sha ]] || \
@@ -100,6 +108,19 @@ trap 'rm -f "$changed_paths"' EXIT
 # --no-renames includes both sides of moves; -z safely handles unusual names.
 if ! git diff --no-renames --name-only -z "$before" "$after" -- > "$changed_paths"; then
     emit true "could not compare PR heads"
+    exit 0
+fi
+
+
+# ci/full on pure documentation must not schedule unrelated native suites.
+# Fail open on ambiguous/missing policy, changed paths or Python failures.
+if [[ "${full_requested:-false}" == true ]]; then
+    policy_script="$(dirname "${BASH_SOURCE[0]}")/ci_required_matrix.py"
+    if python3 "$policy_script" --doc-only-z "$changed_paths"; then
+        emit false "ci/full cumulative diff is unambiguously documentation-only"
+    else
+        emit true "ci/full source PR requires real exact-HEAD requalification"
+    fi
     exit 0
 fi
 
