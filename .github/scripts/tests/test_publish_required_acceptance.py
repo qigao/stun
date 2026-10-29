@@ -256,6 +256,47 @@ class PublisherTests(unittest.TestCase):
         self.assertEqual(result, [])
         self.assertEqual(published, [])
 
+    def test_ci_full_removed_at_last_pr_read_never_publishes_success(self):
+        # Timing: assessment sees label, actual native jobs complete, but a
+        # concurrent unlabeled event removes ci/full just before publication.
+        counts = [0]
+        responses = good_responses()
+        published = []
+
+        def get(path):
+            if path == "/pulls/5":
+                counts[0] += 1
+                if counts[0] >= 4:
+                    return pr(labels=())
+            return copy.deepcopy(responses[path])
+
+        outcome = publisher.evaluate_event(
+            pr_target(), get, lambda *args: published.append(args), REPO, ROOT
+        )
+        self.assertEqual(counts[0], 4)
+        self.assertEqual(outcome[0][1], "failure")
+        self.assertEqual(len(published), 1)
+        self.assertEqual(published[0][1], "failure")
+        self.assertIn("ci/full label removed", published[0][2])
+
+    def test_final_label_response_malformed_fails_closed(self):
+        responses = good_responses()
+        count = [0]
+        posts = []
+        def get(path):
+            if path == "/pulls/5":
+                count[0] += 1
+                if count[0] == 4:
+                    final = pr()
+                    final["labels"] = None
+                    return final
+            return copy.deepcopy(responses[path])
+        result = publisher.evaluate_event(
+            pr_target(), get, lambda *args: posts.append(args), REPO, ROOT
+        )
+        self.assertEqual(result[0][1], "failure")
+        self.assertEqual(posts[0][1], "failure")
+
     def test_same_sha_second_pr_must_not_bypass_missing_label(self):
         responses = good_responses()
         responses["/pulls?state=open&per_page=100&page=1"].append(pr(number=6))
