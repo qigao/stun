@@ -2,18 +2,18 @@
 """Fail-closed exact-PR-HEAD native CI evidence verifier.
 
 This is a read-only verifier, NOT a branch-protection ruleset or a required
-GitHub check. The caller supplies the module-specific required workflow/job
-matrix; later required-check integration must produce that matrix from the
-reviewed PR source diff, not from an untrusted user-controlled payload.
+GitHub check. By default, the required workflow/job matrix is selected from the reviewed
+PR file delta and TRUSTED default-branch workflow paths. This M1 tool is
+still read-only; publishing a non-skippable required status is separate.
 
-Run: GH_TOKEN=... python3 verify_exact_head_ci.py --repo qigao/stun --pr 123 \
-       --requirements .github/acceptance-requirements.json
+Run: GH_TOKEN=... python3 verify_exact_head_ci.py --repo qigao/stun --pr 123
 """
 import argparse
 import json
 import os
 import re
 import sys
+from pathlib import Path
 from urllib.parse import quote
 from urllib.request import Request, urlopen
 
@@ -105,7 +105,8 @@ def pages(get, path, member, limit=10):
     for page in range(1, limit + 1):
         sep = "&" if "?" in path else "?"
         response = get(f"{path}{sep}per_page=100&page={page}")
-        rows = response.get(member, []) if isinstance(response, dict) else []
+        rows = (response if member is None and isinstance(response, list)
+                else response.get(member, []) if isinstance(response, dict) else [])
         if not isinstance(rows, list):
             raise ValueError("malformed GitHub pagination response")
         values.extend(rows)
@@ -145,7 +146,7 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--repo", required=True)
     parser.add_argument("--pr", type=int, required=True)
-    parser.add_argument("--requirements", required=True)
+    parser.add_argument("--requirements", help="manual reviewed manifest; omit for trusted source-delta policy")
     args = parser.parse_args(argv)
     if not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", args.repo) or args.pr < 1:
         parser.error("invalid repository or PR number")
@@ -153,11 +154,23 @@ def main(argv=None):
     if not token:
         parser.error("GH_TOKEN or GITHUB_TOKEN required for trusted REST evidence")
     try:
-        with open(args.requirements, encoding="utf-8") as handle:
-            requirements = parse_requirements(json.load(handle))
         get = lambda endpoint: github_get(args.repo, endpoint, token)
+        prior = get(f"/pulls/{args.pr}").get("head", {}).get("sha")
+        if args.requirements:
+            # Kept only for explicit manual review, never for the required
+            # status publisher. PR-supplied manifests are not trusted policy.
+            with open(args.requirements, encoding="utf-8") as handle:
+                requirements = parse_requirements(json.load(handle))
+        else:
+            from ci_required_matrix import load_workflow_requirements, pr_changed_paths
+            paths = pr_changed_paths(get, args.pr, pages)
+            requirements = load_workflow_requirements(
+                paths, Path(__file__).resolve().parents[2]
+            )
         snapshot = collect_snapshot(get, args.pr, requirements)
         errors = verify_snapshot(snapshot, requirements)
+        if snapshot.get("head_sha") != prior:
+            errors.append("PR head moved while source-delta policy was selected")
     except (OSError, ValueError, KeyError, TypeError) as exc:
         errors = ["CI evidence collection failed: " + str(exc)]
     if errors:

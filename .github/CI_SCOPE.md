@@ -155,6 +155,32 @@ for the required always-created GitHub status and administrator-enabled
 ruleset. Do not merge based solely on this validator or a green workflow
 summary.
 
+## Trusted source-delta CI requirement matrix (stage M1)
+
+The default-branch `.github/scripts/ci_required_matrix.py` now derives a
+non-empty set of required native jobs from the actual PR changed-file list
+(including both sides of renames) and the **trusted default branch's**
+`pull_request.paths` routing. Exact native job names are pinned in source
+and updated alongside their owning workflows. This module must never be loaded
+from the PR head during a privileged publication workflow.
+
+The unfiltered Public Dependency parser contract is always required.
+Non-documentation changes require real Linux installed-SDK Runtime
+Conformance; affected focused workflows add Windows/macOS C11, GraphLayout,
+GLES/NDK, native Android emulator, TSan, Tango and other exact host gates as
+applicable. Documentation-only changes do not require irrelevant native
+matrices. Missing/renamed workflow evidence, malformed paths, unknown source
+roots, empty PR deltas and truncated API pages fail closed rather than
+succeed with a reduced gate.
+
+`verify_exact_head_ci.py` now uses this trusted policy automatically
+(without `--requirements`); the explicit manifest option remains a manual
+diagnostic mode only. `test_ci_affected.py` executes both validator fixture
+suites in its existing lightweight parser-ownership job. This still is NOT a
+required GitHub commit status: the stable event-driven status publisher and
+administrator-enabled master ruleset remain tracked in
+[Issue #315](https://github.com/qigao/stun/issues/315).
+
 ## Maintenance
 
 - Add new files/paths to both the top-level trigger and
