@@ -7,12 +7,14 @@
 #endif
 #endif
 #include "backends/tui/init.h"
+#include "flex/core/render_value_validation.h"
 #include <salts_unicode.h>
 
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <memory>
+#include <stdexcept>
 #include <string>
 
 namespace flex {
@@ -89,9 +91,25 @@ public:
 
     void reset_clip() override { clip_ = {0.0f, 0.0f, frame_w_, frame_h_}; }
     void set_global_alpha(float alpha) override { alpha_ = alpha; }
-    void set_shadow(const Shadow&) override {}
+    void set_shadow(const Shadow& shadow) override {
+        if (!render_values::valid_shadow(shadow)) {
+            throw std::invalid_argument(
+                "Tango renderer shadow values must be finite with non-negative blur");
+        }
+        if (!shadow.is_none() && shadow.color.a > 0.0f) {
+            throw std::logic_error("Tango renderer does not support shadows");
+        }
+    }
     void clear_shadow() override {}
-    void set_blur(const BlurFilter&) override {}
+    void set_blur(const BlurFilter& blur) override {
+        if (!render_values::valid_blur(blur)) {
+            throw std::invalid_argument(
+                "Tango renderer blur radius must be finite and non-negative");
+        }
+        if (!blur.is_none()) {
+            throw std::logic_error("Tango renderer does not support blur filters");
+        }
+    }
     void clear_blur() override {}
     void fill_path(const std::string&, const Paint&) override {}
     void stroke_path(const std::string&, const Paint&, float) override {}

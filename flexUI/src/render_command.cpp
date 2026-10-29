@@ -38,6 +38,53 @@ bool nearly_equal(float lhs, float rhs) {
   return std::fabs(lhs - rhs) <= 0.001f;
 }
 
+// Call only after validation. Raw append retains payloads for limit/value
+// checks, then follows the same empty-draw rules as the recording helpers.
+// State setters are never skipped: an identity effect can clear prior state.
+bool is_empty_draw(const RenderCommand& command) {
+  return std::visit(
+      Overloaded{
+          [](const FillPathCommand& c) {
+            return c.d.empty() || !is_visible_paint(c.paint);
+          },
+          [](const StrokePathCommand& c) {
+            return c.d.empty() || !is_visible_stroke(c.paint, c.width);
+          },
+          [](const DrawRectCommand& c) {
+            return c.width == 0.0f || c.height == 0.0f ||
+                   (!is_visible_paint(c.fill) &&
+                    !is_visible_stroke(c.stroke, c.stroke_width));
+          },
+          [](const DrawLineCommand& c) {
+            return !is_visible_stroke(c.paint, c.width) ||
+                   (nearly_equal(c.x1, c.x2) && nearly_equal(c.y1, c.y2));
+          },
+          [](const DrawCircleCommand& c) {
+            return c.radius == 0.0f ||
+                   (!is_visible_paint(c.fill) &&
+                    !is_visible_stroke(c.stroke, c.stroke_width));
+          },
+          [](const DrawEllipseCommand& c) {
+            return c.radius_x == 0.0f || c.radius_y == 0.0f ||
+                   (!is_visible_paint(c.fill) &&
+                    !is_visible_stroke(c.stroke, c.stroke_width));
+          },
+          [](const DrawTextCommand& c) {
+            return c.text.empty() || c.size == 0.0f || c.color.a <= 0.0f;
+          },
+          [](const DrawImageCommand& c) {
+            return c.src.empty() || c.width == 0.0f || c.height == 0.0f;
+          },
+          [](const DrawSvgCommand& c) {
+            return c.src.empty() || c.width == 0.0f || c.height == 0.0f;
+          },
+          [](const DrawSvgDataCommand& c) {
+            return c.data.empty() || c.width == 0.0f || c.height == 0.0f;
+          },
+          [](const auto&) { return false; },
+      }, command);
+}
+
 bool transforms_equal(const Transform& lhs, const Transform& rhs) {
   for (int i = 0; i < 9; ++i) {
     if (lhs.data[i] != rhs.data[i]) {
@@ -301,6 +348,8 @@ build_retained_plan(const std::vector<RenderCommand>& commands) {
   RetainedReplayState state;
   for (size_t i = 0; i < commands.size(); ++i) {
     const auto& command = commands[i];
+    // Keep the slot non-cacheable so a prior visible handle is removed.
+    if (is_empty_draw(command)) continue;
     std::visit(
         Overloaded{
             [&](const FillPathCommand& cmd) {
@@ -588,7 +637,14 @@ void RenderCommandList::draw_svg_data(std::string data, float x, float y,
 }
 
 void RenderCommandList::replay(Renderer& renderer) const {
+  replay(renderer, RenderValidationLimits{});
+}
+
+void RenderCommandList::replay(Renderer& renderer,
+                               const RenderValidationLimits& limits) const {
+  require_valid_replay(renderer, RenderValidationScope::Commands, limits);
   for (const auto& command : commands_) {
+    if (is_empty_draw(command)) continue;
     std::visit(
         Overloaded{
             [&](const BeginFrameCommand& cmd) {
@@ -672,10 +728,17 @@ void RenderCommandCache::clear(Renderer& renderer) {
 
 void RenderCommandList::replay_retained(Renderer& renderer,
                                         RenderCommandCache& cache) const {
+  replay_retained(renderer, cache, RenderValidationLimits{});
+}
+
+void RenderCommandList::replay_retained(Renderer& renderer,
+                                        RenderCommandCache& cache,
+                                        const RenderValidationLimits& limits) const {
+  require_valid_replay(renderer, RenderValidationScope::Commands, limits);
   renderer.set_retained_mode(true);
   if (!renderer.supports_retained_mode()) {
     renderer.set_retained_mode(false);
-    replay(renderer);
+    replay(renderer, limits);
     return;
   }
 
@@ -743,7 +806,8 @@ void RenderCommandList::replay_retained(Renderer& renderer,
     flex::PaintHandle anchor = nullptr;
     for (size_t next = index + 1; next < cache.entries_.size(); ++next) {
       const auto& entry = cache.entries_[next];
-      if (entry.retained && entry.handle) {
+      // Non-cacheable candidate slots were already removed in the first pass.
+      if (plan[next].cacheable && entry.retained && entry.handle) {
         anchor = entry.handle;
         break;
       }
@@ -755,6 +819,7 @@ void RenderCommandList::replay_retained(Renderer& renderer,
   for (size_t i = 0; i < commands_.size(); ++i) {
     const auto& command = commands_[i];
     const auto& planned = plan[i];
+    if (is_empty_draw(command)) continue;
 
     std::visit(
         Overloaded{

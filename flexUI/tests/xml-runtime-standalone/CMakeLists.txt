@@ -89,6 +89,32 @@ add_test(NAME test_effect_admission COMMAND test_effect_admission)
 set_tests_properties(test_effect_admission PROPERTIES TIMEOUT 120)
 add_dependencies(stun_xml_runtime_qualification test_effect_admission)
 
+# Exercise the production command replay and preflight code with a recording
+# renderer, then the same command path with the real Tango cell renderer.
+foreach(test IN ITEMS test_render_command test_render_command_tango)
+  add_executable(${test}
+    "${STUN_ROOT}/flexUI/tests/${test}.cpp"
+    "${STUN_ROOT}/flexUI/src/render_command.cpp"
+    "${STUN_ROOT}/flexUI/src/render_command_validation.cpp")
+  target_include_directories(${test} PRIVATE
+    "${STUN_ROOT}/flexUI/include" "${STUN_ROOT}/flex/include")
+  target_compile_features(${test} PRIVATE cxx_std_17)
+  target_link_libraries(${test} PRIVATE Salts::TinyTest)
+  add_test(NAME ${test} COMMAND ${test})
+  set_tests_properties(${test} PROPERTIES TIMEOUT 120)
+  add_dependencies(stun_xml_runtime_qualification ${test})
+endforeach()
+target_link_libraries(test_render_command_tango PRIVATE flex_backend_tui)
+
+# Keep the frame boundary test on the actual RenderManager and Element
+# implementation provided by the already-built production Core target.
+add_executable(test_render_preflight
+  "${STUN_ROOT}/flexUI/tests/test_render_preflight.cpp")
+target_link_libraries(test_render_preflight PRIVATE flexUI Salts::TinyTest)
+add_test(NAME test_render_preflight COMMAND test_render_preflight)
+set_tests_properties(test_render_preflight PROPERTIES TIMEOUT 120)
+add_dependencies(stun_xml_runtime_qualification test_render_preflight)
+
 foreach(test IN ITEMS test_ui_content_models test_ui_xml_admission test_ui_xml
     test_ui_document test_widget_registry test_desktop_application
     test_script_controller test_application_service_requests

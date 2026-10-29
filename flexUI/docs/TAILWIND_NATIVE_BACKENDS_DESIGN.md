@@ -255,6 +255,11 @@ M2 的首个 CPU 基础切片见 [效果准入 profile](../../flex/docs/EFFECT_A
 原生操作具有不同契约；该切片没有登记生产后端支持，也未创建 native 资源或发布 RenderPlan。
 真实成本、全状态需求提取、原子 UI/几何/计划发布与后端验收仍是 M2/M3 门槛。
 
+实际提交边界的后续切片见 [渲染命令提交前检查](RENDER_COMMAND_PREFLIGHT.md)：
+完整帧先检查当前命令快照，再允许清屏或修改 retained cache；Tango 对非空
+blur/可见 shadow 明确拒绝。旧 capability 只用于拒绝已知不支持的操作，
+不会被提升为 shader 验收证据；尚未进入命令列表的样式需求仍须在迁移时提取。
+
 | 当前入口/资源 | 目标处理 |
 | --- | --- |
 | `emit_css()`、`UtilityCompileResult.stylesheet`、CSS token cache | 原生 Tailwind 程序和规则缓存 |

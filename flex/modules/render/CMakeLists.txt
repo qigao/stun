@@ -23,6 +23,7 @@ add_library(
   ${FLEX_ENGINE_INCLUDE_DIR}/flex/render.h
   ${FLEX_ENGINE_INCLUDE_DIR}/flex/render/effect_admission.h
   ${FLEX_ENGINE_INCLUDE_DIR}/flex/core/renderer.h
+  ${FLEX_ENGINE_INCLUDE_DIR}/flex/core/render_value_validation.h
   ${FLEX_ENGINE_INCLUDE_DIR}/flex/bridge/renderer.h)
 target_include_directories(
   flex_render

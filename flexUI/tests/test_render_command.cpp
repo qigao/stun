@@ -5,8 +5,11 @@
 #include <flexUI/renderer.h>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdint>
+#include <initializer_list>
+#include <limits>
 #include <string>
 #include <vector>
 
@@ -84,6 +87,11 @@ struct ImageCall {
 
 class RecordingRenderer final : public flex::Renderer {
 public:
+  RecordingRenderer() {
+    capabilities_.shadow = true;
+    capabilities_.blur = true;
+  }
+
   void begin_frame(float width, float height, float pixel_ratio) override {
     ++begin_frame_calls;
     viewport_ = {0.0f, 0.0f, width, height};
@@ -94,18 +102,26 @@ public:
   }
 
   void end_frame() override { ++end_frame_calls; }
-  void set_retained_mode(bool enabled) override { retained_mode_ = enabled; }
+  void set_retained_mode(bool enabled) override {
+    ++state_mutations;
+    retained_mode_ = enabled;
+  }
   void set_retained_insertion_anchor(flex::PaintHandle before) override {
     insertion_anchors.push_back(before);
   }
 
-  void save() override { stack_.push_back({tx_, ty_}); }
+  void save() override {
+    ++state_mutations;
+    stack_.push_back({tx_, ty_});
+  }
   void restore() override {
+    ++state_mutations;
     tx_ = stack_.back().first;
     ty_ = stack_.back().second;
     stack_.pop_back();
   }
   void reset() override {
+    ++state_mutations;
     tx_ = 0.0f;
     ty_ = 0.0f;
   }
@@ -186,12 +202,14 @@ public:
   }
   flex::Bounds viewport() const override { return viewport_; }
   flex::RendererCapabilities capabilities() const override {
-    flex::RendererCapabilities caps;
+    flex::RendererCapabilities caps = capabilities_;
     caps.retained_mode = retained_capable;
     return caps;
   }
 
-  bool supports_retained_mode() const override { return retained_mode_; }
+  bool supports_retained_mode() const override {
+    return retained_mode_ && retained_capable;
+  }
   void remove_cached(flex::PaintHandle paint) override {
     removed_handles.push_back(paint);
   }
@@ -248,7 +266,23 @@ public:
     updated_transforms.push_back(transform);
   }
 
+  std::size_t mutation_count() const {
+    return state_mutations + static_cast<std::size_t>(
+        begin_frame_calls + clear_calls + end_frame_calls + reset_clip_calls +
+        clear_shadow_calls + clear_blur_calls) +
+        translations.size() + rotations.size() + scales.size() + transforms.size() +
+        alphas.size() + shadows.size() + blurs.size() + clips.size() +
+        fill_paths.size() + stroke_paths.size() + rects.size() + lines.size() +
+        circles.size() + ellipses.size() + texts.size() + images.size() +
+        svgs.size() + svg_data.size() + pushed_handles.size() +
+        removed_handles.size() + updated_handles.size() + insertion_anchors.size();
+  }
+
+  bool retained_enabled() const { return retained_mode_; }
+
+  flex::RendererCapabilities capabilities_{};
   bool retained_capable = false;
+  std::size_t state_mutations = 0;
   int begin_frame_calls = 0;
   int clear_calls = 0;
   int end_frame_calls = 0;
@@ -301,6 +335,126 @@ void require_color(const flex::Color& color, float r, float g, float b,
   check(approx_eq(color.g, g));
   check(approx_eq(color.b, b));
   check(approx_eq(color.a, a));
+}
+
+DrawRectCommand command_test_rect() {
+  return {1.0f, 2.0f, 12.0f, 8.0f, 2.0f,
+          Paint::solid(flex::Color{0.2f, 0.4f, 0.6f, 1.0f}),
+          Paint::solid(flex::Color{0.9f, 0.8f, 0.7f, 1.0f}), 1.0f};
+}
+
+RenderCommandList command_test_late_command(const Renderer& renderer,
+                                          const RenderCommand& command) {
+  RenderCommandList commands(renderer.capabilities());
+  commands.begin_frame({64.0f, 48.0f, 1.0f});
+  commands.clear(flex::Color{0.0f, 0.0f, 0.0f, 1.0f});
+  commands.append(std::vector<RenderCommand>{command_test_rect(), command});
+  commands.end_frame();
+  return commands;
+}
+
+template <typename Command>
+void command_test_nonfinite_members(std::vector<RenderCommand>& commands,
+                                    const Command& value,
+                                    std::initializer_list<float Command::*> members,
+                                    float invalid) {
+  for (const auto member : members) {
+    auto candidate = value;
+    candidate.*member = invalid;
+    commands.emplace_back(std::move(candidate));
+  }
+}
+
+std::vector<RenderCommand> command_test_nonfinite_commands(float invalid) {
+  const auto solid = Paint::solid(flex::Color{0.2f, 0.4f, 0.6f, 1.0f});
+  std::vector<RenderCommand> commands;
+  commands.emplace_back(BeginFrameCommand{{invalid, 48.0f, 1.0f}});
+  commands.emplace_back(BeginFrameCommand{{64.0f, invalid, 1.0f}});
+  commands.emplace_back(BeginFrameCommand{{64.0f, 48.0f, invalid}});
+  for (const auto member : {&flex::Color::r, &flex::Color::g,
+                            &flex::Color::b, &flex::Color::a}) {
+    flex::Color color{0.2f, 0.4f, 0.6f, 1.0f};
+    color.*member = invalid;
+    commands.emplace_back(ClearCommand{color});
+    commands.emplace_back(DrawTextCommand{"text", 1.0f, 2.0f, "font", 12.0f, false, color});
+    auto shadow = flex::Shadow::drop(1.0f, 2.0f, 3.0f, color);
+    commands.emplace_back(SetShadowCommand{shadow});
+  }
+  for (std::size_t index = 0; index != 9; ++index) {
+    flex::Transform transform;
+    transform.data[index] = invalid;
+    commands.emplace_back(SetTransformCommand{transform});
+  }
+  command_test_nonfinite_members(commands, TranslateCommand{1.0f, 2.0f},
+      {&TranslateCommand::x, &TranslateCommand::y}, invalid);
+  command_test_nonfinite_members(commands, RotateCommand{10.0f},
+      {&RotateCommand::degrees}, invalid);
+  command_test_nonfinite_members(commands, ScaleCommand{2.0f, 3.0f},
+      {&ScaleCommand::x, &ScaleCommand::y}, invalid);
+  commands.emplace_back(SetGlobalAlphaCommand{invalid});
+  for (const auto member : {&flex::Shadow::offset_x, &flex::Shadow::offset_y,
+                            &flex::Shadow::blur, &flex::Shadow::spread}) {
+    auto shadow = flex::Shadow::drop(1.0f, 2.0f, 3.0f, flex::Color::Black);
+    shadow.*member = invalid;
+    commands.emplace_back(SetShadowCommand{shadow});
+  }
+  commands.emplace_back(SetBlurCommand{flex::BlurFilter{invalid}});
+  command_test_nonfinite_members(commands, ClipRectCommand{1.0f, 2.0f, 12.0f, 8.0f},
+      {&ClipRectCommand::x, &ClipRectCommand::y, &ClipRectCommand::width,
+       &ClipRectCommand::height}, invalid);
+  command_test_nonfinite_members(commands, StrokePathCommand{"M0 0 L1 1", solid, 1.0f},
+      {&StrokePathCommand::width}, invalid);
+  command_test_nonfinite_members(commands, command_test_rect(),
+      {&DrawRectCommand::x, &DrawRectCommand::y, &DrawRectCommand::width,
+       &DrawRectCommand::height, &DrawRectCommand::radius, &DrawRectCommand::stroke_width},
+      invalid);
+  command_test_nonfinite_members(commands, DrawLineCommand{1.0f, 2.0f, 12.0f, 8.0f, solid, 1.0f},
+      {&DrawLineCommand::x1, &DrawLineCommand::y1, &DrawLineCommand::x2,
+       &DrawLineCommand::y2, &DrawLineCommand::width}, invalid);
+  command_test_nonfinite_members(commands, DrawCircleCommand{1.0f, 2.0f, 3.0f, solid, solid, 1.0f},
+      {&DrawCircleCommand::cx, &DrawCircleCommand::cy, &DrawCircleCommand::radius,
+       &DrawCircleCommand::stroke_width}, invalid);
+  command_test_nonfinite_members(commands, DrawEllipseCommand{1.0f, 2.0f, 3.0f, 4.0f,
+                                                            solid, solid, 1.0f},
+      {&DrawEllipseCommand::cx, &DrawEllipseCommand::cy, &DrawEllipseCommand::radius_x,
+       &DrawEllipseCommand::radius_y, &DrawEllipseCommand::stroke_width}, invalid);
+  command_test_nonfinite_members(commands,
+      DrawTextCommand{"text", 1.0f, 2.0f, "font", 12.0f, false, flex::Color::Black},
+      {&DrawTextCommand::x, &DrawTextCommand::y, &DrawTextCommand::size}, invalid);
+  command_test_nonfinite_members(commands, DrawImageCommand{"image", 1.0f, 2.0f, 12.0f, 8.0f},
+      {&DrawImageCommand::x, &DrawImageCommand::y, &DrawImageCommand::width,
+       &DrawImageCommand::height}, invalid);
+  command_test_nonfinite_members(commands, DrawSvgCommand{"svg", 1.0f, 2.0f, 12.0f, 8.0f},
+      {&DrawSvgCommand::x, &DrawSvgCommand::y, &DrawSvgCommand::width,
+       &DrawSvgCommand::height}, invalid);
+  command_test_nonfinite_members(commands, DrawSvgDataCommand{"<svg/>", 1.0f, 2.0f, 12.0f, 8.0f},
+      {&DrawSvgDataCommand::x, &DrawSvgDataCommand::y, &DrawSvgDataCommand::width,
+       &DrawSvgDataCommand::height}, invalid);
+  return commands;
+}
+
+bool command_test_validation_error(const RenderValidationResult& result,
+                                   RenderValidationError error) {
+  return !result && result.code == error && result.message != nullptr &&
+         result.message[0] != '\0';
+}
+
+std::vector<RenderCommand> command_test_paint_commands(const Paint& paint) {
+  auto fill = command_test_rect();
+  fill.fill = paint;
+  auto stroke = command_test_rect();
+  stroke.stroke = paint;
+  const auto valid = Paint::solid(flex::Color::White);
+  return {
+      FillPathCommand{"M0 0 L4 0 L0 4 Z", paint},
+      StrokePathCommand{"M0 0 L4 0", paint, 1.0f},
+      fill, stroke,
+      DrawLineCommand{1.0f, 2.0f, 12.0f, 8.0f, paint, 1.0f},
+      DrawCircleCommand{1.0f, 2.0f, 3.0f, paint, valid, 1.0f},
+      DrawCircleCommand{1.0f, 2.0f, 3.0f, valid, paint, 1.0f},
+      DrawEllipseCommand{1.0f, 2.0f, 3.0f, 4.0f, paint, valid, 1.0f},
+      DrawEllipseCommand{1.0f, 2.0f, 3.0f, 4.0f, valid, paint, 1.0f},
+  };
 }
 
 } // namespace
@@ -740,5 +894,791 @@ spec("RenderCommandList replays backend-neutral commands") {
     check(std::find(backend.removed_handles.begin(),
                     backend.removed_handles.end(),
                     suffix_handle) == backend.removed_handles.end());
+  }
+}
+
+spec("RenderCommandList validates the actual replay snapshot before renderer mutation") {
+  it("rejects every nonfinite command field even when supplied through raw append") {
+    for (float invalid : {std::numeric_limits<float>::quiet_NaN(),
+                           std::numeric_limits<float>::infinity(),
+                           -std::numeric_limits<float>::infinity()}) {
+      for (const auto& command : command_test_nonfinite_commands(invalid)) {
+        RecordingRenderer backend;
+        Renderer renderer(&backend);
+        const auto commands = command_test_late_command(renderer, command);
+        const auto result = commands.validate_replay(renderer);
+        check(command_test_validation_error(result, RenderValidationError::InvalidValue));
+        check(result.command_index == 3);
+        check_throws_as(commands.replay(renderer), RenderValidationException);
+        check(backend.mutation_count() == 0);
+      }
+    }
+  }
+
+  it("validates active solid paint channels for every paint-bearing command") {
+    for (float invalid : {std::numeric_limits<float>::quiet_NaN(),
+                           std::numeric_limits<float>::infinity()}) {
+      for (const auto member : {&flex::Color::r, &flex::Color::g,
+                                &flex::Color::b, &flex::Color::a}) {
+        auto paint = Paint::solid(flex::Color{0.2f, 0.4f, 0.6f, 1.0f});
+        paint.color.*member = invalid;
+        for (const auto& command : command_test_paint_commands(paint)) {
+          RecordingRenderer backend;
+          Renderer renderer(&backend);
+          const auto commands = command_test_late_command(renderer, command);
+          check(command_test_validation_error(commands.validate_replay(renderer),
+                                              RenderValidationError::InvalidValue));
+          check(backend.mutation_count() == 0);
+        }
+      }
+    }
+  }
+
+  it("rejects unknown paint tags and invalid active gradient values") {
+    std::vector<Paint> invalid_paints;
+    auto unknown = Paint::solid(flex::Color::White);
+    unknown.type = static_cast<Paint::Type>(255);
+    invalid_paints.push_back(unknown);
+    invalid_paints.emplace_back(flex::LinearGradient{});
+    invalid_paints.emplace_back(flex::RadialGradient{});
+    flex::LinearGradient linear;
+    linear.add_stop(-1.0f, flex::Color::Red);
+    linear.add_stop(2.0f, flex::Color::Blue);
+    flex::RadialGradient radial;
+    radial.add_stop(1.0f, flex::Color::Blue);
+    radial.add_stop(0.0f, flex::Color::Red);
+    const auto invalid = std::numeric_limits<float>::quiet_NaN();
+    for (const auto member : {&flex::LinearGradient::x1, &flex::LinearGradient::y1,
+                              &flex::LinearGradient::x2, &flex::LinearGradient::y2}) {
+      auto candidate = linear;
+      candidate.*member = invalid;
+      invalid_paints.emplace_back(candidate);
+    }
+    for (const auto member : {&flex::RadialGradient::cx, &flex::RadialGradient::cy,
+                              &flex::RadialGradient::radius, &flex::RadialGradient::fx,
+                              &flex::RadialGradient::fy}) {
+      auto candidate = radial;
+      candidate.*member = invalid;
+      invalid_paints.emplace_back(candidate);
+    }
+    auto negative = radial;
+    negative.radius = -1.0f;
+    invalid_paints.emplace_back(negative);
+    for (bool use_linear : {false, true}) {
+      auto candidate = use_linear ? Paint(linear) : Paint(radial);
+      auto& stops = use_linear ? candidate.linear.stops : candidate.radial.stops;
+      stops.back().offset = invalid;
+      invalid_paints.push_back(candidate);
+      for (const auto member : {&flex::Color::r, &flex::Color::g,
+                                &flex::Color::b, &flex::Color::a}) {
+        auto color_candidate = use_linear ? Paint(linear) : Paint(radial);
+        auto& color_stops = use_linear ? color_candidate.linear.stops
+                                      : color_candidate.radial.stops;
+        color_stops.back().color.*member = invalid;
+        invalid_paints.push_back(std::move(color_candidate));
+      }
+    }
+    for (const auto& paint : invalid_paints) {
+      RecordingRenderer backend;
+      Renderer renderer(&backend);
+      const auto commands = command_test_late_command(renderer,
+          FillPathCommand{"M0 0 L4 0 L0 4 Z", paint});
+      check(command_test_validation_error(commands.validate_replay(renderer),
+                                          RenderValidationError::InvalidValue));
+      check(backend.mutation_count() == 0);
+    }
+  }
+
+  it("preserves finite color alpha gradient and signed-shadow compatibility") {
+    RecordingRenderer backend;
+    Renderer renderer(&backend);
+    RenderCommandList commands(renderer.capabilities());
+    const flex::Color extended{-1.0f, 2.0f, 3.0f, 2.0f};
+    commands.clear(extended);
+    commands.set_global_alpha(-2.0f);
+    auto shadow = flex::Shadow::drop(-3.0f, -4.0f, 0.0f, extended);
+    shadow.spread = -5.0f;
+    commands.set_shadow(shadow);
+    flex::LinearGradient linear;
+    linear.add_stop(2.0f, extended);
+    linear.add_stop(-1.0f, flex::Color::Blue);
+    commands.fill_path("M0 0 L4 0 L0 4 Z", Paint(linear));
+    flex::RadialGradient radial;
+    radial.radius = 0.0f;
+    radial.add_stop(0.0f, extended);
+    commands.fill_path("M0 0 L4 0 L0 4 Z", Paint(radial));
+    check(static_cast<bool>(commands.validate_replay(renderer)));
+    check(backend.mutation_count() == 0);
+    check_nothrow(commands.replay(renderer));
+    check(backend.fill_paths.size() == 2);
+    check(backend.shadows.size() == 1);
+    check(backend.alphas.size() == 1);
+  }
+
+  it("rejects negative geometry sizes radii stroke widths and blur") {
+    const auto paint = Paint::solid(flex::Color::White);
+    std::vector<RenderCommand> invalid = {
+        BeginFrameCommand{{0.0f, 48.0f, 1.0f}},
+        BeginFrameCommand{{64.0f, -1.0f, 1.0f}},
+        BeginFrameCommand{{64.0f, 48.0f, 0.0f}},
+        ClipRectCommand{0.0f, 0.0f, -1.0f, 8.0f},
+        ClipRectCommand{0.0f, 0.0f, 12.0f, -1.0f},
+        StrokePathCommand{"M0 0 L4 0", paint, -1.0f},
+        DrawLineCommand{0.0f, 0.0f, 4.0f, 4.0f, paint, -1.0f},
+        DrawCircleCommand{0.0f, 0.0f, -1.0f, paint, paint, 1.0f},
+        DrawCircleCommand{0.0f, 0.0f, 4.0f, paint, paint, -1.0f},
+        DrawEllipseCommand{0.0f, 0.0f, -1.0f, 4.0f, paint, paint, 1.0f},
+        DrawEllipseCommand{0.0f, 0.0f, 4.0f, -1.0f, paint, paint, 1.0f},
+        DrawEllipseCommand{0.0f, 0.0f, 4.0f, 4.0f, paint, paint, -1.0f},
+        DrawTextCommand{"text", 0.0f, 0.0f, "font", -1.0f, false, flex::Color::White},
+        DrawImageCommand{"image", 0.0f, 0.0f, -1.0f, 8.0f},
+        DrawImageCommand{"image", 0.0f, 0.0f, 12.0f, -1.0f},
+        DrawSvgCommand{"svg", 0.0f, 0.0f, -1.0f, 8.0f},
+        DrawSvgCommand{"svg", 0.0f, 0.0f, 12.0f, -1.0f},
+        DrawSvgDataCommand{"<svg/>", 0.0f, 0.0f, -1.0f, 8.0f},
+        DrawSvgDataCommand{"<svg/>", 0.0f, 0.0f, 12.0f, -1.0f},
+        SetBlurCommand{flex::BlurFilter{-1.0f}},
+        SetShadowCommand{flex::Shadow::drop(0.0f, 0.0f, -1.0f, flex::Color::Black)},
+    };
+    for (const auto member : {&DrawRectCommand::width, &DrawRectCommand::height,
+                              &DrawRectCommand::radius, &DrawRectCommand::stroke_width}) {
+      auto rect = command_test_rect();
+      rect.*member = -1.0f;
+      invalid.emplace_back(rect);
+    }
+    for (const auto& command : invalid) {
+      RecordingRenderer backend;
+      Renderer renderer(&backend);
+      const auto commands = command_test_late_command(renderer, command);
+      check(command_test_validation_error(commands.validate_replay(renderer),
+                                          RenderValidationError::InvalidValue));
+      check(backend.mutation_count() == 0);
+    }
+  }
+
+  it("requires an exact affine matrix and honors a translation-only backend") {
+    for (std::size_t index : {6u, 7u, 8u}) {
+      RecordingRenderer backend;
+      Renderer renderer(&backend);
+      flex::Transform transform;
+      transform.data[index] = index == 8 ? 0.0f : 0.00001f;
+      const auto commands = command_test_late_command(renderer, SetTransformCommand{transform});
+      check(command_test_validation_error(commands.validate_replay(renderer),
+                                          RenderValidationError::InvalidValue));
+    }
+    RecordingRenderer backend;
+    backend.capabilities_.rotation = false;
+    backend.capabilities_.scaling = false;
+    Renderer renderer(&backend);
+    auto translation = command_test_late_command(renderer,
+        SetTransformCommand{flex::make_translation(3.0f, -2.0f)});
+    check(static_cast<bool>(translation.validate_replay(renderer)));
+    flex::Transform scaled;
+    scaled.data[0] = 2.0f;
+    const auto nontranslation = command_test_late_command(renderer, SetTransformCommand{scaled});
+    check(command_test_validation_error(nontranslation.validate_replay(renderer),
+                                        RenderValidationError::UnsupportedOperation));
+    check(backend.mutation_count() == 0);
+  }
+
+  it("uses current renderer capabilities instead of the recording-time flags") {
+    struct CapabilityCase {
+      bool flex::RendererCapabilities::*member;
+      RenderCommand command;
+    };
+    const auto paint = Paint::solid(flex::Color::White);
+    const std::array<CapabilityCase, 9> cases = {{
+        {&flex::RendererCapabilities::path_drawing, FillPathCommand{"M0 0 L4 0 L0 4 Z", paint}},
+        {&flex::RendererCapabilities::path_drawing, StrokePathCommand{"M0 0 L4 0", paint, 1.0f}},
+        {&flex::RendererCapabilities::raster_images, DrawImageCommand{"image", 0, 0, 12, 8}},
+        {&flex::RendererCapabilities::svg_images, DrawSvgCommand{"svg", 0, 0, 12, 8}},
+        {&flex::RendererCapabilities::svg_images, DrawSvgDataCommand{"<svg/>", 0, 0, 12, 8}},
+        {&flex::RendererCapabilities::rotation, RotateCommand{10.0f}},
+        {&flex::RendererCapabilities::scaling, ScaleCommand{2.0f, 3.0f}},
+        {&flex::RendererCapabilities::shadow,
+         SetShadowCommand{flex::Shadow::drop(1, 2, 3, flex::Color::Black)}},
+        {&flex::RendererCapabilities::blur, SetBlurCommand{flex::BlurFilter{4}}},
+    }};
+    for (const auto& sample : cases) {
+      RecordingRenderer backend;
+      Renderer renderer(&backend);
+      const auto commands = command_test_late_command(renderer, sample.command);
+      check(static_cast<bool>(commands.validate_replay(renderer)));
+      backend.capabilities_.*sample.member = false;
+      const auto result = commands.validate_replay(renderer);
+      check(command_test_validation_error(result, RenderValidationError::UnsupportedOperation));
+      check(result.command_index == 3);
+      check_throws_as(commands.replay(renderer), RenderValidationException);
+      check(backend.mutation_count() == 0);
+      const auto recorded_without_support = command_test_late_command(renderer, sample.command);
+      backend.capabilities_.*sample.member = true;
+      check(static_cast<bool>(recorded_without_support.validate_replay(renderer)));
+    }
+  }
+
+  it("accepts explicit no-effects and empty unsupported operations without promoting capabilities") {
+    RecordingRenderer backend;
+    backend.capabilities_.path_drawing = false;
+    backend.capabilities_.raster_images = false;
+    backend.capabilities_.svg_images = false;
+    backend.capabilities_.rotation = false;
+    backend.capabilities_.scaling = false;
+    backend.capabilities_.shadow = false;
+    backend.capabilities_.blur = false;
+    Renderer renderer(&backend);
+    RenderCommandList commands(renderer.capabilities());
+    auto transparent = flex::Shadow::drop(1, 2, 3, flex::Color::Transparent);
+    const auto paint = Paint::solid(flex::Color::White);
+    commands.append(std::vector<RenderCommand>{
+        RotateCommand{0.0f}, ScaleCommand{1.0f, 1.0f},
+        SetShadowCommand{flex::Shadow{}}, SetShadowCommand{transparent},
+        SetBlurCommand{flex::BlurFilter{0}}, ClearShadowCommand{}, ClearBlurCommand{},
+        FillPathCommand{"", paint}, FillPathCommand{"M0 0 L4 0", Paint::none()},
+        StrokePathCommand{"M0 0 L4 0", paint, 0.0f},
+        DrawImageCommand{"", 0, 0, 12, 8}, DrawImageCommand{"image", 0, 0, 0, 8},
+        DrawSvgCommand{"", 0, 0, 12, 8}, DrawSvgDataCommand{"", 0, 0, 12, 8},
+    });
+    check(static_cast<bool>(commands.validate_replay(renderer)));
+    check(backend.mutation_count() == 0);
+    check(!renderer.capabilities().shadow && !renderer.capabilities().blur);
+  }
+
+  it("reports the first invalid command with a diagnostic that outlives the input") {
+    RecordingRenderer backend;
+    Renderer renderer(&backend);
+    auto commands = command_test_late_command(renderer,
+        SetBlurCommand{flex::BlurFilter{-1.0f}});
+    commands.append(std::vector<RenderCommand>{SetGlobalAlphaCommand{
+        std::numeric_limits<float>::quiet_NaN()}});
+    const auto result = commands.validate_replay(renderer);
+    check(command_test_validation_error(result, RenderValidationError::InvalidValue));
+    check(result.command_index == 3);
+    try {
+      commands.require_valid_replay(renderer);
+      check(false);
+    } catch (const RenderValidationException& error) {
+      check(error.diagnostic().code == result.code);
+      check(error.diagnostic().command_index == result.command_index);
+      check(std::string(error.what()) == result.message);
+    }
+    const std::string message = result.message;
+    commands.reset();
+    check(std::string(result.message) == message);
+    check(backend.mutation_count() == 0);
+  }
+
+  it("rejects a late invalid retained candidate before changing the old cache") {
+    RecordingRenderer backend;
+    backend.retained_capable = true;
+    Renderer renderer(&backend);
+    RenderCommandCache cache;
+    RenderCommandList original(renderer.capabilities());
+    original.begin_frame({64.0f, 48.0f, 1.0f});
+    original.append(std::vector<RenderCommand>{command_test_rect()});
+    original.end_frame();
+    original.replay_retained(renderer, cache);
+    check(!cache.empty());
+    check(backend.pushed_handles.size() == 1);
+    const auto previous_mutations = backend.mutation_count();
+    auto replacement_rect = command_test_rect();
+    replacement_rect.width = 24.0f;
+    RenderCommandList candidate(renderer.capabilities());
+    candidate.begin_frame({64.0f, 48.0f, 1.0f});
+    candidate.append(std::vector<RenderCommand>{replacement_rect,
+        SetBlurCommand{flex::BlurFilter{4.0f}}});
+    candidate.end_frame();
+    backend.capabilities_.blur = false;
+    check_throws_as(candidate.replay_retained(renderer, cache), RenderValidationException);
+    check(backend.mutation_count() == previous_mutations);
+    check(!backend.retained_enabled());
+    check(!cache.empty());
+    check(backend.pushed_handles.size() == 1);
+    check(backend.updated_handles.empty() && backend.removed_handles.empty());
+    check(backend.insertion_anchors.empty());
+    original.replay_retained(renderer, cache);
+    check(backend.pushed_handles.size() == 1);
+    check(backend.removed_handles.empty());
+    cache.clear(renderer);
+    check(cache.empty());
+    check(backend.removed_handles.size() == 1);
+  }
+}
+
+spec("RenderCommandList executes raw no-op draws consistently") {
+  it("skips raw empty invisible and degenerate draws on every replay path") {
+    const auto solid = Paint::solid(flex::Color::White);
+    const auto transparent = Paint::solid(flex::Color::Transparent);
+    const std::vector<RenderCommand> noops = {
+        FillPathCommand{"", solid},
+        FillPathCommand{"M0 0 L4 0 L0 4 Z", Paint::none()},
+        FillPathCommand{"M0 0 L4 0 L0 4 Z", transparent},
+        StrokePathCommand{"", solid, 1},
+        StrokePathCommand{"M0 0 L4 0", Paint::none(), 1},
+        StrokePathCommand{"M0 0 L4 0", transparent, 1},
+        StrokePathCommand{"M0 0 L4 0", solid, 0},
+        DrawRectCommand{0, 0, 0, 8, 0, solid, Paint::none(), 0},
+        DrawRectCommand{0, 0, 12, 0, 0, solid, Paint::none(), 0},
+        DrawRectCommand{0, 0, 12, 8, 0, transparent, Paint::none(), 0},
+        DrawLineCommand{0, 0, 4, 4, solid, 0},
+        DrawLineCommand{0, 0, 4, 4, transparent, 1},
+        DrawLineCommand{1, 2, 1, 2, solid, 1},
+        DrawCircleCommand{0, 0, 0, solid, Paint::none(), 0},
+        DrawCircleCommand{0, 0, 4, transparent, Paint::none(), 0},
+        DrawEllipseCommand{0, 0, 0, 4, solid, Paint::none(), 0},
+        DrawEllipseCommand{0, 0, 4, 0, solid, Paint::none(), 0},
+        DrawEllipseCommand{0, 0, 4, 4, Paint::none(), transparent, 1},
+        DrawTextCommand{"", 0, 0, "font", 12, false, flex::Color::White},
+        DrawTextCommand{"text", 0, 0, "font", 0, false, flex::Color::White},
+        DrawTextCommand{"text", 0, 0, "font", 12, false, flex::Color::Transparent},
+        DrawTextCommand{"text", 0, 0, "font", 12, false, flex::Color{1, 1, 1, -1}},
+        DrawImageCommand{"", 0, 0, 12, 8},
+        DrawImageCommand{"image", 0, 0, 0, 8},
+        DrawImageCommand{"image", 0, 0, 12, 0},
+        DrawSvgCommand{"", 0, 0, 12, 8},
+        DrawSvgCommand{"svg", 0, 0, 0, 8},
+        DrawSvgCommand{"svg", 0, 0, 12, 0},
+        DrawSvgDataCommand{"", 0, 0, 12, 8},
+        DrawSvgDataCommand{"<svg/>", 0, 0, 0, 8},
+        DrawSvgDataCommand{"<svg/>", 0, 0, 12, 0},
+    };
+
+    // Cover direct replay, true retained execution, and retained fallback.
+    // Raw commands remain in the snapshot and count toward all input limits.
+    for (int path = 0; path != 3; ++path) {
+      RecordingRenderer backend;
+      backend.retained_capable = path == 1;
+      backend.capabilities_.path_drawing = false;
+      backend.capabilities_.raster_images = false;
+      backend.capabilities_.svg_images = false;
+      Renderer renderer(&backend);
+      RenderCommandList commands(renderer.capabilities());
+      commands.append(noops);
+      RenderCommandCache cache;
+      check(commands.commands().size() == noops.size());
+      check(static_cast<bool>(commands.validate_replay(renderer)));
+      if (path == 0) commands.replay(renderer);
+      else commands.replay_retained(renderer, cache);
+      check(backend.mutation_count() == (path == 0 ? 0u : 2u));
+      check(backend.pushed_handles.empty());
+      check(backend.removed_handles.empty());
+      check(backend.updated_handles.empty());
+      check(!backend.retained_enabled());
+      cache.clear(renderer);
+      check(backend.removed_handles.empty());
+    }
+  }
+
+  it("still forwards no-effect setters that can clear previous backend state") {
+    for (bool retained : {false, true}) {
+      RecordingRenderer backend;
+      backend.retained_capable = retained;
+      backend.capabilities_.shadow = false;
+      backend.capabilities_.blur = false;
+      Renderer renderer(&backend);
+      RenderCommandList commands(renderer.capabilities());
+      commands.append(std::vector<RenderCommand>{
+          SetShadowCommand{flex::Shadow{}},
+          SetShadowCommand{flex::Shadow::drop(1, 2, 3, flex::Color::Transparent)},
+          SetBlurCommand{flex::BlurFilter{0}},
+      });
+      RenderCommandCache cache;
+      if (retained) commands.replay_retained(renderer, cache);
+      else commands.replay(renderer);
+      check(backend.shadows.size() == 2);
+      check(backend.blurs.size() == 1);
+      check(backend.blurs.front().is_none());
+      check(backend.shadows.front().is_none());
+      check(backend.shadows.back().color.a == 0);
+      check(backend.pushed_handles.empty());
+      cache.clear(renderer);
+    }
+  }
+
+  it("retires a cached draw exactly once when its raw slot becomes a no-op") {
+    struct DrawPair {
+      RenderCommand visible;
+      RenderCommand noop;
+    };
+    const auto solid = Paint::solid(flex::Color::White);
+    const std::array<DrawPair, 5> pairs = {{
+        {command_test_rect(),
+         DrawRectCommand{0, 0, 0, 8, 0, solid, Paint::none(), 0}},
+        {DrawTextCommand{"text", 0, 0, "font", 12, false, flex::Color::White},
+         DrawTextCommand{"text", 0, 0, "font", 0, false, flex::Color::White}},
+        {DrawImageCommand{"image", 0, 0, 12, 8},
+         DrawImageCommand{"", 0, 0, 12, 8}},
+        {DrawSvgCommand{"svg", 0, 0, 12, 8},
+         DrawSvgCommand{"svg", 0, 0, 0, 8}},
+        {DrawSvgDataCommand{"<svg/>", 0, 0, 12, 8},
+         DrawSvgDataCommand{"<svg/>", 0, 0, 12, 0}},
+    }};
+    for (const auto& pair : pairs) {
+      RecordingRenderer backend;
+      backend.retained_capable = true;
+      Renderer renderer(&backend);
+      RenderCommandCache cache;
+      RenderCommandList visible(renderer.capabilities());
+      visible.append(std::vector<RenderCommand>{pair.visible});
+      RenderCommandList noop(renderer.capabilities());
+      noop.append(std::vector<RenderCommand>{pair.noop});
+
+      visible.replay_retained(renderer, cache);
+      check(backend.pushed_handles.size() == 1);
+      check(backend.removed_handles.empty());
+      const auto original_handle = backend.pushed_handles.front();
+      noop.replay_retained(renderer, cache);
+      check(backend.pushed_handles.size() == 1);
+      check(backend.removed_handles.size() == 1);
+      check(backend.removed_handles.front() == original_handle);
+      noop.replay_retained(renderer, cache);
+      check(backend.pushed_handles.size() == 1);
+      check(backend.removed_handles.size() == 1);
+      check(backend.updated_handles.empty());
+
+      visible.replay_retained(renderer, cache);
+      check(backend.pushed_handles.size() == 2);
+      check(backend.removed_handles.size() == 1);
+      check(backend.pushed_handles.back() != original_handle);
+      cache.clear(renderer);
+      check(backend.removed_handles.size() == 2);
+      check(backend.removed_handles.back() == backend.pushed_handles.back());
+      check(cache.empty());
+    }
+  }
+
+  it("never anchors a retained rebuild to a later slot that became a no-op") {
+    for (bool keep_suffix : {false, true}) {
+      RecordingRenderer backend;
+      backend.retained_capable = true;
+      Renderer renderer(&backend);
+      RenderCommandCache cache;
+      auto first_rect = command_test_rect();
+      auto second_rect = command_test_rect();
+      second_rect.x = 20;
+      auto suffix_rect = command_test_rect();
+      suffix_rect.x = 40;
+      RenderCommandList original(renderer.capabilities());
+      original.append(std::vector<RenderCommand>{first_rect, second_rect});
+      if (keep_suffix) original.append(std::vector<RenderCommand>{suffix_rect});
+      original.replay_retained(renderer, cache);
+      const std::size_t original_count = keep_suffix ? 3 : 2;
+      check(backend.pushed_handles.size() == original_count);
+      if (backend.pushed_handles.size() != original_count) continue;
+      const auto first_handle = backend.pushed_handles[0];
+      const auto removed_later_handle = backend.pushed_handles[1];
+      const auto live_suffix_handle = keep_suffix ? backend.pushed_handles[2] : nullptr;
+
+      first_rect.width += 2;
+      second_rect.width = 0;
+      RenderCommandList replacement(renderer.capabilities());
+      replacement.append(std::vector<RenderCommand>{first_rect, second_rect});
+      if (keep_suffix) replacement.append(std::vector<RenderCommand>{suffix_rect});
+      replacement.replay_retained(renderer, cache);
+      check(backend.removed_handles.size() == 2);
+      check(std::count(backend.removed_handles.begin(), backend.removed_handles.end(),
+                       first_handle) == 1);
+      check(std::count(backend.removed_handles.begin(), backend.removed_handles.end(),
+                       removed_later_handle) == 1);
+      check(backend.pushed_handles.size() == original_count + 1);
+      check(backend.updated_handles.empty());
+      check(backend.insertion_anchors.size() == 1);
+      if (!backend.insertion_anchors.empty()) {
+        check(backend.insertion_anchors.front() == live_suffix_handle);
+        check(backend.insertion_anchors.front() != removed_later_handle);
+      }
+      if (keep_suffix) {
+        check(std::find(backend.removed_handles.begin(), backend.removed_handles.end(),
+                        live_suffix_handle) == backend.removed_handles.end());
+      }
+
+      replacement.replay_retained(renderer, cache);
+      check(backend.removed_handles.size() == 2);
+      check(backend.pushed_handles.size() == original_count + 1);
+      check(backend.insertion_anchors.size() == 1);
+      cache.clear(renderer);
+      check(backend.removed_handles.size() == original_count + 1);
+      check(std::count(backend.removed_handles.begin(), backend.removed_handles.end(),
+                       removed_later_handle) == 1);
+      check(cache.empty());
+    }
+  }
+
+  it("validates invalid fields of raw no-op candidates before any dispatch") {
+    const float invalid = std::numeric_limits<float>::quiet_NaN();
+    const auto solid = Paint::solid(flex::Color::White);
+    auto unknown = Paint::none();
+    unknown.type = static_cast<Paint::Type>(255);
+    const std::vector<RenderCommand> candidates = {
+        FillPathCommand{"", unknown},
+        StrokePathCommand{"", solid, -1},
+        DrawRectCommand{0, 0, 0, 8, invalid, solid, Paint::none(), 0},
+        DrawLineCommand{0, 0, invalid, 0, solid, 0},
+        DrawCircleCommand{invalid, 0, 0, solid, Paint::none(), 0},
+        DrawEllipseCommand{0, 0, 0, -1, solid, Paint::none(), 0},
+        DrawTextCommand{"", invalid, 0, "font", 12, false, flex::Color::White},
+        DrawTextCommand{"text", 0, 0, "font", 0, false,
+                        flex::Color{invalid, 1, 1, 1}},
+        DrawTextCommand{"text", 0, 0, "font", -1, false, flex::Color::Transparent},
+        DrawImageCommand{"", invalid, 0, 12, 8},
+        DrawImageCommand{"image", 0, 0, 0, -1},
+        DrawSvgCommand{"", 0, invalid, 12, 8},
+        DrawSvgCommand{"svg", 0, 0, 0, invalid},
+        DrawSvgDataCommand{"", 0, 0, -1, 8},
+        DrawSvgDataCommand{"<svg/>", 0, 0, invalid, 0},
+    };
+    for (const auto& command : candidates) {
+      RecordingRenderer backend;
+      backend.retained_capable = true;
+      Renderer renderer(&backend);
+      const auto commands = command_test_late_command(renderer, command);
+      const auto result = commands.validate_replay(renderer);
+      check(command_test_validation_error(result, RenderValidationError::InvalidValue));
+      check(result.command_index == 3);
+      check_throws_as(commands.replay(renderer), RenderValidationException);
+      check(backend.mutation_count() == 0);
+      RenderCommandCache cache;
+      check_throws_as(commands.replay_retained(renderer, cache), RenderValidationException);
+      check(backend.mutation_count() == 0);
+      check(cache.empty());
+    }
+  }
+
+  it("charges string and payload limits before skipping raw no-op candidates") {
+    const std::string payload = "12345678";
+    const std::vector<RenderCommand> candidates = {
+        FillPathCommand{payload, Paint::none()},
+        StrokePathCommand{payload, Paint::solid(flex::Color::White), 0},
+        DrawTextCommand{payload, 0, 0, "", 0, false, flex::Color::White},
+        DrawTextCommand{"", 0, 0, payload, 12, false, flex::Color::White},
+        DrawTextCommand{payload, 0, 0, "", 12, false, flex::Color::Transparent},
+        DrawImageCommand{payload, 0, 0, 0, 8},
+        DrawSvgCommand{payload, 0, 0, 12, 0},
+        DrawSvgDataCommand{payload, 0, 0, 0, 8},
+    };
+    for (const auto& command : candidates) {
+      for (const auto field : {&RenderValidationLimits::max_string_bytes,
+                               &RenderValidationLimits::max_payload_bytes}) {
+        RecordingRenderer backend;
+        backend.retained_capable = true;
+        Renderer renderer(&backend);
+        const auto commands = command_test_late_command(renderer, command);
+        RenderValidationLimits limits;
+        limits.*field = payload.size();
+        check(static_cast<bool>(commands.validate_replay(
+            renderer, RenderValidationScope::Commands, limits)));
+        --(limits.*field);
+        const auto result = commands.validate_replay(
+            renderer, RenderValidationScope::Commands, limits);
+        check(command_test_validation_error(result, RenderValidationError::ResourceLimit));
+        check(result.command_index == 3);
+        check_throws_as(commands.replay(renderer, limits), RenderValidationException);
+        check(backend.mutation_count() == 0);
+        RenderCommandCache cache;
+        check_throws_as(commands.replay_retained(renderer, cache, limits),
+                        RenderValidationException);
+        check(backend.mutation_count() == 0);
+        check(cache.empty());
+      }
+    }
+  }
+}
+
+spec("RenderCommandList bounds raw work and distinguishes fragments from complete frames") {
+  it("rejects every zero limit before replaying otherwise valid commands") {
+    const std::array<std::size_t RenderValidationLimits::*, 5> fields = {
+        &RenderValidationLimits::max_commands,
+        &RenderValidationLimits::max_payload_bytes,
+        &RenderValidationLimits::max_string_bytes,
+        &RenderValidationLimits::max_gradient_stops,
+        &RenderValidationLimits::max_state_depth,
+    };
+    for (const auto field : fields) {
+      RecordingRenderer backend;
+      Renderer renderer(&backend);
+      RenderCommandList commands(renderer.capabilities());
+      commands.append(std::vector<RenderCommand>{command_test_rect()});
+      RenderValidationLimits limits;
+      limits.*field = 0;
+      check(command_test_validation_error(
+          commands.validate_replay(renderer, RenderValidationScope::Commands, limits),
+          RenderValidationError::InvalidLimits));
+      check_throws_as(commands.replay(renderer, limits), RenderValidationException);
+      check(backend.mutation_count() == 0);
+    }
+  }
+
+  it("counts all raw commands including empty draws and duplicate commands") {
+    RecordingRenderer backend;
+    Renderer renderer(&backend);
+    RenderCommandList commands(renderer.capabilities());
+    commands.append(std::vector<RenderCommand>{DrawTextCommand{}, DrawTextCommand{}});
+    RenderValidationLimits limits;
+    limits.max_commands = 2;
+    check(static_cast<bool>(commands.validate_replay(
+        renderer, RenderValidationScope::Commands, limits)));
+    limits.max_commands = 1;
+    check(command_test_validation_error(
+        commands.validate_replay(renderer, RenderValidationScope::Commands, limits),
+        RenderValidationError::ResourceLimit));
+    RenderCommandCache cache;
+    backend.retained_capable = true;
+    check_throws_as(commands.replay_retained(renderer, cache, limits),
+                    RenderValidationException);
+    check(backend.mutation_count() == 0);
+    check(cache.empty());
+  }
+
+  it("bounds each text path image and SVG payload at its original byte length") {
+    constexpr std::size_t limit = 8;
+    const auto make_string_commands = [](std::size_t count) {
+      const std::string text(count, 'x');
+      const auto paint = Paint::solid(flex::Color::White);
+      return std::vector<RenderCommand>{
+          FillPathCommand{text, paint}, StrokePathCommand{text, paint, 1.0f},
+          DrawTextCommand{text, 0, 0, "font", 12, false, flex::Color::White},
+          DrawTextCommand{"text", 0, 0, text, 12, false, flex::Color::White},
+          DrawImageCommand{text, 0, 0, 12, 8}, DrawSvgCommand{text, 0, 0, 12, 8},
+          DrawSvgDataCommand{text, 0, 0, 12, 8},
+      };
+    };
+    for (std::size_t count : {limit, limit + 1}) {
+      for (const auto& command : make_string_commands(count)) {
+        RecordingRenderer backend;
+        Renderer renderer(&backend);
+        RenderCommandList commands(renderer.capabilities());
+        commands.append(std::vector<RenderCommand>{command});
+        RenderValidationLimits limits;
+        limits.max_string_bytes = limit;
+        const auto result = commands.validate_replay(
+            renderer, RenderValidationScope::Commands, limits);
+        if (count == limit) check(static_cast<bool>(result));
+        else check(command_test_validation_error(result, RenderValidationError::ResourceLimit));
+        check(backend.mutation_count() == 0);
+      }
+    }
+  }
+
+  it("accounts exact aggregate string bytes without deduplicating identical payloads") {
+    RecordingRenderer backend;
+    Renderer renderer(&backend);
+    RenderCommandList commands(renderer.capabilities());
+    const DrawTextCommand text{"text", 0, 0, "font", 12, false, flex::Color::White};
+    commands.append(std::vector<RenderCommand>{text, text});
+    RenderValidationLimits limits;
+    limits.max_payload_bytes = 16; // Two four-byte texts plus two four-byte font names.
+    check(static_cast<bool>(commands.validate_replay(
+        renderer, RenderValidationScope::Commands, limits)));
+    limits.max_payload_bytes = 15;
+    check(command_test_validation_error(
+        commands.validate_replay(renderer, RenderValidationScope::Commands, limits),
+        RenderValidationError::ResourceLimit));
+    check_throws_as(commands.replay(renderer, limits), RenderValidationException);
+    check(backend.mutation_count() == 0);
+  }
+
+  it("bounds inactive gradient storage while inspecting only the active paint values") {
+    RecordingRenderer backend;
+    Renderer renderer(&backend);
+    auto paint = Paint::solid(flex::Color::White);
+    paint.linear.stops.resize(2);
+    paint.radial.stops.resize(3);
+    paint.linear.x1 = std::numeric_limits<float>::quiet_NaN();
+    paint.radial.stops.front().color.a = std::numeric_limits<float>::infinity();
+    RenderCommandList commands(renderer.capabilities());
+    commands.append(std::vector<RenderCommand>{FillPathCommand{"p", paint}});
+    RenderValidationLimits limits;
+    limits.max_gradient_stops = 3;
+    limits.max_payload_bytes = 1 + 5 * sizeof(flex::ColorStop);
+    check(static_cast<bool>(commands.validate_replay(
+        renderer, RenderValidationScope::Commands, limits)));
+    --limits.max_payload_bytes;
+    check(command_test_validation_error(
+        commands.validate_replay(renderer, RenderValidationScope::Commands, limits),
+        RenderValidationError::ResourceLimit));
+    ++limits.max_payload_bytes;
+    limits.max_gradient_stops = 2;
+    check(command_test_validation_error(
+        commands.validate_replay(renderer, RenderValidationScope::Commands, limits),
+        RenderValidationError::ResourceLimit));
+    check(backend.mutation_count() == 0);
+  }
+
+  it("preserves inherited frame and stack fragments but checks a complete frame sequence") {
+    RecordingRenderer backend;
+    Renderer renderer(&backend);
+    const RenderCommand begin = BeginFrameCommand{{64.0f, 48.0f, 1.0f}};
+    const RenderCommand end = EndFrameCommand{};
+    const RenderCommand save = SaveCommand{};
+    const RenderCommand restore = RestoreCommand{};
+    const std::vector<std::vector<RenderCommand>> fragments = {
+        {}, {end}, {restore}, {save}, {command_test_rect()},
+    };
+    for (const auto& fragment : fragments) {
+      RenderCommandList commands(renderer.capabilities());
+      commands.append(fragment);
+      check(static_cast<bool>(commands.validate_replay(renderer)));
+      check(command_test_validation_error(
+          commands.validate_replay(renderer, RenderValidationScope::CompleteFrame),
+          RenderValidationError::InvalidSequence));
+    }
+    RenderCommandList complete(renderer.capabilities());
+    complete.append(std::vector<RenderCommand>{begin, save, command_test_rect(), restore, end});
+    check(static_cast<bool>(complete.validate_replay(renderer, RenderValidationScope::CompleteFrame)));
+    const std::vector<std::vector<RenderCommand>> malformed = {
+        {begin}, {begin, end, end}, {begin, begin, end},
+        {begin, end, command_test_rect()}, {command_test_rect(), begin, end},
+        {begin, restore, end}, {begin, save, end}, {begin, end, begin, end},
+    };
+    for (const auto& sequence : malformed) {
+      RenderCommandList commands(renderer.capabilities());
+      commands.append(sequence);
+      check(command_test_validation_error(
+          commands.validate_replay(renderer, RenderValidationScope::CompleteFrame),
+          RenderValidationError::InvalidSequence));
+    }
+    check(backend.mutation_count() == 0);
+  }
+
+  it("bounds the local save peak without assuming an inherited fragment stack") {
+    RecordingRenderer backend;
+    Renderer renderer(&backend);
+    RenderCommandList commands(renderer.capabilities());
+    commands.append(std::vector<RenderCommand>{RestoreCommand{}, SaveCommand{}, SaveCommand{},
+                                              RestoreCommand{}, RestoreCommand{}});
+    RenderValidationLimits limits;
+    limits.max_state_depth = 2;
+    check(static_cast<bool>(commands.validate_replay(
+        renderer, RenderValidationScope::Commands, limits)));
+    limits.max_state_depth = 1;
+    const auto result = commands.validate_replay(renderer, RenderValidationScope::Commands, limits);
+    check(command_test_validation_error(result, RenderValidationError::ResourceLimit));
+    check(result.command_index == 2);
+    check(backend.mutation_count() == 0);
+  }
+
+  it("rejects overflowing direct geometry bounds even when every input is finite") {
+    const float huge = (std::numeric_limits<float>::max)();
+    const auto paint = Paint::solid(flex::Color::White);
+    auto rect = command_test_rect();
+    rect.x = huge;
+    rect.width = huge;
+    const std::vector<RenderCommand> invalid = {
+        rect, ClipRectCommand{0, huge, 12, huge},
+        DrawCircleCommand{huge, 0, huge, paint, Paint::none(), 0},
+        DrawCircleCommand{-huge, 0, huge, paint, Paint::none(), 0},
+        DrawEllipseCommand{0, huge, 4, huge, paint, Paint::none(), 0},
+        DrawImageCommand{"image", huge, 0, huge, 8},
+        DrawSvgCommand{"svg", huge, 0, huge, 8},
+        DrawSvgDataCommand{"<svg/>", huge, 0, huge, 8},
+    };
+    for (const auto& command : invalid) {
+      RecordingRenderer backend;
+      Renderer renderer(&backend);
+      const auto commands = command_test_late_command(renderer, command);
+      check(command_test_validation_error(commands.validate_replay(renderer),
+                                          RenderValidationError::InvalidValue));
+      check_throws_as(commands.replay(renderer), RenderValidationException);
+      check(backend.mutation_count() == 0);
+    }
   }
 }

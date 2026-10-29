@@ -1,5 +1,6 @@
 #include "backends/d2d/init.h"
 #include "flex/bridge/renderer.h"
+#include "flex/core/render_value_validation.h"
 
 #include <gcanvas/svg.hpp>
 
@@ -616,11 +617,7 @@ class D2DRenderer final : public Renderer {
   }
 
   void set_shadow(const Shadow& shadow) override {
-    if (!std::isfinite(shadow.offset_x) || !std::isfinite(shadow.offset_y) ||
-        !std::isfinite(shadow.blur) || !std::isfinite(shadow.spread) ||
-        !std::isfinite(shadow.color.r) || !std::isfinite(shadow.color.g) ||
-        !std::isfinite(shadow.color.b) || !std::isfinite(shadow.color.a) ||
-        shadow.blur < 0.0f) {
+    if (!render_values::valid_shadow(shadow)) {
       throw std::invalid_argument(
           "Direct2D renderer shadow values must be finite with non-negative blur");
     }
@@ -630,7 +627,7 @@ class D2DRenderer final : public Renderer {
   }
   void clear_shadow() override {}
   void set_blur(const BlurFilter& blur) override {
-    if (!std::isfinite(blur.radius) || blur.radius < 0.0f) {
+    if (!render_values::valid_blur(blur)) {
       throw std::invalid_argument(
           "Direct2D renderer blur radius must be finite and non-negative");
     }
