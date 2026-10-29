@@ -72,6 +72,12 @@ public:
     const NativeEffectResourceIdentity* identity() const noexcept {
         return resources_ ? &resources_->identity() : nullptr;
     }
+    // C++ backend-only borrowed native bundle. Lifetime is bounded by this
+    // PreparedNativeEffect; backend consumers must enforce their owner thread
+    // and must not retain the handle beyond synchronous completion.
+    const NativeEffectResources* native_resources() const noexcept {
+        return resources_.get();
+    }
     const ResourceScope& scope() const noexcept { return reservation_.scope(); }
     void reset() noexcept;
 
