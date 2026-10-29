@@ -1,4 +1,7 @@
-add_library(flex_backend_tui STATIC renderer.cpp)
+add_library(flex_backend_tui STATIC
+  renderer.cpp
+  effect_owner.cpp
+  include/backends/tui/effect_owner.h)
 
 target_link_libraries(flex_backend_tui PUBLIC flex_render tango)
 target_include_directories(

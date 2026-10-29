@@ -2,6 +2,7 @@
 #undef group
 
 #include <backends/tui/init.h>
+#include <backends/tui/effect_owner.h>
 #include <flexUI/render_command.h>
 #include <flexUI/renderer.h>
 
@@ -9,6 +10,8 @@
 #include <limits>
 #include <memory>
 #include <stdexcept>
+#include <thread>
+#include <utility>
 #include <vector>
 
 namespace {
@@ -237,5 +240,190 @@ spec("Render command rejection preserves real Tango cells") {
     check(tango_test_matches(buffer.get(), snapshot));
     flexUI::Renderer renderer(backend.get());
     tango_test_recovery(renderer, buffer.get());
+  }
+}
+
+
+namespace {
+namespace fx = flex::effects;
+using flex::tui_backend::TangoCellClearOwner;
+using flex::tui_backend::TangoCellClearResources;
+
+fx::ResourceScope real_tango_scope(std::uint64_t generation = 3) {
+  return {101, 202, generation};
+}
+fx::EffectValidationResult real_tango_validate(
+    TangoCellClearOwner& owner, std::uint32_t columns = 12,
+    std::uint32_t rows = 4) {
+  auto desc = owner.describe_clear(columns, rows);
+  return fx::validate_effect_contract(
+      desc.requirement, desc.manifest, owner.capabilities());
+}
+fx::ResourceBudgetLimits real_tango_limits(
+    const fx::ValidatedEffectContract& checked, std::uint64_t n = 1) {
+  const auto c = checked.cost();
+  return {{c.bytes*n, c.pixels*n, c.cells*n, c.allocations*n}, 4};
+}
+const TangoCellClearResources* real_tango_resource(
+    const fx::NativeEffectPreparationResult& result) {
+  return dynamic_cast<const TangoCellClearResources*>(
+      result.prepared.native_resources());
+}
+} // namespace
+
+spec("Real Tango native cell-buffer resource owner") {
+  it("admissibly allocates real Tango storage and executes synchronous Flex replay") {
+    TangoCellClearOwner owner(real_tango_scope(), 16, 8);
+    const auto caps = owner.capabilities();
+    check(caps.backend.api == fx::BackendApi::Tango);
+    check(caps.effects.size() == 1);
+    check(caps.device.stages.size() == 1);
+    check(caps.device.stages.front().kind == fx::ArtifactKind::NativeBuiltin);
+    check(caps.installed.size() == 1);
+    check(caps.installed.front().observed_byte_count == 0);
+    auto checked = real_tango_validate(owner);
+    check(bool(checked));
+    if (!checked) return;
+    check(checked.contract->cost().cells == 48);
+    check(checked.contract->cost().pixels == 0);
+    check(checked.contract->cost().allocations == 2);
+    check(checked.contract->cost().bytes ==
+          sizeof(tui_buffer_t) + 48*sizeof(tui_cell_t));
+    fx::SharedResourceBudget ledger(caps.scope, real_tango_limits(*checked.contract));
+    auto prepared = fx::prepare_native_effect(checked.contract, ledger, owner);
+    check(bool(prepared));
+    if (!prepared) return;
+    check(ledger.snapshot().reservations == 1);
+    const auto* real = real_tango_resource(prepared);
+    check(real != nullptr);
+    if (!real) return;
+    auto* cells = real->buffer_on_owner();
+    check(cells != nullptr);
+    if (!cells) return;
+    check(cells->width == 12 && cells->height == 4 && cells->capacity == 48);
+    const tui_cell_t blank = TUI_CELL_DEFAULT;
+    for (int y=0; y<cells->height; ++y)
+      for (int x=0; x<cells->width; ++x)
+        check(tui_cell_eq(tui_buffer_at_const(cells,x,y), &blank));
+    auto renderer_backend = flex::tui_backend::create_buffer_renderer(cells);
+    check(renderer_backend != nullptr);
+    if (renderer_backend) {
+      flexUI::Renderer renderer(renderer_backend.get());
+      tango_test_recovery(renderer, cells);
+      renderer_backend.reset();  // End all borrows before native retirement.
+    }
+    prepared.prepared.reset();
+    check(ledger.snapshot().reservations == 0);
+    check(ledger.snapshot().reserved.bytes == 0);
+  }
+
+  it("rejects a second candidate before touching the current cell buffer") {
+    TangoCellClearOwner owner(real_tango_scope(), 16, 8);
+    auto checked = real_tango_validate(owner);
+    check(bool(checked));
+    if (!checked) return;
+    fx::SharedResourceBudget ledger(owner.capabilities().scope,
+                                    real_tango_limits(*checked.contract));
+    auto first = fx::prepare_native_effect(checked.contract, ledger, owner);
+    check(bool(first));
+    if (!first) return;
+    auto* cells = real_tango_resource(first)->buffer_on_owner();
+    tui_buffer_set_char(cells, 0, 0, 'R');
+    auto second = fx::prepare_native_effect(checked.contract, ledger, owner);
+    check(!second);
+    check(second.diagnostic.code == fx::EffectError::BudgetExceeded);
+    check(tui_buffer_at_const(cells,0,0)->ch == 'R');
+    check(ledger.snapshot().reservations == 1);
+    first.prepared.reset();
+    check(ledger.snapshot().reservations == 0);
+  }
+
+  it("rejects GPU artifacts, excess cells and wrong-owner-thread preparation") {
+    TangoCellClearOwner owner(real_tango_scope(), 16, 8);
+    check_throws_as(owner.describe_clear(0,4), std::invalid_argument);
+    check_throws_as(owner.describe_clear(17,4), std::invalid_argument);
+    check_throws_as(owner.describe_clear(1,9), std::invalid_argument);
+    check_throws_as(TangoCellClearOwner(real_tango_scope(),1024,1024),
+                    std::invalid_argument);
+    auto forged = owner.describe_clear(12,4);
+    forged.manifest.artifacts.front().kind = fx::ArtifactKind::SpirV;
+    forged.manifest.artifacts.front().stage = fx::ShaderStage::Compute;
+    const auto unsupported = fx::validate_effect_contract(
+        forged.requirement, forged.manifest, owner.capabilities());
+    check(!unsupported);
+    check(unsupported.diagnostic.code == fx::EffectError::UnsupportedStage);
+
+    auto checked = real_tango_validate(owner);
+    check(bool(checked));
+    if (!checked) return;
+    fx::SharedResourceBudget ledger(owner.capabilities().scope,
+                                    real_tango_limits(*checked.contract));
+    fx::NativeEffectPreparationResult attempted;
+    std::thread foreign([&] {
+      attempted = fx::prepare_native_effect(checked.contract, ledger, owner);
+    });
+    foreign.join();
+    check(!attempted);
+    check(attempted.diagnostic.code == fx::EffectError::WrongOwnerThread);
+    check(ledger.snapshot().reservations == 0);
+  }
+
+  it("preserves lost-generation cells and reservations until explicit retirement") {
+    TangoCellClearOwner old_owner(real_tango_scope(3), 16, 8);
+    auto old_checked = real_tango_validate(old_owner);
+    check(bool(old_checked));
+    if (!old_checked) return;
+    fx::SharedResourceBudget old_budget(old_owner.capabilities().scope,
+                                        real_tango_limits(*old_checked.contract));
+    auto old = fx::prepare_native_effect(old_checked.contract, old_budget, old_owner);
+    check(bool(old));
+    if (!old) return;
+    auto* old_cells = real_tango_resource(old)->buffer_on_owner();
+    tui_buffer_set_char(old_cells, 0, 0, 'O');
+    old_owner.mark_device_lost(old_budget);
+    check(old_budget.snapshot().status == fx::DeviceStatus::Lost);
+    check(old_budget.snapshot().reservations == 1);
+    check(tui_buffer_at_const(old_cells,0,0)->ch == 'O');
+    auto blocked = fx::prepare_native_effect(old_checked.contract, old_budget, old_owner);
+    check(!blocked);
+    check(blocked.diagnostic.code == fx::EffectError::DeviceLost);
+
+    TangoCellClearOwner recovered(real_tango_scope(4), 16, 8);
+    auto new_checked = real_tango_validate(recovered);
+    check(bool(new_checked));
+    if (!new_checked) return;
+    fx::SharedResourceBudget new_budget(recovered.capabilities().scope,
+                                        real_tango_limits(*new_checked.contract));
+    auto candidate = fx::prepare_native_effect(new_checked.contract, new_budget, recovered);
+    check(bool(candidate));
+    check(old_budget.snapshot().reservations == 1);
+    check(new_budget.snapshot().reservations == 1);
+    candidate.prepared.reset();
+    old.prepared.reset();
+    check(new_budget.snapshot().reservations == 0);
+    check(old_budget.snapshot().reservations == 0);
+  }
+
+  it("keeps the actual Tango buffer alive after its temporary resource factory dies") {
+    fx::NativeEffectPreparationResult result;
+    fx::SharedResourceBudget ledger(real_tango_scope(),
+                                     {{1000000,0,1000,10},4});
+    {
+      TangoCellClearOwner owner(real_tango_scope(), 16, 8);
+      auto checked = real_tango_validate(owner);
+      check(bool(checked));
+      if (!checked) return;
+      result = fx::prepare_native_effect(checked.contract, ledger, owner);
+    }
+    check(bool(result));
+    if (!result) return;
+    auto* buffer = real_tango_resource(result)->buffer_on_owner();
+    check(buffer != nullptr);
+    if (buffer) {
+      tui_buffer_set_char(buffer,0,0,'L');
+      check(tui_buffer_at_const(buffer,0,0)->ch == 'L');
+    }
+    result.prepared.reset();
+    check(ledger.snapshot().reservations == 0);
   }
 }

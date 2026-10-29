@@ -294,6 +294,59 @@ artifacts cannot qualify real shader compilation, GPU execution, or PTY UI.
 This bridge does not publish Style/Layout/hit geometry and has no CSS
 input or fallback.
 
+## First production native buffer owner: Tango TerminalCell clear
+
+The next independently scoped M2/M3 boundary is a **real, limited Tango
+native cell-buffer owner** in `flex_backend_tui`, implemented using the
+existing C11 `tui_buffer_create`, `tui_buffer_clear`, and
+`tui_buffer_destroy` functions. This is a qualified **NativeBuiltin**
+operation named `tango.cell-buffer.clear`, not a GPU shader.
+
+`TangoCellClearOwner` advertises only its actual Tango
+`TerminalCell / CellColumn / CellRow / TerminalTrueColor` binding. It
+declares one native output, no parameters, one native-write pass and
+one linked builtin artifact with zero shader bytes. Fixed versioned
+semantic/target/binding/ABI hashes identify these contracts; they
+**do not** pretend to be hashes of compiled Tango binary files.
+Actual dynamically loaded shader artifacts are not involved.
+
+A caller explicitly requests bounded columns/rows (max total 65,536
+cells). The complete output reservation covers
+`sizeof(tui_buffer_t) + columns * rows * sizeof(tui_cell_t)`, the
+two actual C allocation blocks, and the cell count. The owner checks
+the exact frozen manifest and never allocates from an uncontrolled
+width/height. `tui_buffer_create` failure is a hard allocation
+error; it never falls back to a different backend. A prepared bundle
+owns the buffer directly, independent of its factory's lifetime.
+Owner-thread-only borrowing is exposed to native C++ integration
+through `PreparedNativeEffect::native_resources()` and
+`TangoCellClearResources::buffer_on_owner()`; these handles
+must not escape their prepared resource's lifetime.
+
+The existing real Flex→Tango synchronous `RenderCommandList`
+renderer can draw to that buffer. Its replay must finish and release
+all borrows **before** prepared resources are retired; this contract
+does not create a terminal front/back-buffer transaction, resize a
+live terminal, or implement asynchronous in-flight GPU retirement.
+Explicit `mark_device_lost(budget)` makes the old scope unavailable
+for new preparation while retaining the old resource and budget until
+its owner-thread destruction. Recovery creates a distinct generation
+and new ledger.
+
+The production Tango test now verifies real buffer creation, clear,
+actual Flex command replay, insufficient-budget refusal without
+mutating existing cells, invalid dimensions and GPU shader rejection,
+wrong-thread refusal, lost-vs-new-generation resource ownership and
+factory-independent retirement. It runs in the **existing**
+`test_render_command_tango` native headless and sanitizer CI;
+no new workflow or provider is needed.
+
+**Not qualified:** blur, shadow, custom Tango cell effects, GPU shaders,
+D2D/GL/GLES/Vulkan resource owners, XML/Tailwind default mounting,
+a whole UI revision or actual terminal present. The older
+`RendererCapabilities` booleans are not used to advertise this
+native binding.
+
 ## Qualification and remaining integration
 
 `flex/tests/test_effect_admission.cpp` uses explicitly synthetic capability and
