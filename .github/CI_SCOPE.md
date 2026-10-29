@@ -118,6 +118,43 @@ groups; ordinary master pushes, PR updates, and explicit `ci/full`
 events retain normal superseding semantics. Test commands, module scope
 filters, and required source coverage are unchanged.
 
+## Exact-head evidence verifier (stage M0; not a branch rule)
+
+`.github/scripts/verify_exact_head_ci.py` can read GitHub's live PR,
+workflow-run and per-job REST records and fail closed unless all explicitly
+required jobs ran successfully on the **current exact PR head**. It rejects
+`skipped`, `neutral`, `cancelled`, pending, missing and stale-head jobs.
+It verifies that `ci/full` is present and rereads the PR head after fetching
+evidence. Requirement files list trusted workflow paths and exact job names;
+they **must be produced from reviewed module ownership**, never accepted
+from untrusted PR input.
+
+Example requirement JSON for a runtime-affecting change:
+
+```json
+{"required_workflows": [
+  {"path": ".github/workflows/public-dependency-contract.yml",
+   "jobs": ["Repository sole C11 parser contract"]},
+  {"path": ".github/workflows/runtime-conformance.yml",
+   "jobs": ["Linux / focused installed-SDK ASan/UBSan"]}
+]}
+```
+
+Run after the relevant `ci/full` suites finish:
+
+```sh
+GH_TOKEN=... python3 .github/scripts/verify_exact_head_ci.py \
+  --repo qigao/stun --pr PR_NUMBER --requirements reviewed-matrix.json
+```
+
+The deterministic positive/negative cases run inside the existing public
+dependency parser-check job through `test_ci_affected.py`. This is **not**
+yet a non-skippable required PR check, does not protect `master`, and
+does not itself infer the module matrix. See [Issue #315](https://github.com/qigao/stun/issues/315)
+for the required always-created GitHub status and administrator-enabled
+ruleset. Do not merge based solely on this validator or a green workflow
+summary.
+
 ## Maintenance
 
 - Add new files/paths to both the top-level trigger and

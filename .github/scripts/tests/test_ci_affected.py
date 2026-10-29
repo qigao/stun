@@ -9,6 +9,7 @@ import os
 from pathlib import Path
 import subprocess
 import tempfile
+import sys
 
 SCRIPT = Path(__file__).resolve().parents[1] / "ci-affected.sh"
 
@@ -205,6 +206,12 @@ def main():
         newest = git(directory, "rev-parse", "HEAD")
         assert check(directory, synchronize(newer, newest), ["shared/gcanvas/*"])
 
+    # Reuse the same existing lightweight public-dependency job; no new runner
+    # or cross-platform matrix is created for acceptance verifier fixtures.
+    subprocess.run([
+        sys.executable,
+        str(Path(__file__).with_name("test_verify_exact_head_ci.py"))
+    ], check=True)
     print("CI PR/master-push scope: all targeted and fail-open cases passed")
 
 
