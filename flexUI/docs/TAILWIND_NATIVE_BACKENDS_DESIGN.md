@@ -245,6 +245,10 @@ device loss 后保留逻辑 UI 和 CPU program，但旧设备计划进入不可�
 
 ## 9. 迁移清单与实施顺序
 
+M1 首个实现切片见 [原生 paint profile](TAILWIND_NATIVE_PAINT_PROFILE.md)：独立编译
+opacity/颜色与有限状态条件，经现有属性 registry 生成 CPU 样式候选，不生成或解析 CSS。
+这尚未替换默认 Box/XML 路径，也未完成后端效果准入或完整 Tailwind profile。
+
 | 当前入口/资源 | 目标处理 |
 | --- | --- |
 | `emit_css()`、`UtilityCompileResult.stylesheet`、CSS token cache | 原生 Tailwind 程序和规则缓存 |

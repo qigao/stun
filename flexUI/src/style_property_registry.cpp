@@ -22,6 +22,19 @@ bool write_member(ComputedStyle& style, const void* value) {
     return true;
 }
 
+bool write_uniform_border_color(ComputedStyle& style, const void* value) {
+    if (!value) return false;
+    const auto& color = *static_cast<const Color*>(value);
+    style.border_color = color;
+    for (Color& side_color : style.border_colors) {
+        side_color = color;
+    }
+    // Renderers prefer the side array when enabled. Keep both projections in
+    // sync, including when a subsequent single-side update enables that array.
+    style.has_border_side_colors = true;
+    return true;
+}
+
 bool read_shadow_offset_x(const ComputedStyle& style, void* out) {
     if (!out) return false;
     *static_cast<float*>(out) = style.shadow.offset_x;
@@ -112,7 +125,7 @@ const std::array<StylePropertyDesc, 24> kProperties = {{
     {StylePropertyId::BorderColor, "border-color", &flex::cmeta_type_color,
      kAnim, kPaint, nullptr,
      read_member<Color, &ComputedStyle::border_color>,
-     write_member<Color, &ComputedStyle::border_color>},
+     write_uniform_border_color},
     {StylePropertyId::FontSize, "font-size", &cmeta_type_float,
      kAnim | STYLE_PROPERTY_INHERITED, kFontImpact, nullptr,
      read_member<float, &ComputedStyle::font_size>,
