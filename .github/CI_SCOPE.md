@@ -322,6 +322,46 @@ old and new contexts temporarily, and only then remove the old context.
 Track all missing external dependencies in
 [Issue #322](https://github.com/qigao/stun/issues/322).
 
+## External attestor bounded durable inbox (Issue #322; preparatory M1)
+
+`.github/scripts/attestor_inbox.py` implements a **bounded SQLite WAL
+inbox** which can be injected as the atomic `enqueue` callback of the
+signed webhook admission module. It uses `BEGIN IMMEDIATE` transactions,
+foreign keys and `synchronous=FULL`. A new delivery and its normalized
+authenticated event are committed together; duplicate UUID/body digests
+are not scheduled twice, and a reused UUID with a different digest is
+rejected. Storage capacity is explicitly bounded (no silent eviction),
+including retained terminal records, and persistence errors must prevent
+acknowledging a new delivery.
+
+The consumer enforces a **single globally claimed work item** even across
+independent SQLite connections. `claim_next(owner)` records an explicit
+ownership claim; only that owner can complete or fail the event. Failed
+or interrupted claims are **never automatically retried/reclaimed**.
+A crashed owner leaves work claimed, blocking further processing until a
+trusted operator inspects the evidence and explicitly recovers the inbox.
+This is intentional: a retry must not blindly republish stale-success
+evidence. A new worker must always fetch the latest actual PR/CI facts
+through the existing M0–M2 evaluator before any status write.
+
+The inbox stores normalized **event metadata**, not App credentials or
+private keys. An external deployment must provision a private directory,
+restrict access to the SQLite database and WAL files, monitor bounded
+capacity/retained records, and implement an explicit operator-controlled
+recovery and retention policy. This repository does **not** implement a
+public webhook listener, background worker, App installation token,
+external secrets store, delivery acknowledger or new status publication.
+The 15 deterministic offline inbox tests, including a SQL fault trigger
+and process-reopen ownership cases, run in the existing required Public
+Dependency job; no additional native CI runner is introduced.
+
+As with the admission layer, the inbox does not turn the generic GitHub
+Actions App identity into an exclusive attestor. The protected master
+Ruleset continues to require `Stun required acceptance` unchanged.
+Dedicated App installation, securely deployed worker, new App-owned
+`Stun attested acceptance` context and the two-context Ruleset migration
+remain in [Issue #322](https://github.com/qigao/stun/issues/322).
+
 ## Maintenance
 
 - Add new files/paths to both the top-level trigger and
