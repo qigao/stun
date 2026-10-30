@@ -5,13 +5,14 @@ name: Tango OpenGL native pixels
 on:
   pull_request:
     types: [opened, synchronize, reopened, labeled]
+    # Only shared code and desktop GL/glyph paths that can affect TangoGL.
+    # Do not run a Mesa desktop GPU check for Vulkan/Android-only edits.
+    # Keep paths as a contiguous list: ci_required_matrix.py parses it strictly.
     paths:
       - "tango/**"
       - "flex/backends/tango_opengl/**"
       - "flex/render/engines/gcanvas/**"
       - "flex/modules/render/**"
-      # Only shared code and desktop GL/glyph paths that can affect TangoGL.
-      # Do not run a Mesa desktop GPU check for Vulkan/Android-only edits.
       - "shared/gcanvas/src/backends/gl/**"
       - "shared/gcanvas/src/backends/opengl/**"
       - "shared/gcanvas/src/font.cpp"
