@@ -413,6 +413,12 @@ jobs:
             "-DCMAKE_PREFIX_PATH=$SALTS_ROOT;$RUNNER_TEMP/stun-xml-runtime-deps" \
             -DSTB_INCLUDE_DIRS=/usr/include/stb
           cmake --build build/xml-runtime --target stun_xml_runtime_qualification --parallel 2
+          # Real producer SDK delivery, not a generated installer/consumer
+          # project or a second target graph. Build the public Flex archive
+          # as part of the actual installed Core/JinjaXml package set.
+          cmake --build build/xml-runtime --target flex --parallel 2
+          cmake --install build/xml-runtime --component FlexUICore \
+            --prefix "$RUNNER_TEMP/stun-flexui-sdk"
           ctest --test-dir build/xml-runtime --no-tests=error --verbose --output-on-failure \
             --timeout 120 --output-junit build/xml-runtime/results.xml
           git diff --exit-code
