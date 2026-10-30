@@ -157,6 +157,18 @@ class RequirementTests(unittest.TestCase):
         self.assertNotIn("gcanvas-package-contract.yml", policy.WORKFLOWS)
         self.assertNotIn("gcanvas-shader-tools-cache.yml", policy.WORKFLOWS)
 
+    def test_existing_meta_editor_and_shared_root_build_sources_require_native(self):
+        # Both real source-owned modules are configured by the repository root.
+        # Keep arbitrary new shared submodules fail-closed until mapped.
+        for path in ("meta_editor/CMakeLists.txt",
+                     "meta_editor/src/core/editor.cpp",
+                     "shared/CMakeLists.txt"):
+            with self.subTest(path=path):
+                required = matrix(path)
+                self.assertIn(policy.PUBLIC, required)
+                self.assertIn(policy.RUNTIME, required)
+        self.assertFalse(policy.known_source("shared/unregistered/CMakeLists.txt"))
+
     def test_unknown_sources_fail_closed_even_with_docs(self):
         for paths in (
             ["new-module/src/x.c"],
