@@ -2492,3 +2492,71 @@ spec("FlexUI explicit immutable XML module imports use the one component compile
     check_null(recursive.program.get());
   }
 }
+
+
+spec("FlexUI XML module import inspection shares strict compiler admission policy") {
+  const std::string xml = R"xml(
+    <ui name="App" xmlns:editor="urn:studio:ui">
+      <imports>
+        <import namespace="urn:studio:ui" prefix="editor"
+                source="components/editor.ui.xml" version="1"
+                sha256="386d0ecf9934261ca948423c8f501365cc8b98a35b03c6581dc4bba38144756b"/>
+      </imports>
+      <main id="root"/>
+    </ui>
+  )xml";
+
+  it("extracts only explicitly declared, bounded source identities") {
+    const auto inspected = flexUI::inspect_ui_xml_imports(xml);
+    check(static_cast<bool>(inspected));
+    if (!inspected) return;
+    check_equal(inspected.imports.size(), std::size_t{1});
+    const auto &import = inspected.imports.front();
+    check_equal(import.source, "components/editor.ui.xml");
+    check_equal(import.namespace_uri, "urn:studio:ui");
+    check_equal(import.prefix, "editor");
+    check_equal(import.version, "1");
+    check_equal(import.sha256,
+                "386d0ecf9934261ca948423c8f501365cc8b98a35b03c6581dc4bba38144756b");
+    const auto no_imports = flexUI::inspect_ui_xml_imports(
+        "<ui name=\"Plain\"><div id=\"root\"/></ui>");
+    check(static_cast<bool>(no_imports));
+    check(no_imports.imports.empty());
+  }
+
+  it("fails closed on spoofed hashes, paths, namespaces and malformed roots") {
+    const auto reject = [&](const std::string &candidate) {
+      const auto result = flexUI::inspect_ui_xml_imports(candidate);
+      check_false(static_cast<bool>(result));
+      check(result.imports.empty());
+    };
+    const auto replace_once = [&](std::string old_text, std::string new_text) {
+      auto candidate = xml;
+      const auto found = candidate.find(old_text);
+      check(found != std::string::npos);
+      if (found != std::string::npos)
+        candidate.replace(found, old_text.size(), new_text);
+      return candidate;
+    };
+    reject(replace_once("components/editor.ui.xml", "../escape.xml"));
+    reject(replace_once("components/editor.ui.xml", "https://example.org/editor.xml"));
+    reject(replace_once("components/editor.ui.xml", "components//editor.ui.xml"));
+    reject(replace_once("version=\"1\"", "version=\"01\""));
+    reject(replace_once("prefix=\"editor\"", "prefix=\"unbound\""));
+    reject(replace_once("urn:studio:ui", "urn:forged:ui"));
+    reject(replace_once(
+        "386d0ecf9934261ca948423c8f501365cc8b98a35b03c6581dc4bba38144756b",
+        "386D0ECF9934261ca948423c8f501365cc8b98a35b03c6581dc4bba38144756b"));
+    reject(replace_once("sha256=\"386d", "sha256=\"386"));
+    reject(replace_once("<imports>", "<imports><import/>"));
+    reject(replace_once("<main id=\"root\"/>", "<main/><aside/>"));
+    reject(replace_once("</imports>", "</imports><imports/>"));
+    reject(replace_once("name=\"App\"", "name=\"\""));
+    reject(std::string("<ui name=\"App\"><imports/><div/></ui>") + std::string(1, '\0'));
+    flexUI::UiDocumentLimits bounded;
+    bounded.max_source_bytes = xml.size() - 1;
+    const auto over = flexUI::inspect_ui_xml_imports(xml, bounded);
+    check_false(static_cast<bool>(over));
+    check(over.error.code == flexUI::UiDocumentErrorCode::SourceTooLarge);
+  }
+}

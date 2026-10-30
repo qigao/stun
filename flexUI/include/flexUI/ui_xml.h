@@ -88,4 +88,32 @@ UiDocumentCompileResult compile_ui_xml(
     const UiXmlSha256Provider &sha256,
     const UiDocumentLimits &limits = {});
 
+
+/** One strictly validated import declaration, independent of file access.
+ * The source path is a safe relative catalog key, never an absolute path,
+ * network URL or authorization to access a file.
+ */
+struct UiXmlImportSpec {
+  std::string source;
+  std::string namespace_uri;
+  std::string prefix;
+  std::string version;
+  std::string sha256;
+};
+
+struct UiXmlImportInspectionResult {
+  std::vector<UiXmlImportSpec> imports;
+  UiDocumentError error;
+
+  explicit operator bool() const noexcept { return !static_cast<bool>(error); }
+};
+
+/** Read only the explicit imports manifest from the canonical XML adapter.
+ * Validates UTF-8, XML structure, paths, URI, version, namespace binding,
+ * count and digest shape. Does not read, hash or admit any module source.
+ * Both inspection and full compilation share the same import policy.
+ */
+UiXmlImportInspectionResult inspect_ui_xml_imports(
+    std::string_view source, const UiDocumentLimits &limits = {});
+
 } // namespace flexUI
