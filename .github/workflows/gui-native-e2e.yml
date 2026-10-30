@@ -13,6 +13,7 @@ on:
       - '.github/scripts/tests/test_gui_native_suite.py'
       - '.github/scripts/gui_runtime/**'
       - 'flexUI/examples/desktop_editor/**'
+      - 'shared/markdown/**'
   workflow_dispatch:
 
 permissions:
@@ -236,6 +237,53 @@ jobs:
         run: |
           set -euo pipefail
           cmake --build build/stun-gui --target flexui_desktop_editor --parallel 2
+          cmake --build build/stun-gui --target \
+            stun_ui_core_test stun_markdown_adapter_test \
+            stun_markdown_tango_candidate_test test_markdown_widget \
+            --parallel 2
+
+      - name: Qualify one Markdown grammar, real C11/Tango/Widget consumers
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 shared/markdown/tests/verify_single_markdown_parser.py
+          export LD_LIBRARY_PATH="$SALTS_ROOT/lib:$SALTS_UTILS_ROOT/lib:$CHTTP_ROOT/lib:$TURBOSCRIPT_ROOT/lib:${LD_LIBRARY_PATH:-}"
+          ctest --test-dir build/stun-gui --no-tests=error \
+            --output-on-failure --timeout 120 \
+            -R '^(stun_ui_core_test|stun_markdown_adapter_test|stun_markdown_tango_candidate_test|test_markdown_widget)
+        shell: bash
+        run: |
+          set -euo pipefail
+          export LD_LIBRARY_PATH="$SALTS_ROOT/lib:$SALTS_UTILS_ROOT/lib:$CHTTP_ROOT/lib:$TURBOSCRIPT_ROOT/lib:${LD_LIBRARY_PATH:-}"
+          xvfb-run -a -s '-screen 0 1280x900x24 -nolisten tcp' \
+            /usr/bin/python3 .github/scripts/gui_native_suite.py \
+              --exe build/stun-gui/bin/flexui_desktop_editor \
+              --source-sha "${{ steps.source.outputs.sha }}" \
+              --out build/stun-gui/gui-e2e
+
+      - name: Preserve exact-head actual GUI screenshot evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: stun-visible-gui-${{ steps.source.outputs.sha }}
+          retention-days: 3
+          if-no-files-found: warn
+          path: |
+            build/stun-gui/gui-e2e/
+            build/stun-gui/CMakeFiles/CMakeConfigureLog.yaml
+
+      - name: Report real compiler cache statistics
+        if: always() && steps.verified_cache.outcome == 'success'
+        shell: bash
+        run: bash .github/scripts/report-ccache.sh native-gui-linux
+
+      - name: Retain completed compiler work after a failed GUI qualification
+        if: failure() && steps.verified_cache.outcome == 'success'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ runner.temp }}/stun-ccache/native-gui-linux
+          key: stun-ccache-v1-4.14.2-native-gui-linux-${{ runner.os }}-${{ runner.arch }}-${{ steps.source.outputs.sha }}
+
 
       - name: Qualify real Stun Save and reject wrong visible states
         shell: bash
