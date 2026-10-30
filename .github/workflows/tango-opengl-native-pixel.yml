@@ -122,7 +122,7 @@ jobs:
             libgl1-mesa-dev libgl1-mesa-dri libglx-mesa0 \
             libfreetype-dev libstb-dev libz-dev \
             libglfw3-dev libx11-dev libxrandr-dev libxinerama-dev \
-            libxcursor-dev libxi-dev libxext-dev \
+            libxcursor-dev libxi-dev libxext-dev libxtst-dev \
             fonts-dejavu-core xvfb xauth
           test -r /usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf
           sha256sum /usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf
@@ -224,6 +224,7 @@ jobs:
               --output-on-failure -V --no-tests=error \
               -R '^tango_gl_real_pixel$' --timeout 120
           test -s build/tango-gl-native/tango-gl-frame.ppm
+          test -s build/tango-gl-native/tango-gl-frame.ppm.input.ppm
           head -c 2 build/tango-gl-native/tango-gl-frame.ppm | grep -q P6
           echo "ExactHEAD=${{ needs.changes.outputs.source_sha }} TangoGLNativePixel=SUCCESS"
 
@@ -232,7 +233,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: tango-gl-mesa-pixels-${{ needs.changes.outputs.source_sha }}
-          path: build/tango-gl-native/tango-gl-frame.ppm
+          path: |
+            build/tango-gl-native/tango-gl-frame.ppm
+            build/tango-gl-native/tango-gl-frame.ppm.input.ppm
           if-no-files-found: ignore
           retention-days: 7
 

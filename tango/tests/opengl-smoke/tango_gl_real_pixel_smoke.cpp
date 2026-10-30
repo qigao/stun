@@ -9,8 +9,15 @@
 #include <backends/tango_opengl/cell_input.h>
 #include <tui_grid_snapshot.h>
 #include <GLFW/glfw3.h>
+// This existing Mesa/Xvfb-only test injects input at the X server, rather
+// than directly invoking an application callback or fabricating events.
+#define GLFW_EXPOSE_NATIVE_X11
+#include <GLFW/glfw3native.h>
+#include <X11/extensions/XTest.h>
+#include <X11/keysym.h>
 
 #include <array>
+#include <chrono>
 #include <cstdint>
 #include <cstdlib>
 #include <exception>
@@ -19,6 +26,7 @@
 #include <memory>
 #include <stdexcept>
 #include <string>
+#include <thread>
 #include <vector>
 
 namespace {
@@ -183,7 +191,243 @@ void require_rgb_dominance(const Pixel& p, int channel,
     }
 }
 
-void exercise_gpu(const std::string& font_path,
+
+// Actual XTest -> X11 -> GLFW callback -> submitted Tango C11 event.
+// This is a live window / server-delivered test; the independent pixel-plan
+// assertions above still run before it. An IME preedit test is NOT implied.
+struct NativeX11Input final {
+    GLFWwindow* window;
+    flex::tango_opengl::CellPixelPresenter& presenter;
+    std::vector<flex::tango_opengl::CellHostInput> presses;
+    std::vector<flex::tango_opengl::CellHostInput> releases;
+    std::vector<flex::tango_opengl::CellHostInput> keys;
+    std::vector<flex::tango_opengl::CellHostInput> characters;
+    std::exception_ptr failure;
+
+    NativeX11Input(GLFWwindow* handle,
+                   flex::tango_opengl::CellPixelPresenter& owner)
+        : window(handle), presenter(owner) {
+        glfwSetWindowUserPointer(window, this);
+        glfwSetMouseButtonCallback(window, &on_mouse);
+        glfwSetKeyCallback(window, &on_key);
+        glfwSetCharCallback(window, &on_character);
+    }
+    ~NativeX11Input() {
+        glfwSetMouseButtonCallback(window, nullptr);
+        glfwSetKeyCallback(window, nullptr);
+        glfwSetCharCallback(window, nullptr);
+        glfwSetWindowUserPointer(window, nullptr);
+    }
+    NativeX11Input(const NativeX11Input&) = delete;
+    NativeX11Input& operator=(const NativeX11Input&) = delete;
+
+    template <typename F>
+    static void guarded(GLFWwindow* handle, F&& fn) noexcept {
+        auto* self = static_cast<NativeX11Input*>(
+            glfwGetWindowUserPointer(handle));
+        if (!self || self->failure) return;
+        try {
+            fn(*self);
+        } catch (...) {
+            self->failure = std::current_exception();
+        }
+    }
+
+    static void on_mouse(GLFWwindow* handle, int button,
+                         int action, int mods) noexcept {
+        guarded(handle, [&](NativeX11Input& self) {
+            if (button != GLFW_MOUSE_BUTTON_LEFT || mods != 0 ||
+                (action != GLFW_PRESS && action != GLFW_RELEASE))
+                throw std::runtime_error(
+                    "Injected mouse button/modifiers are not the expected X11 events");
+            double x = 0.0, y = 0.0;
+            glfwGetCursorPos(handle, &x, &y);
+            int ww = 0, wh = 0, fw = 0, fh = 0;
+            glfwGetWindowSize(handle, &ww, &wh);
+            glfwGetFramebufferSize(handle, &fw, &fh);
+            const auto hit = flex::tango_opengl::cell_input_pointer(
+                self.presenter, x, y, {ww, wh, fw, fh},
+                action == GLFW_PRESS ?
+                    flex::tango_opengl::CellMouseAction::Press :
+                    flex::tango_opengl::CellMouseAction::Release,
+                flex::tango_opengl::CellMouseButton::Left, TUI_MOD_NONE);
+            require(hit.has_value(),
+                    "XTest mouse event did not hit the submitted Tango grid");
+            if (action == GLFW_PRESS)
+                self.presses.push_back(*hit);
+            else
+                self.releases.push_back(*hit);
+        });
+    }
+
+    static void on_key(GLFWwindow* handle, int key, int,
+                       int action, int mods) noexcept {
+        guarded(handle, [&](NativeX11Input& self) {
+            if (action == GLFW_RELEASE) return;
+            if (mods != 0 || action != GLFW_PRESS)
+                throw std::runtime_error("XTest sent unexpected keyboard state");
+            if (key == GLFW_KEY_LEFT) {
+                const auto event = flex::tango_opengl::cell_input_key(
+                    self.presenter, TUI_KEY_LEFT, TUI_MOD_NONE);
+                require(event.has_value(), "GLFW Left key was not converted to C11");
+                self.keys.push_back(*event);
+            } else if (key != GLFW_KEY_A) {
+                throw std::runtime_error("XTest keyboard input was not Left or A");
+            }
+        });
+    }
+
+    static void on_character(GLFWwindow* handle,
+                             unsigned int scalar) noexcept {
+        guarded(handle, [&](NativeX11Input& self) {
+            const auto event = flex::tango_opengl::cell_input_character(
+                self.presenter, scalar);
+            require(event.has_value(),
+                    "X11 committed character was not converted to Tango C11");
+            self.characters.push_back(*event);
+        });
+    }
+
+    template <typename F>
+    void wait_for(F&& condition, const char* error) {
+        for (int attempt = 0; attempt != 100; ++attempt) {
+            glfwPollEvents(); // OS events, not a direct callback invocation.
+            if (failure) std::rethrow_exception(failure);
+            if (condition()) return;
+            std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        }
+        throw std::runtime_error(error);
+    }
+};
+
+void exercise_real_x11_input(
+    GLFWwindow* window,
+    flex::tango_opengl::CellPixelPresenter& presenter,
+    flex::tango_opengl::CellPixelMetrics layout,
+    const std::string& pixel_artifact) {
+    Display* const display = glfwGetX11Display();
+    const Window native_window = glfwGetX11Window(window);
+    require(display && native_window,
+            "TangoGL has no actual X11 GLFW host window");
+
+    int event_base = 0, error_base = 0, major = 0, minor = 0;
+    require(XTestQueryExtension(display, &event_base, &error_base,
+                                &major, &minor) == True,
+            "Xvfb XTest server extension is required; no fake input fallback");
+    NativeX11Input events(window, presenter);
+
+    // The original pixel smoke window was hidden to avoid window-system
+    // effects during framebuffer readback. Map and focus it explicitly
+    // before sending real X-server device events.
+    glfwShowWindow(window);
+    XMapRaised(display, native_window);
+    XSetInputFocus(display, native_window, RevertToParent, CurrentTime);
+    XSync(display, False);
+    events.wait_for(
+        [&] { return glfwGetWindowAttrib(window, GLFW_FOCUSED) == GLFW_TRUE; },
+        "GLFW did not receive real X11 focus after window mapping");
+
+    int root_x = 0, root_y = 0;
+    Window child = None;
+    require(XTranslateCoordinates(display, native_window,
+                                  DefaultRootWindow(display), 0, 0,
+                                  &root_x, &root_y, &child) == True,
+            "Cannot resolve real X11 window position for server injection");
+
+    const auto inject_click = [&](int cell_x, int cell_y) {
+        const int px = root_x + cell_x * kCellWidth + 3;
+        const int py = root_y + cell_y * kCellHeight + 3;
+        require(XTestFakeMotionEvent(
+                    display, DefaultScreen(display), px, py, 0) == True,
+                "XTest real server mouse motion injection failed");
+        XSync(display, False);
+        glfwPollEvents();
+        const std::size_t previous = events.presses.size();
+        require(XTestFakeButtonEvent(display, 1u, True, 0) == True &&
+                XTestFakeButtonEvent(display, 1u, False, 0) == True,
+                "XTest real server button injection failed");
+        XSync(display, False);
+        events.wait_for(
+            [&] { return events.presses.size() == previous + 1u &&
+                         events.releases.size() == previous + 1u; },
+            "XTest pointer press/release did not reach actual GLFW callbacks");
+        const auto& press = events.presses.back();
+        const auto& release = events.releases.back();
+        require(press.event.type == TUI_EVENT_MOUSE_PRESS &&
+                press.event.key == TUI_KEY_MOUSE_LEFT &&
+                release.event.type == TUI_EVENT_MOUSE_RELEASE &&
+                release.event.key == TUI_KEY_MOUSE_LEFT &&
+                press.event.x == cell_x && press.event.y == cell_y &&
+                release.event.x == cell_x && release.event.y == cell_y &&
+                press.grid_revision == 101u && release.grid_revision == 101u,
+                "XTest GLFW pointer and painted C11 cell disagree");
+        std::cout << "TANGO_GL_XTEST_MOUSE cell=" << press.event.x << ','
+                  << press.event.y << " revision=" << press.grid_revision
+                  << " server=XVFB_XTEST\n";
+    };
+
+    inject_click(1, 1); // Actually GPU-painted red A cell.
+    inject_click(5, 1); // Actually GPU-painted green B cell.
+
+    const auto inject_key = [&](KeySym symbol) {
+        const KeyCode key = XKeysymToKeycode(display, symbol);
+        require(key != 0, "X11 keysym has no physical server keycode");
+        require(XTestFakeKeyEvent(display, key, True, 0) == True &&
+                XTestFakeKeyEvent(display, key, False, 0) == True,
+                "XTest key injection could not reach real X11 keyboard");
+        XSync(display, False);
+    };
+    inject_key(XK_Left);
+    events.wait_for([&] { return events.keys.size() == 1u; },
+                    "Real XTest Left key did not reach GLFW key callback");
+    require(events.keys[0].event.type == TUI_EVENT_KEY &&
+            events.keys[0].event.key == TUI_KEY_LEFT &&
+            events.keys[0].grid_revision == 101u,
+            "Real X11 Left key was not delivered as canonical C11 key");
+
+    inject_key(XK_a);
+    events.wait_for([&] { return events.characters.size() == 1u; },
+                    "Real X11 text key did not reach GLFW committed char callback");
+    require(events.characters[0].event.type == TUI_EVENT_KEY &&
+            events.characters[0].event.ch == static_cast<std::uint32_t>('a') &&
+            events.characters[0].grid_revision == 101u,
+            "X11 committed printable key was not the canonical C11 text event");
+
+    // A real injected cell click now drives a new *native Tango C11 source*
+    // snapshot and is observed in the REAL GPU framebuffer. Do not merely
+    // assert the translated event or paint a synthetic comparison buffer.
+    std::unique_ptr<tui_buffer_t, decltype(&tui_buffer_destroy)> source(
+        tui_buffer_create(kColumns, kRows), &tui_buffer_destroy);
+    require(source != nullptr, "Cannot allocate new Tango C11 reaction frame");
+    tui_buffer_clear_color(source.get(), TUI_COLOR(14, 23, 52));
+    const auto& selected = events.presses.front().event;
+    tui_buffer_set(source.get(), selected.x, selected.y,
+                   tui_cell('A', TUI_BLACK, TUI_COLOR(245, 215, 38)));
+    tui_grid_snapshot_t* raw = nullptr;
+    require(tui_grid_snapshot_capture(
+                source.get(), 102u, kColumns * kRows, 8192, &raw) ==
+            TUI_GRID_SNAPSHOT_OK,
+            "XTest-driven UI update did not produce a canonical C11 snapshot");
+    std::unique_ptr<tui_grid_snapshot_t, decltype(&tui_grid_snapshot_destroy)>
+        updated(raw, &tui_grid_snapshot_destroy);
+    layout.expected_grid_revision = 102u;
+    presenter.present(updated.get(), layout);
+    require(presenter.last_submitted_plan() &&
+            presenter.last_submitted_plan()->grid_revision() == 102u,
+            "Injected click failed to update the submitted Tango frame");
+    const auto image = read_back_rgba();
+    const Pixel highlight = at(image, selected.x * kCellWidth + 3,
+                               selected.y * kCellHeight + 3);
+    require(highlight[0] > 175 && highlight[1] > 160 &&
+            highlight[2] < 85 && highlight[3] >= 240,
+            "XTest clicked cell did not repaint with the real GL highlight");
+    save_ppm(image, pixel_artifact);
+    std::cout << "TANGO_GL_XTEST_KEY=LEFT,A\n"
+              << "TANGO_GL_XTEST_FRAME_REVISION=102\n"
+              << "TANGO_GL_XTEST_REAL_PIXEL_PASS=1\n";
+}
+
+void exercise_gpu(const std::string& font_path:
                   const std::string& bold_font_path,
                   const std::string& ppm) {
     GlfwSession glfw;
@@ -339,6 +583,10 @@ void exercise_gpu(const std::string& font_path,
     require(read_back_rgba() == first_frame,
             "Rejected Tango grid mutation changed an already drawn GL frame");
 
+    // The original pixel contract passed. Now exercise actual X11 server
+    // input delivered through GLFW, and record the interactive GPU frame.
+    exercise_real_x11_input(window.handle, *presenter, layout,
+                            ppm + ".input.ppm");
     std::cout << "TANGO_GL_PIXEL_PASS=1\n";
 }
 
