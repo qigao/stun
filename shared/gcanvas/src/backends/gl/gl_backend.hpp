@@ -22,6 +22,8 @@ namespace gcanvas::detail
         void (*swap_buffers)(void* user_data) = nullptr;
         void (*set_swap_interval)(void* user_data, int interval) = nullptr;
         void (*framebuffer_size)(void* user_data, int* width, int* height) = nullptr;
+        NativeGpuMutationGuard resource_mutation_guard = nullptr;
+        void* resource_mutation_user_data = nullptr;
     };
 
     struct GlRuntime

@@ -1291,7 +1291,9 @@ std::unique_ptr<Renderer> create_renderer(::gcanvas::Context& context) {
 }
 
 std::unique_ptr<Renderer> create_external_opengl_renderer(
-    ::gcanvas::opengl::ProcLoader proc_loader, void* proc_loader_user_data) {
+    ::gcanvas::opengl::ProcLoader proc_loader, void* proc_loader_user_data,
+    ::gcanvas::NativeGpuMutationGuard native_mutation_guard,
+    void* native_mutation_user_data) {
 #if defined(FLEX_GCANVAS_HAS_OPENGL)
   if (proc_loader == nullptr) {
     throw std::invalid_argument("gCanvas external OpenGL renderer requires a proc loader");
@@ -1304,12 +1306,16 @@ std::unique_ptr<Renderer> create_external_opengl_renderer(
   create_info.host.user_data = state.get();
   create_info.host.get_proc_address = load_external_gl_proc;
   create_info.host.framebuffer_size = external_framebuffer_size;
+  create_info.host.resource_mutation_guard = native_mutation_guard;
+  create_info.host.resource_mutation_user_data = native_mutation_user_data;
   create_info.presentation = ::gcanvas::opengl::PresentationMode::External;
   auto context = ::gcanvas::opengl::create_context(create_info);
   return std::make_unique<GCanvasRenderer>(std::move(state), std::move(context));
 #else
   (void)proc_loader;
   (void)proc_loader_user_data;
+  (void)native_mutation_guard;
+  (void)native_mutation_user_data;
   throw std::logic_error("Flex gCanvas engine was built without OpenGL support");
 #endif
 }

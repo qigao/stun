@@ -13,14 +13,86 @@
 
 namespace flex::tango_opengl {
 
+ExternalGLCellCreateInfo NativeGLPresentationOwner::instrumented_info(
+    const ExternalGLCellCreateInfo& source,
+    NativeGLPresentationOwner* owner) {
+    if (!owner || source.native_mutation_guard ||
+        source.native_mutation_user_data)
+        throw std::invalid_argument(
+            "TangoGL combined owner requires its sole native GL mutation guard");
+    auto result = source;
+    result.native_mutation_guard = &NativeGLPresentationOwner::admit_native_mutation;
+    result.native_mutation_user_data = owner;
+    return result;
+}
+
+bool NativeGLPresentationOwner::admit_native_mutation(
+    void* user_data, ::gcanvas::NativeGpuMutation operation,
+    std::uint64_t, std::size_t bytes) noexcept {
+    auto* self = static_cast<NativeGLPresentationOwner*>(user_data);
+    if (!self) return false;
+    try {
+        // Guard is installed before ANY gCanvas atlas/shader creation.
+        // Access only members constructed before presenter_, including
+        // this original context identity and the real native fence owner.
+        if (!self->host_config_.is_context_current ||
+            !self->host_config_.is_context_current(
+                self->host_config_.host_user_data) ||
+            self->fences_.in_flight() != 0) {
+            ++self->mutation_audit_.denied;
+            return false;
+        }
+        switch (operation) {
+        case ::gcanvas::NativeGpuMutation::TextureUpload:
+            // This is a cumulative CPU texture-payload bound, not an
+            // estimate of VRAM/driver allocations. Admission is checked
+            // before glGenTextures/glTexImage2D in the real gCanvas path.
+            if (bytes > self->host_config_.max_total_texture_upload_bytes ||
+                self->mutation_audit_.uploaded_payload_bytes >
+                    self->host_config_.max_total_texture_upload_bytes - bytes) {
+                ++self->mutation_audit_.denied;
+                return false;
+            }
+            ++self->mutation_audit_.texture_uploads;
+            self->mutation_audit_.uploaded_payload_bytes += bytes;
+            break;
+        case ::gcanvas::NativeGpuMutation::TextureUpdate:
+            ++self->mutation_audit_.texture_updates;
+            break;
+        case ::gcanvas::NativeGpuMutation::TextureDelete:
+            ++self->mutation_audit_.texture_deletes;
+            break;
+        case ::gcanvas::NativeGpuMutation::ProgramCreate:
+            ++self->mutation_audit_.program_creates;
+            break;
+        case ::gcanvas::NativeGpuMutation::ProgramDelete:
+            ++self->mutation_audit_.program_deletes;
+            break;
+        default:
+            ++self->mutation_audit_.denied;
+            return false;
+        }
+        return true;
+    } catch (...) {
+        ++self->mutation_audit_.denied;
+        return false;
+    }
+}
+
 NativeGLPresentationOwner::NativeGLPresentationOwner(
     const ExternalGLCellCreateInfo& renderer,
     const NativeGLFenceConfig& fences)
-    : fences_(fences),
-      presenter_(create_external_gl_presenter(renderer)),
+    : host_config_(fences),
+      fences_(fences),
+      presenter_(create_external_gl_presenter(
+          instrumented_info(renderer, this))),
       gate_(std::make_shared<CellHostFrameGate>(*presenter_)) {
     // NativeGLFrameFences validates actual current-context identity and
     // exact GL proc availability before creating the GPU renderer.
+    if (!host_config_.max_total_texture_upload_bytes ||
+        host_config_.max_total_texture_upload_bytes > (2ull * 1024ull * 1024ull * 1024ull))
+        throw std::invalid_argument(
+            "TangoGL native texture upload payload limit must be bounded to at most 2 GiB");
     if (!presenter_ || !presenter_->on_owner_thread())
         throw std::logic_error(
             "TangoGL native owner requires an actual same-thread pixel renderer");
@@ -205,6 +277,11 @@ void NativeGLPresentationOwner::close() {
 
 bool NativeGLPresentationOwner::closed() const noexcept {
     return closed_;
+}
+
+NativeGLMutationAudit NativeGLPresentationOwner::native_mutation_audit() const {
+    (void)fences_.in_flight(); // Native owner-thread-only audit read.
+    return mutation_audit_;
 }
 
 } // namespace flex::tango_opengl

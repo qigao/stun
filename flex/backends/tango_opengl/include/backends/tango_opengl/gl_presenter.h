@@ -7,6 +7,7 @@
 #include <backends/tango_opengl/cell_presenter.h>
 #include <backends/tango_opengl/cell_input.h>
 #include <backends/opengl/init.h>
+#include <gcanvas/context.hpp>
 
 #include <memory>
 #include <cstddef>
@@ -22,6 +23,11 @@ struct ExternalGLCellCreateInfo {
     // presenter. The host owns window buffer swapping.
     opengl_backend::OpenGLProcLoader get_proc_address = nullptr;
     void* proc_user_data = nullptr;
+    // Optional actual GL operation admission; the callback is borrowed
+    // until the renderer and its native GPU resources are destroyed.
+    // The strict combined owner installs its own fence/current-context guard.
+    ::gcanvas::NativeGpuMutationGuard native_mutation_guard = nullptr;
+    void* native_mutation_user_data = nullptr;
     // Both regular and bold font files are mandatory. Empty/missing paths
     // must fail before a frame instead of silently falling back to gCanvas's
     // default font or pretending that regular glyphs are bold glyphs.
@@ -57,6 +63,11 @@ struct NativeGLFenceConfig final {
     void* host_user_data = nullptr;
     std::uint64_t device_generation = 0;
     std::size_t max_in_flight = 0;
+    // Conservative cumulative native texture upload payload bound. This
+    // caps base image bytes consumed by this owner, NOT driver VRAM/mipmaps.
+    // A strict finite default keeps this resource path bounded even when
+    // hosts do not provide an explicit smaller profile.
+    std::size_t max_total_texture_upload_bytes = 1024ull * 1024ull * 1024ull;
 };
 
 enum class NativeGLFencePoll { Drained, Busy };
@@ -116,6 +127,19 @@ struct NativeGLResourceLease final {
 
 // Bind actual gCanvas GPU texture/atlas/shader names (not a guessed draw
 // recipe) to the exact native GLsync's submission and device generation.
+struct NativeGLMutationAudit final {
+    std::uint64_t texture_uploads = 0;
+    std::uint64_t texture_updates = 0;
+    std::uint64_t texture_deletes = 0;
+    std::uint64_t program_creates = 0;
+    std::uint64_t program_deletes = 0;
+    std::uint64_t denied = 0;
+    // Sum of CPU payload byte extents for accepted native texture uploads.
+    // This does not include driver/mipmap/compression overhead and is not
+    // a complete GPU VRAM or peak-allocation budget.
+    std::uint64_t uploaded_payload_bytes = 0;
+};
+
 class NativeGLPresentationOwner final {
 public:
     NativeGLPresentationOwner(
@@ -144,9 +168,18 @@ public:
     std::shared_ptr<CellHostFrameGate> input_gate() const noexcept;
     void close();
     bool closed() const noexcept;
+    NativeGLMutationAudit native_mutation_audit() const;
 
 private:
+    static ExternalGLCellCreateInfo instrumented_info(
+        const ExternalGLCellCreateInfo& source,
+        NativeGLPresentationOwner* owner);
+    static bool admit_native_mutation(
+        void* user_data, ::gcanvas::NativeGpuMutation operation,
+        std::uint64_t native_name, std::size_t bytes) noexcept;
+    NativeGLFenceConfig host_config_;
     NativeGLFrameFences fences_;
+    NativeGLMutationAudit mutation_audit_{};
     std::unique_ptr<CellPixelPresenter> presenter_;
     std::shared_ptr<CellHostFrameGate> gate_;
     bool closed_ = false;

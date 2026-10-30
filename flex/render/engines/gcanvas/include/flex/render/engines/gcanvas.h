@@ -28,6 +28,8 @@ std::unique_ptr<Renderer> create_renderer(::gcanvas::Context& context);
  * remain valid until the renderer is destroyed.
  */
 std::unique_ptr<Renderer> create_external_opengl_renderer(
-    ::gcanvas::opengl::ProcLoader proc_loader, void* proc_loader_user_data = nullptr);
+    ::gcanvas::opengl::ProcLoader proc_loader, void* proc_loader_user_data = nullptr,
+    ::gcanvas::NativeGpuMutationGuard native_mutation_guard = nullptr,
+    void* native_mutation_user_data = nullptr);
 
 } // namespace flex::render::engines::gcanvas

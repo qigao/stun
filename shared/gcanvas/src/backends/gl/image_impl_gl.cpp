@@ -5,6 +5,7 @@
 #include <cstring>
 #include <cmath>
 #include <stdexcept>
+#include <exception>
 
 #include <stb_image.h>
 
@@ -68,12 +69,28 @@ namespace GCANVAS_GL_PROFILE_NAMESPACE
     }
 
     ImageImplGl::~ImageImplGl()
-    {        
+    {
         if (_uploaded)
-        {               
+        {
+            // No noexcept destructor can return a denied GPU deletion as an
+            // exception: terminate BEFORE touching an in-flight GL texture.
+            if (mutation_guard_ &&
+                !mutation_guard_(mutation_user_data_,
+                                 NativeGpuMutation::TextureDelete,
+                                 _image, uploaded_bytes_))
+                std::terminate();
             glDeleteTextures(1, &_image);
             _uploaded = false;
         }
+    }
+
+    void ImageImplGl::admit_mutation(
+        NativeGpuMutation operation, GLuint name, std::size_t bytes) const
+    {
+        if (mutation_guard_ &&
+            !mutation_guard_(mutation_user_data_, operation, name, bytes))
+            throw std::logic_error(
+                "gCanvas native texture upload/update denied by GPU resource owner");
     }
 
     void ImageImplGl::upload()
@@ -81,6 +98,10 @@ namespace GCANVAS_GL_PROFILE_NAMESPACE
         if (_data == nullptr)
             return;
 
+        // The exact CPU-side texture byte extent is already bounded and
+        // validated. Admission occurs BEFORE allocating any GL object.
+        const auto bytes = required_pixel_bytes();
+        admit_mutation(NativeGpuMutation::TextureUpload, 0u, bytes);
         glGenTextures(1, &_image);
         glBindTexture(GL_TEXTURE_2D, _image);
 
@@ -124,11 +145,17 @@ namespace GCANVAS_GL_PROFILE_NAMESPACE
         }      
 
         
+        uploaded_bytes_ = bytes;
         _uploaded = true;
     }
 
     void ImageImplGl::upload_update()
     {
+        if (!_uploaded || !_image || _data == nullptr)
+            throw std::logic_error(
+                "gCanvas cannot mutate a texture that has no native upload");
+        admit_mutation(NativeGpuMutation::TextureUpdate,
+                       _image, uploaded_bytes_);
         glBindTexture(GL_TEXTURE_2D, _image);
         glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, _width, _height, _type, GL_UNSIGNED_BYTE, _data);
     }

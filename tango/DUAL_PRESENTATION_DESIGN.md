@@ -490,6 +490,59 @@ unexpected driver loss and host callback retirement remain separately OPEN.
 The standalone GLFW demo is still not migrated onto the combined owner,
 so no production TangoOpenGL factory may be registered.
 
+## Native GL Texture/Shader mutation admission (Draft)
+
+The existing gCanvas OpenGL Context now accepts an **optional native
+mutation-admission callback** through its original OpenGL host configuration.
+There is no second GL renderer, no global GL dispatch replacement, no
+extra parser, and no probe/consumer workflow. Without that callback,
+normal gCanvas GLES, Android and other consumers retain their existing
+behavior. Tango's `NativeGLPresentationOwner` installs its
+own callback while constructing the *original* gCanvas Context, so even
+font/shader uploads during renderer creation require the real host's
+same-current-GL-context identity and zero unretired native GLsyncs.
+
+gCanvas calls this observer **immediately before actual driver operations**:
+`glTexImage2D` (including dummy textures and font atlases),
+`glTexSubImage2D` for the existing `Image::update_data()`
+path, `glDeleteTextures` from the original native Image
+destructor, and `glCreateProgram/glDeleteProgram` from the
+existing GL Context. Upload/update admission refusal throws before
+altering texture storage; destructor refusal terminates before deleting
+a texture or program still referenced by the GPU (there is **no**
+context-less or CPU-only fallback).
+
+The combined native owner additionally has an explicit **cumulative CPU
+texture-payload upload byte budget** (default 1 GiB, configurable up
+to 2 GiB). It is checked before the native `glGenTextures/glTexImage2D`
+pair and is deliberately conservative: this is **not** GPU VRAM
+telemetry, driver allocation overhead, mipmap storage, resident image
+peak, uniform/shader memory or an overall device memory budget. A tighter
+budget can refuse atlas creation before GL texture storage is allocated.
+The audit reports accepted native upload/update/delete and program
+create/delete attempts, denied calls and cumulative payload bytes.
+
+The original Mesa/Xvfb test now also uses the real low-level gCanvas
+OpenGL Context and an independently created **actual native GLsync**:
+a texture with real red GPU pixels receives a denied
+`Image::update_data()` call while its earlier GPU fence is
+not acknowledged; `glGetTexImage` must still return red.
+After actual `glClientWaitSync` signal and `glDeleteSync`,
+the same resource updates via real `glTexSubImage2D` and GPU
+readback must contain green texels. Context cleanup must report
+`glDeleteTextures` and `glDeleteProgram` callbacks.
+The combined TangoGL owner also audits its real font/shader uploads and
+deletes across two independent Context generations and rejects a
+tiny upload-byte budget before creating a large font atlas.
+
+**Remaining strict limits:** actual total device VRAM/peak GPU memory,
+native per-resource eviction or concurrency and per-atlas-page leases,
+driver reset/unexpected context loss recovery, physical GPU,
+native IME and OS window callbacks on Windows/macOS. The previously
+accepted strict serial-in-flight frame gate remains mandatory. Do
+not register the production TangoOpenGL factory or treat this as a
+physical-GPU driver recovery proof.
+
 ## Native TTY presenter
 
 Owns/borrows the terminal, validates the bounded buffer, produces VT diff
