@@ -352,6 +352,16 @@ struct UiScopedInputAlias {
   std::string application_name;
 };
 
+/// One compile-time caller fill for a named <slot name="..."/> outlet inside
+/// a precompiled component source. This is a single-root, static M2 slice:
+/// children keep caller-local data/event references, and no Slot Widget or
+/// runtime template engine exists. Multiple-root/default/optional slots and
+/// imported XML modules remain separately gated in #16.
+struct UiScopedSlotFill {
+  std::string name;
+  std::shared_ptr<const CompiledUiProgram> program;
+};
+
 struct UiScopedComponent {
   std::string scope;
   /// ID of an existing structural host in the application's BASE document.
@@ -361,6 +371,11 @@ struct UiScopedComponent {
   /// Optional static aliases; existing three-field aggregate callers keep
   /// shared global input source semantics without an extra owner.
   std::vector<UiScopedInputAlias> input_aliases = {};
+  /// Optional named compile-time slot fills. The template must declare each
+  /// outlet exactly once. Every outlet requires one caller-provided program.
+  /// IDs and binding/event inputs in fills retain caller lexical meaning;
+  /// component-private nodes continue using scope::id and input aliases.
+  std::vector<UiScopedSlotFill> slot_fills = {};
 };
 
 /// Build a single immutable UI program from an XML application and statically

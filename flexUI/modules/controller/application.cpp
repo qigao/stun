@@ -34,6 +34,7 @@ struct ApplicationConfig {
   std::vector<DesktopScopedXmlComponent> scoped_components;
   std::vector<DesktopScopedBindingAlias> scoped_binding_aliases;
   std::vector<DesktopBindingInput> binding_inputs;
+  UiXmlSha256Provider xml_sha256_provider;
 };
 
 std::optional<UiEventKind> to_ui_event_kind(EventType type) noexcept {
@@ -213,6 +214,14 @@ CandidateResult build_candidate(const ApplicationConfig &config, DesktopApplicat
                  DesktopApplicationStage::Configuration,
                  "desktop script module name must not be empty")};
   }
+  // The legacy Flex DSL cannot import XML modules. Reject instead of
+  // silently discarding source revisions or falling back to another loader.
+  if (config.entry_format != UiEntryFormat::Xml && !sources.xml_modules.empty()) {
+    return {{},
+            fail(DesktopApplicationErrorCode::InvalidConfiguration,
+                 DesktopApplicationStage::Configuration,
+                 "XML modules require an XML application entry")};
+  }
 
   try {
     // Repeating independently bounded component XML sources must not multiply
@@ -240,15 +249,38 @@ CandidateResult build_candidate(const ApplicationConfig &config, DesktopApplicat
         remaining -= component.source.size();
       }
     }
-    UiDocumentCompileResult compiled =
-        config.entry_format == UiEntryFormat::Xml
-            ? compile_ui_xml(sources.ui, config.limits.document)
-            : compile_ui_document(sources.ui, {}, config.limits.document);
+    // Use the SAME canonical registry-aware XML adapter for local Component
+    // definitions and host-supplied cross-file modules. The immutable source
+    // catalog is part of THIS candidate, not a global source cache. A failed
+    // hash/import/schema compile never reaches Box or Controller publication.
+    UiDocumentCompileResult compiled;
+    if (config.entry_format == UiEntryFormat::Xml) {
+      compiled = sources.xml_modules.empty()
+                     ? compile_ui_xml(sources.ui, config.registry,
+                                      config.limits.document)
+                     : compile_ui_xml(sources.ui, config.registry,
+                                      sources.xml_modules,
+                                      config.xml_sha256_provider,
+                                      config.limits.document);
+    } else {
+      compiled = compile_ui_document(sources.ui, {}, config.limits.document);
+    }
     if (!compiled) {
       auto error = fail(DesktopApplicationErrorCode::UiCompileFailed,
                         DesktopApplicationStage::UiCompile, compiled.error.message);
       error.ui_error = std::move(compiled.error);
       return {{}, std::move(error)};
+    }
+
+    // The existing explicit scoped-component builder composes a SECOND
+    // candidate atop the XML-authored component program. Until a single
+    // combined ownership ledger is proven, reject that combination instead
+    // of dropping the XML compiler's already-qualified scope provenance.
+    if (!config.scoped_components.empty() && !compiled.scoped_ownership.empty()) {
+      return {{},
+              fail(DesktopApplicationErrorCode::InvalidConfiguration,
+                   DesktopApplicationStage::Configuration,
+                   "XML-authored components cannot be combined with explicit scoped components")};
     }
 
     if (config.scoped_components.empty() &&
@@ -1196,6 +1228,18 @@ DesktopApplicationBuilder::operator=(DesktopApplicationBuilder &&) noexcept = de
 DesktopApplicationBuilder &DesktopApplicationBuilder::xml_entry(std::string source) {
   impl_->config.entry_format = UiEntryFormat::Xml;
   impl_->sources.ui = std::move(source);
+  return *this;
+}
+
+DesktopApplicationBuilder &DesktopApplicationBuilder::xml_module_source(
+    std::string source_key, std::string xml) {
+  impl_->sources.xml_modules.push_back({std::move(source_key), std::move(xml)});
+  return *this;
+}
+
+DesktopApplicationBuilder &DesktopApplicationBuilder::xml_module_sha256_provider(
+    UiXmlSha256Provider provider) {
+  impl_->config.xml_sha256_provider = provider;
   return *this;
 }
 

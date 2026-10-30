@@ -7,6 +7,7 @@
 #include <tinytest.hpp>
 
 #include <atomic>
+#include <cstdint>
 #include <limits>
 #include <memory>
 #include <stdexcept>
@@ -2797,5 +2798,152 @@ spec("Desktop XML components share one native ScriptController and Effects engin
     check_false(static_cast<bool>(no_module));
     check(no_module.error.code ==
           flexUI::DesktopApplicationErrorCode::ScriptRequired);
+  }
+}
+
+
+namespace {
+
+// The only source accepted by this fixed-digest test oracle. SHA-256 was
+// independently calculated from the exact UTF-8 fixture bytes; this callback
+// validates DesktopApplication's provider/ownership contract, NOT the hash
+// algorithm or a deployed cryptographic provider.
+const std::string &desktop_xml_module_fixture() {
+  static const std::string source = R"module(<module namespace="urn:studio:ui" version="1"><components><component name="EditorPanel"><interface><prop name="title" type="string" required="true"/><slot name="actions"/></interface><template><section id="panel"><label id="heading" text="$props.title"/><slot name="actions"/></section></template></component></components></module>)module";
+  return source;
+}
+
+bool desktop_xml_module_digest(const void *bytes, std::size_t count,
+                               std::uint8_t out[32], void *) {
+  if (std::string_view(static_cast<const char *>(bytes), count) !=
+      desktop_xml_module_fixture()) return false;
+  static constexpr std::uint8_t kKnownSha256[32] = {
+      0x38, 0x6d, 0x0e, 0xcf, 0x99, 0x34, 0x26, 0x1c,
+      0xa9, 0x48, 0x42, 0x3c, 0x8f, 0x50, 0x13, 0x65,
+      0xcc, 0x8b, 0x98, 0xa3, 0x5b, 0x03, 0xc6, 0x58,
+      0x1d, 0xc4, 0xbb, 0xa3, 0x81, 0x44, 0x75, 0x6b};
+  for (std::size_t i = 0; i < 32; ++i) out[i] = kKnownSha256[i];
+  return true;
+}
+
+const flexUI::UiXmlSha256Provider kDesktopModuleOracle{
+    &desktop_xml_module_digest, nullptr};
+
+std::string desktop_xml_import_ui() {
+  return R"xml(
+    <ui name="NativeDesktop" xmlns:studio="urn:studio:ui"
+        xmlns:bind="urn:flexui:binding">
+      <imports>
+        <import namespace="urn:studio:ui" prefix="studio"
+                source="components/editor.ui.xml" version="1"
+                sha256="386d0ecf9934261ca948423c8f501365cc8b98a35b03c6581dc4bba38144756b"/>
+      </imports>
+      <main id="root">
+        <studio:EditorPanel id="editor" title="007">
+          <fill name="actions">
+            <label id="save" bind:text="$caption"/>
+          </fill>
+        </studio:EditorPanel>
+      </main>
+    </ui>
+  )xml";
+}
+
+} // namespace
+
+spec("FlexUI DesktopApplication compiles immutable XML modules in its real owner lifecycle") {
+  it("builds and owns imported typed Props/Slots through the normal candidate path") {
+    flexUI::DesktopApplicationBuilder builder(nullptr);
+    builder.xml_entry(desktop_xml_import_ui())
+        .xml_module_source("components/editor.ui.xml", desktop_xml_module_fixture())
+        .xml_module_sha256_provider(kDesktopModuleOracle)
+        .binding_input_string("caption", "Caller caption");
+    auto built = builder.build();
+    check(static_cast<bool>(built));
+    if (!built) return;
+
+    auto &application = *built.application;
+    check_equal(application.sources().xml_modules.size(), std::size_t{1});
+    check_equal(application.sources().xml_modules.front().xml, desktop_xml_module_fixture());
+    check_equal(application.scoped_component_ownership().size(), std::size_t{1});
+    check_equal(application.scoped_component_ownership().front().scope, "editor");
+    check_not_null(application.box().get_by_id("editor"));
+    check_not_null(application.box().get_by_id("editor::panel"));
+    check_not_null(application.box().get_by_id("editor::heading"));
+    check_not_null(application.box().get_by_id("save"));
+    check_null(application.box().get_by_id("heading"));
+    application.box().update();
+    check_equal(application.box().get_by_id("editor::heading")->text(), "007");
+    check_equal(application.box().get_by_id("save")->text(), "Caller caption");
+  }
+
+  it("rejects missing provider and retains the previous generation on failed module reload") {
+    flexUI::DesktopApplicationBuilder without_hash(nullptr);
+    without_hash.xml_entry(desktop_xml_import_ui())
+        .xml_module_source("components/editor.ui.xml", desktop_xml_module_fixture());
+    auto refused = without_hash.build();
+    check_false(static_cast<bool>(refused));
+    check(refused.error.code == flexUI::DesktopApplicationErrorCode::UiCompileFailed);
+    check(refused.error.ui_error.code == flexUI::UiDocumentErrorCode::InvalidComponentScope);
+
+    flexUI::DesktopApplicationBuilder builder(nullptr);
+    builder.xml_entry(desktop_xml_import_ui())
+        .xml_module_source("components/editor.ui.xml", desktop_xml_module_fixture())
+        .xml_module_sha256_provider(kDesktopModuleOracle)
+        .binding_input_string("caption", "Initial");
+    auto built = builder.build();
+    check(static_cast<bool>(built));
+    if (!built) return;
+    auto &app = *built.application;
+    const auto original_generation = app.generation();
+    auto *original_box = &app.box();
+    auto *original_heading = app.box().get_by_id("editor::heading");
+    check_not_null(original_heading);
+
+    auto altered = app.sources();
+    altered.xml_modules.front().xml += " "; // checksum/host oracle must refuse
+    const auto bad_reload = app.reload(std::move(altered));
+    check_false(static_cast<bool>(bad_reload));
+    check(bad_reload.error.code == flexUI::DesktopApplicationErrorCode::UiCompileFailed);
+    check_equal(app.generation(), original_generation);
+    check_equal(&app.box(), original_box);
+    check_equal(app.box().get_by_id("editor::heading"), original_heading);
+    check_equal(app.sources().xml_modules.front().xml, desktop_xml_module_fixture());
+    check_equal(app.scoped_component_ownership().size(), std::size_t{1});
+
+    auto no_source = app.sources();
+    no_source.xml_modules.clear();
+    const auto missing = app.reload(std::move(no_source));
+    check_false(static_cast<bool>(missing));
+    check_equal(app.generation(), original_generation);
+    check_equal(&app.box(), original_box);
+    check_equal(app.sources().xml_modules.size(), std::size_t{1});
+
+    auto replacement = app.sources();
+    const auto offset = replacement.ui.find("title=\"007\"");
+    check(offset != std::string::npos);
+    if (offset == std::string::npos) return;
+    replacement.ui.replace(offset, std::string("title=\"007\"").size(), "title=\"008\"");
+    const auto accepted = app.reload(std::move(replacement));
+    check(static_cast<bool>(accepted));
+    if (!accepted) return;
+    check_equal(app.generation(), original_generation + 1);
+    check_equal(app.sources().xml_modules.size(), std::size_t{1});
+    check_equal(app.scoped_component_ownership().size(), std::size_t{1});
+    app.box().update();
+    check_equal(app.box().get_by_id("editor::heading")->text(), "008");
+  }
+
+  it("fails closed on ambiguous XML-authored and builder-owned component graphs") {
+    flexUI::DesktopApplicationBuilder builder(nullptr);
+    builder.xml_entry(desktop_xml_import_ui())
+        .xml_module_source("components/editor.ui.xml", desktop_xml_module_fixture())
+        .xml_module_sha256_provider(kDesktopModuleOracle)
+        .scoped_xml_component("manual", "root",
+                              "<ui name=\"Manual\"><div id=\"manual\"/></ui>");
+    const auto result = builder.build();
+    check_false(static_cast<bool>(result));
+    check(result.error.code == flexUI::DesktopApplicationErrorCode::InvalidConfiguration);
+    check_null(result.application.get());
   }
 }
