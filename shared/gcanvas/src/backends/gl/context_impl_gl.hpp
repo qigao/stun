@@ -224,6 +224,9 @@ namespace GCANVAS_GL_PROFILE_NAMESPACE
             const std::string& file_path,
             const std::vector<std::uint8_t>& trusted_encoded_revision,
             ImageConfig config = {}) override;
+        Image& create_image_published(
+            const PublishedEncodedImage& published,
+            ImageConfig config = {}) override;
         Image& create_image(int width, int height, int components, const unsigned char* data,
                             std::size_t size, ImageConfig config = {}) override;
         Font& create_font(const std::string& file_path) override;
@@ -285,6 +288,11 @@ namespace GCANVAS_GL_PROFILE_NAMESPACE
         Image& create_file_image(
             const std::string& file_path,
             const std::vector<std::uint8_t>* trusted_encoded_revision,
+            ImageConfig config);
+        Image& finish_frozen_encoded_image(
+            const std::string& source_name,
+            const std::vector<std::uint8_t>& frozen_encoded,
+            const ImagePublicationIdentity* publication,
             ImageConfig config);
         void draw_text_impl(float x, float y, const std::u32string& text,
                             const Transform& transform, bool alpha_mask,

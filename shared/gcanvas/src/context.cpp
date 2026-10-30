@@ -137,6 +137,21 @@ namespace gcanvas
             "gCanvas verified encoded file revisions are unsupported by this backend");
     }
 
+    Image& Context::create_image_published(
+        const PublishedEncodedImage& published, ImageConfig config)
+    {
+        (void)published;
+        (void)config;
+        throw std::logic_error(
+            "gCanvas published encoded image revisions are unsupported by this backend");
+    }
+
+    void Context::mark_image_publication(
+        Image& image, const ImagePublicationIdentity& identity)
+    {
+        image._source_publication = identity;
+    }
+
     Context::ShadowKernel Context::make_filter_kernel(float blur_radius, float spread_radius,
                                                        float target_alpha,
                                                        std::size_t maximum_samples,

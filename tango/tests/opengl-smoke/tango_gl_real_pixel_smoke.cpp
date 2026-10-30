@@ -1365,6 +1365,83 @@ void exercise_actual_gl_mutation_barrier(
             audit.updates == old_updates + 2,
             "In-place aliased Image::update_data did not preserve its bytes");
 
+    // PUBLISHER-OWNED REVISION CONTRACT: consume captured encoded content,
+    // not a pathname or a second image decoder. Red publication A1 and A3
+    // have identical source bytes but DISTINCT publisher generations.
+    const gcanvas::PublishedEncodedImage published_red_a1{
+        {"mesa-publisher", "status-icon", 1u}, trusted_red_encoded};
+    const gcanvas::PublishedEncodedImage published_green_b{
+        {"mesa-publisher", "status-icon", 2u}, trusted_green_encoded};
+    const gcanvas::PublishedEncodedImage published_red_a3{
+        {"mesa-publisher", "status-icon", 3u}, trusted_red_encoded};
+    const int publisher_uploads_before = audit.uploads;
+    std::vector<gcanvas::NativeGpuResourceId> publisher_inventory_before;
+    require(context->native_gpu_resource_ids(publisher_inventory_before),
+            "Native GL publisher test did not expose previous GPU identities");
+    auto& published_a1 = context->create_image_published(published_red_a1);
+    std::vector<gcanvas::NativeGpuResourceId> publisher_a1_inventory;
+    require(context->native_gpu_resource_ids(publisher_a1_inventory),
+            "Published A1 missing native image resource");
+    const GLuint published_a1_id = newly_uploaded_image(
+        publisher_inventory_before, publisher_a1_inventory);
+    auto& published_b = context->create_image_published(published_green_b);
+    std::vector<gcanvas::NativeGpuResourceId> publisher_b_inventory;
+    require(context->native_gpu_resource_ids(publisher_b_inventory),
+            "Published B missing native image resource");
+    const GLuint published_b_id = newly_uploaded_image(
+        publisher_a1_inventory, publisher_b_inventory);
+    auto& published_a3 = context->create_image_published(published_red_a3);
+    std::vector<gcanvas::NativeGpuResourceId> publisher_a3_inventory;
+    require(context->native_gpu_resource_ids(publisher_a3_inventory),
+            "Published A3 missing native image resource");
+    const GLuint published_a3_id = newly_uploaded_image(
+        publisher_b_inventory, publisher_a3_inventory);
+    require(audit.uploads == publisher_uploads_before + 3 &&
+            published_a1_id != 0u && published_b_id != 0u &&
+            published_a3_id != 0u &&
+            published_a1_id != published_a3_id &&
+            published_b_id != published_a3_id &&
+            published_a1.source_publication() != nullptr &&
+            published_b.source_publication() != nullptr &&
+            published_a3.source_publication() != nullptr &&
+            *published_a1.source_publication() == published_red_a1.publication &&
+            *published_b.source_publication() == published_green_b.publication &&
+            *published_a3.source_publication() == published_red_a3.publication &&
+            *published_a1.source_publication() !=
+                *published_a3.source_publication() &&
+            published_a1.pixels() == published_a3.pixels() &&
+            published_a1.pixels() != published_b.pixels(),
+            "A-B-A publication reused version identity or native image resource");
+    glBindTexture(GL_TEXTURE_2D, published_a1_id);
+    glGetTexImage(GL_TEXTURE_2D, 0, GL_RGBA, GL_UNSIGNED_BYTE, actual.data());
+    require(actual == red && glGetError() == GL_NO_ERROR,
+            "Published A1 decoded wrong real GPU texels");
+    glBindTexture(GL_TEXTURE_2D, published_b_id);
+    glGetTexImage(GL_TEXTURE_2D, 0, GL_RGBA, GL_UNSIGNED_BYTE, actual.data());
+    require(actual == green && glGetError() == GL_NO_ERROR,
+            "Published B decoded wrong real GPU texels");
+    glBindTexture(GL_TEXTURE_2D, published_a3_id);
+    glGetTexImage(GL_TEXTURE_2D, 0, GL_RGBA, GL_UNSIGNED_BYTE, actual.data());
+    require(actual == red && glGetError() == GL_NO_ERROR,
+            "Published A3 decoded wrong real GPU texels");
+    const gcanvas::PublishedEncodedImage invalid_publisher{
+        {"", "status-icon", 4u}, trusted_red_encoded};
+    bool invalid_publisher_denied = false;
+    try { (void)context->create_image_published(invalid_publisher); }
+    catch (const std::invalid_argument&) { invalid_publisher_denied = true; }
+    require(invalid_publisher_denied &&
+            audit.uploads == publisher_uploads_before + 3,
+            "Unqualified publisher identity reached native GL upload");
+
+    // A real synchronous manual Image mutation invalidates encoded-source
+    // provenance even if the written pixels are identical. A GPU rejection
+    // would instead retain the old source tag via the existing rollback.
+    published_a1.update_data(
+        published_a1.pixels().data(), published_a1.pixels().size());
+    require(published_a1.source_publication() == nullptr &&
+            published_a3.source_publication() != nullptr,
+            "Mutable Image retained stale published source identity");
+
     context.reset(); // Actual ImageImplGl::~ and GL shader program deletion.
     require(audit.deletes >= audit.uploads &&
             audit.program_deletes == audit.program_creates &&
@@ -1390,6 +1467,8 @@ void exercise_actual_gl_mutation_barrier(
               << "TANGO_GL_FROZEN_PNG_INVALID_REJECTED=1\n"
               << "TANGO_GL_TRUSTED_ENCODED_REVISION_REJECTED=1\n"
               << "TANGO_GL_CONCURRENT_INPLACE_VERSION_GUARD=1\n"
+              << "TANGO_GL_PUBLISHED_ABA_REVISIONS=1\n"
+              << "TANGO_GL_PUBLISHED_IMAGE_MUTATION_RETIRES_ID=1\n"
               << "TANGO_GL_ACTUAL_GL_DELETE_AUDIT=1\n";
 }
 

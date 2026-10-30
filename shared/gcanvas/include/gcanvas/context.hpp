@@ -101,6 +101,15 @@ namespace gcanvas
             std::size_t{128} * 1024u * 1024u;
     };
 
+    // Producer-owned immutable encoded snapshot. A valid publisher must
+    // pin the complete bytes for this call and never recycle a publication
+    // generation within its (publisher_id, asset_id) identity domain.
+    // There is no pathname or OS read in the published-source load path.
+    struct PublishedEncodedImage final {
+        ImagePublicationIdentity publication;
+        std::vector<std::uint8_t> encoded_bytes;
+    };
+
     struct ImageUpdatePeakUsage final {
         std::size_t retained_cpu_bytes = 0;
         std::size_t candidate_cpu_bytes = 0;
@@ -458,6 +467,12 @@ namespace gcanvas
             const std::string& file_path,
             const std::vector<std::uint8_t>& trusted_encoded_revision,
             ImageConfig config = {});
+        // Consume a producer-pinned immutable encoded revision directly,
+        // without opening a mutable pathname. Stores the publication
+        // identity on the Image; does NOT authenticate publisher tokens.
+        // Other backends must explicitly refuse, not decode via fallback.
+        virtual Image& create_image_published(
+            const PublishedEncodedImage& published, ImageConfig config = {});
         // size must equal width * height * components; input pixels are copied before return.
         virtual Image& create_image(int width, int height, int components,
                                     const unsigned char* data, std::size_t size,
@@ -543,6 +558,8 @@ namespace gcanvas
                                                  vec2 maximum);
         void reset_transient_path_resources() noexcept;
 
+        void mark_image_publication(
+            Image& image, const ImagePublicationIdentity& identity);
         virtual void register_image(Image* image) = 0;
         virtual void register_font(Font* font) = 0;
         virtual void update_image(Image* image) = 0;

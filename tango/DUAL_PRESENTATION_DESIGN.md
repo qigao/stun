@@ -790,6 +790,56 @@ and preserve the open descriptor semantics on each supported platform.
 The production TangoOpenGL factory is still disabled and Issue #342
 remains open.
 
+## Producer-pinned immutable Image revisions and publication identity (Draft)
+
+A version identity is **not** a hash. Even if a producer publishes
+encoded red (A1), green (B2), and byte-for-byte identical red (A3),
+A1 and A3 have different commit/publication identities. A producer
+must mint an immutable (publisher_id, asset_id, monotonically
+non-reused generation) and pin a complete immutable encoded source
+for the duration of its consumer lease. The consumer must not create
+revision IDs by inspecting the mutable pathname or hashing a
+possibly torn first read. No revision counter is invented by gCanvas.
+
+`PublishedEncodedImage` carries the producer-issued identity and its
+complete encoded bytes. The OpenGL/GLES
+`Context::create_image_published(source)` overload **does not open
+a pathname**. It validates identity length/generation and encoded
+source limits, preflights the encoded-source allocation, makes one
+Context-owned frozen byte copy, and passes that snapshot through
+the **same original STB metadata/decode and GL texture admission**
+as the one-open loader. The resulting `Image::source_publication()`
+records the owner-supplied identity, distinct from the pixel hash.
+A successful client-side `Image::update_data` clears this source
+provenance even when replacement pixels equal the original; a failed
+GPU update retains provenance and old pixels. Non-GL backends fail
+closed rather than disguising an unsupported publisher snapshot
+as an unverified file read.
+
+The native Mesa regression uses real red PNG source bytes A1,
+different green B2, and red A3 carrying a new generation. It checks
+separate real GL texture uploads/pixel readbacks, distinct A1/A3
+publication IDs despite equal content, rejection of an invalid
+publisher identity, and provenance retirement on client mutation.
+
+**Boundary:** gCanvas cannot authenticate a producer-supplied
+publisher_id, ensure generations never repeat outside its own API,
+or prove OS-level atomic publication. The host must supply this
+guarantee through a versioned immutable store and a valid pinned
+lease (or by transferring an owned immutable snapshot). If the host
+mutates `source.encoded_bytes` concurrently with the call, that
+violates the C++ object access contract and is not admitted as a
+safe race. Changing a mutable "current revision" pointer between
+two calls does not retroactively invalidate an already pinned
+snapshot; clients that insist on the latest revision must arbitrate
+that policy with the publisher. The **filesystem publisher,
+cross-process leases/GC and Windows rename/sharing qualification**
+remain separate gates. External producer-owned bytes are outside
+gCanvas's modeled memory peak.
+
+Production TangoOpenGL remains unavailable until its distinct
+native platform/IME/device-loss gates close.
+
 ## Native TTY presenter
 
 Owns/borrows the terminal, validates the bounded buffer, produces VT diff
