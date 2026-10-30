@@ -60,4 +60,48 @@ std::optional<CellHostInput> cell_input_key(
 std::optional<CellHostInput> cell_input_character(
     const CellPixelPresenter& presenter, std::uint32_t scalar);
 
+
+// Synchronous host focus/resize/input admission. A successful GPU frame is
+// NOT automatically an input frame: its host must have focus and explicitly
+// publish the exact observed window/framebuffer metrics AFTER the host swap.
+// Any focus transition, resize callback, silently changed host dimensions,
+// renderer failure, or unacknowledged repaint retires input without changing
+// the renderer or inventing an event queue. This is not an IME model.
+class CellHostFrameGate final {
+public:
+    explicit CellHostFrameGate(CellPixelPresenter& presenter) noexcept;
+    CellHostFrameGate(const CellHostFrameGate&) = delete;
+    CellHostFrameGate& operator=(const CellHostFrameGate&) = delete;
+
+    // UI-owner-only; either focus transition requires a fresh successful
+    // present/swap before any key/character/pointer can be admitted.
+    void set_focus(bool focused);
+    // Call on ANY logical window, framebuffer or DPI generation change.
+    void invalidate_geometry();
+
+    // After a real present+swap, bind input to this EXACT successful submission,
+    // grid revision and same-generation native host sizes. A missing frame or
+    // incoherent framebuffer size fails, never accepting an old frame.
+    void accept_presented_frame(const CellWindowExtents& observed);
+
+    std::optional<CellHostInput> pointer(
+        double x, double y, const CellWindowExtents& current,
+        CellMouseAction action, CellMouseButton button, std::uint8_t modifiers);
+    std::optional<CellHostInput> key(
+        tui_key_t key, std::uint8_t modifiers,
+        const CellWindowExtents& current);
+    std::optional<CellHostInput> character(
+        std::uint32_t scalar, const CellWindowExtents& current);
+
+private:
+    void require_owner() const;
+    bool admitted_for(const CellWindowExtents& current);
+    CellPixelPresenter* presenter_ = nullptr;
+    CellWindowExtents accepted_{};
+    std::uint64_t revision_ = 0;
+    std::uint64_t submission_ = 0;
+    bool focused_ = false;
+    bool admitted_ = false;
+};
+
 } // namespace flex::tango_opengl

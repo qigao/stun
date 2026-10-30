@@ -300,6 +300,13 @@ bool CellPixelPresenter::on_owner_thread() const noexcept {
     return std::this_thread::get_id() == owner_thread_;
 }
 
+std::uint64_t CellPixelPresenter::submission_id() const {
+    if (!on_owner_thread())
+        throw std::logic_error(
+            "TangoOpenGL submission identity accessed off its GL owner");
+    return submitted_plan_ ? submission_id_ : 0;
+}
+
 std::optional<CellPixelHit> CellPixelPresenter::hit_test_window_pointer(
     double window_x, double window_y,
     int window_width, int window_height,
@@ -325,6 +332,9 @@ void CellPixelPresenter::present(const tui_grid_snapshot_t* snapshot,
     if (!on_owner_thread())
         throw std::logic_error(
             "TangoOpenGL presenter accessed outside its GL owner thread");
+    if (submission_id_ == (std::numeric_limits<std::uint64_t>::max)())
+        throw std::overflow_error(
+            "TangoOpenGL submitted pixel frame generation exhausted");
     auto plan = prepare_cell_pixel_plan(snapshot, metrics);
 
     // Invalid font state is still a PRE-submit error: keep the previously
@@ -335,6 +345,7 @@ void CellPixelPresenter::present(const tui_grid_snapshot_t* snapshot,
     submitted_plan_.reset();
     paint_cell_pixel_plan(*renderer_, plan);
     submitted_plan_.emplace(std::move(plan));
+    ++submission_id_;
 }
 
 } // namespace flex::tango_opengl

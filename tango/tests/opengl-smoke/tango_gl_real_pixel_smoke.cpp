@@ -198,6 +198,10 @@ void require_rgb_dominance(const Pixel& p, int channel,
 struct NativeX11Input final {
     GLFWwindow* window;
     flex::tango_opengl::CellPixelPresenter& presenter;
+    flex::tango_opengl::CellHostFrameGate gate;
+    int focus_loss_callbacks = 0;
+    int focus_gain_callbacks = 0;
+    int resize_callbacks = 0;
     std::vector<flex::tango_opengl::CellHostInput> presses;
     std::vector<flex::tango_opengl::CellHostInput> releases;
     std::vector<flex::tango_opengl::CellHostInput> keys;
@@ -206,20 +210,35 @@ struct NativeX11Input final {
 
     NativeX11Input(GLFWwindow* handle,
                    flex::tango_opengl::CellPixelPresenter& owner)
-        : window(handle), presenter(owner) {
+        : window(handle), presenter(owner), gate(owner) {
+        gate.set_focus(glfwGetWindowAttrib(window, GLFW_FOCUSED) == GLFW_TRUE);
         glfwSetWindowUserPointer(window, this);
         glfwSetMouseButtonCallback(window, &on_mouse);
         glfwSetKeyCallback(window, &on_key);
         glfwSetCharCallback(window, &on_character);
+        glfwSetWindowFocusCallback(window, &on_focus);
+        glfwSetWindowSizeCallback(window, &on_window_size);
+        glfwSetFramebufferSizeCallback(window, &on_framebuffer_size);
     }
     ~NativeX11Input() {
         glfwSetMouseButtonCallback(window, nullptr);
         glfwSetKeyCallback(window, nullptr);
         glfwSetCharCallback(window, nullptr);
+        glfwSetWindowFocusCallback(window, nullptr);
+        glfwSetWindowSizeCallback(window, nullptr);
+        glfwSetFramebufferSizeCallback(window, nullptr);
         glfwSetWindowUserPointer(window, nullptr);
     }
     NativeX11Input(const NativeX11Input&) = delete;
     NativeX11Input& operator=(const NativeX11Input&) = delete;
+
+    flex::tango_opengl::CellWindowExtents extents() const {
+        flex::tango_opengl::CellWindowExtents result{};
+        glfwGetWindowSize(window, &result.window_width, &result.window_height);
+        glfwGetFramebufferSize(window, &result.framebuffer_width,
+                               &result.framebuffer_height);
+        return result;
+    }
 
     template <typename F>
     static void guarded(GLFWwindow* handle, F&& fn) noexcept {
@@ -242,17 +261,13 @@ struct NativeX11Input final {
                     "Injected mouse button/modifiers are not the expected X11 events");
             double x = 0.0, y = 0.0;
             glfwGetCursorPos(handle, &x, &y);
-            int ww = 0, wh = 0, fw = 0, fh = 0;
-            glfwGetWindowSize(handle, &ww, &wh);
-            glfwGetFramebufferSize(handle, &fw, &fh);
-            const auto hit = flex::tango_opengl::cell_input_pointer(
-                self.presenter, x, y, {ww, wh, fw, fh},
+            const auto hit = self.gate.pointer(
+                x, y, self.extents(),
                 action == GLFW_PRESS ?
                     flex::tango_opengl::CellMouseAction::Press :
                     flex::tango_opengl::CellMouseAction::Release,
                 flex::tango_opengl::CellMouseButton::Left, TUI_MOD_NONE);
-            require(hit.has_value(),
-                    "XTest mouse event did not hit the submitted Tango grid");
+            if (!hit) return; // Unfocused or retired frames are never input.
             if (action == GLFW_PRESS)
                 self.presses.push_back(*hit);
             else
@@ -267,10 +282,9 @@ struct NativeX11Input final {
             if (mods != 0 || action != GLFW_PRESS)
                 throw std::runtime_error("XTest sent unexpected keyboard state");
             if (key == GLFW_KEY_LEFT) {
-                const auto event = flex::tango_opengl::cell_input_key(
-                    self.presenter, TUI_KEY_LEFT, TUI_MOD_NONE);
-                require(event.has_value(), "GLFW Left key was not converted to C11");
-                self.keys.push_back(*event);
+                const auto event = self.gate.key(
+                    TUI_KEY_LEFT, TUI_MOD_NONE, self.extents());
+                if (event) self.keys.push_back(*event);
             } else if (key != GLFW_KEY_A) {
                 throw std::runtime_error("XTest keyboard input was not Left or A");
             }
@@ -280,11 +294,30 @@ struct NativeX11Input final {
     static void on_character(GLFWwindow* handle,
                              unsigned int scalar) noexcept {
         guarded(handle, [&](NativeX11Input& self) {
-            const auto event = flex::tango_opengl::cell_input_character(
-                self.presenter, scalar);
-            require(event.has_value(),
-                    "X11 committed character was not converted to Tango C11");
-            self.characters.push_back(*event);
+            const auto event = self.gate.character(scalar, self.extents());
+            if (event) self.characters.push_back(*event);
+        });
+    }
+
+    static void on_focus(GLFWwindow* handle, int focused) noexcept {
+        guarded(handle, [&](NativeX11Input& self) {
+            self.gate.set_focus(focused == GLFW_TRUE);
+            if (focused == GLFW_TRUE) ++self.focus_gain_callbacks;
+            else ++self.focus_loss_callbacks;
+        });
+    }
+
+    static void on_window_size(GLFWwindow* handle, int, int) noexcept {
+        guarded(handle, [&](NativeX11Input& self) {
+            self.gate.invalidate_geometry();
+            ++self.resize_callbacks;
+        });
+    }
+
+    static void on_framebuffer_size(GLFWwindow* handle, int, int) noexcept {
+        guarded(handle, [&](NativeX11Input& self) {
+            self.gate.invalidate_geometry();
+            ++self.resize_callbacks;
         });
     }
 
@@ -303,6 +336,7 @@ struct NativeX11Input final {
 void exercise_real_x11_input(
     GLFWwindow* window,
     flex::tango_opengl::CellPixelPresenter& presenter,
+    const tui_grid_snapshot_t* original_frame,
     flex::tango_opengl::CellPixelMetrics layout,
     const std::string& pixel_artifact) {
     Display* const display = glfwGetX11Display();
@@ -324,8 +358,14 @@ void exercise_real_x11_input(
     XSetInputFocus(display, native_window, RevertToParent, CurrentTime);
     XSync(display, False);
     events.wait_for(
-        [&] { return glfwGetWindowAttrib(window, GLFW_FOCUSED) == GLFW_TRUE; },
-        "GLFW did not receive real X11 focus after window mapping");
+        [&] { return glfwGetWindowAttrib(window, GLFW_FOCUSED) == GLFW_TRUE &&
+                     events.focus_gain_callbacks != 0; },
+        "GLFW did not receive real X11 focus callback after window mapping");
+    require(!events.gate.key(TUI_KEY_LEFT, TUI_MOD_NONE, events.extents()),
+            "X11 initial focus accepted keyboard without a fresh GPU frame");
+    presenter.present(original_frame, layout);
+    glfwSwapBuffers(window);
+    events.gate.accept_presented_frame(events.extents());
 
     int root_x = 0, root_y = 0;
     Window child = None;
@@ -422,6 +462,75 @@ void exercise_real_x11_input(
             highlight[2] < 85 && highlight[3] >= 240,
             "XTest clicked cell did not repaint with the real GL highlight");
     save_ppm(image, pixel_artifact);
+    glfwSwapBuffers(window);
+    events.gate.accept_presented_frame(events.extents());
+
+    // Move X11 focus to the REAL root window. A stale GPU frame must never
+    // remain keyboard-active after GLFW receives a server focus-out event.
+    XSetInputFocus(display, DefaultRootWindow(display),
+                   RevertToParent, CurrentTime);
+    XSync(display, False);
+    events.wait_for(
+        [&] { return glfwGetWindowAttrib(window, GLFW_FOCUSED) == GLFW_FALSE &&
+                     events.focus_loss_callbacks != 0; },
+        "X11 focus-out event never reached the GLFW host");
+    require(!events.gate.key(TUI_KEY_LEFT, TUI_MOD_NONE, events.extents()) &&
+            !events.gate.character('a', events.extents()),
+            "Old TangoGL GPU frame wrongly admitted input after real X11 focus loss");
+
+    const std::size_t before_blur_keys = events.keys.size();
+    inject_key(XK_Left); // Actual server key goes to the focused root, not GUI.
+    for (int i = 0; i != 10; ++i) {
+        glfwPollEvents();
+        if (events.failure) std::rethrow_exception(events.failure);
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+    require(events.keys.size() == before_blur_keys,
+            "Unfocused TangoGL admitted an injected X11 keyboard event");
+
+    // Returning focus cannot reactivate the old painted plan by itself.
+    XSetInputFocus(display, native_window, RevertToParent, CurrentTime);
+    XSync(display, False);
+    const int prior_focus_gains = events.focus_gain_callbacks;
+    events.wait_for(
+        [&] { return glfwGetWindowAttrib(window, GLFW_FOCUSED) == GLFW_TRUE &&
+                     events.focus_gain_callbacks > prior_focus_gains; },
+        "X11 focus recovery event never reached the GLFW host");
+    require(!events.gate.key(TUI_KEY_LEFT, TUI_MOD_NONE, events.extents()),
+            "GLFW focus regain wrongly resurrected old TangoGL input admission");
+    bool reused_old = false;
+    try {
+        events.gate.accept_presented_frame(events.extents());
+    } catch (const std::logic_error&) {
+        reused_old = true;
+    }
+    require(reused_old, "Focus regain accepted an old completed GPU frame");
+    presenter.present(updated.get(), layout);
+    glfwSwapBuffers(window);
+    events.gate.accept_presented_frame(events.extents());
+    inject_key(XK_Left);
+    events.wait_for([&] { return events.keys.size() == before_blur_keys + 1u; },
+                    "X11 focus recovery failed to restore real C11 keyboard input");
+    require(events.keys.back().grid_revision == 102u,
+            "X11 refocused keyboard was attached to a stale grid revision");
+
+    // Real X server resize: current framebuffer is intentionally NOT
+    // repainted for this new window generation, so all input must be retired.
+    XResizeWindow(display, native_window,
+                  static_cast<unsigned>(kWidth + 16),
+                  static_cast<unsigned>(kHeight));
+    XSync(display, False);
+    events.wait_for(
+        [&] { return events.extents().window_width == kWidth + 16 &&
+                     events.resize_callbacks != 0; },
+        "Native X11 window resize was not observed by GLFW");
+    require(!events.gate.key(TUI_KEY_LEFT, TUI_MOD_NONE, events.extents()) &&
+            !events.gate.character('a', events.extents()),
+            "Unpresented resized X11 viewport wrongly admitted stale input");
+    std::cout << "TANGO_GL_XTEST_FOCUS_RETIRE=1\n"
+              << "TANGO_GL_XTEST_FOCUS_REPRESENT=1\n"
+              << "TANGO_GL_XTEST_RESIZE_RETIRE=1\n";
+
     std::cout << "TANGO_GL_XTEST_KEY=LEFT,A\n"
               << "TANGO_GL_XTEST_FRAME_REVISION=102\n"
               << "TANGO_GL_XTEST_REAL_PIXEL_PASS=1\n";
@@ -585,7 +694,8 @@ void exercise_gpu(const std::string& font_path,
 
     // The original pixel contract passed. Now exercise actual X11 server
     // input delivered through GLFW, and record the interactive GPU frame.
-    exercise_real_x11_input(window.handle, *presenter, layout,
+    layout.expected_grid_revision = tui_grid_snapshot_revision(tango.frame);
+    exercise_real_x11_input(window.handle, *presenter, tango.frame, layout,
                             ppm + ".input.ppm");
     std::cout << "TANGO_GL_PIXEL_PASS=1\n";
 }
