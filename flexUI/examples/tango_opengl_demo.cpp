@@ -76,6 +76,7 @@ using flex::tango_opengl::CellMouseAction;
 using flex::tango_opengl::CellMouseButton;
 using flex::tango_opengl::CellWindowExtents;
 using flex::tango_opengl::CellPixelPresenter;
+using flex::tango_opengl::CellHostFrameGate;
 
 tui_key_t native_navigation_key(int key) noexcept {
     if (key >= GLFW_KEY_F1 && key <= GLFW_KEY_F12)
@@ -150,6 +151,7 @@ CellMouseButton native_button(int button) {
 struct GlfwTangoInput final {
     GLFWwindow* window;
     CellPixelPresenter* presenter;
+    CellHostFrameGate gate;
     std::exception_ptr failure;
     double wheel_remainder = 0.0;
     int last_column = -1;
@@ -160,13 +162,17 @@ struct GlfwTangoInput final {
     bool dirty = false;
 
     GlfwTangoInput(GLFWwindow* host, CellPixelPresenter& frame)
-        : window(host), presenter(&frame) {
+        : window(host), presenter(&frame), gate(frame) {
+        gate.set_focus(glfwGetWindowAttrib(window, GLFW_FOCUSED) == GLFW_TRUE);
         glfwSetWindowUserPointer(window, this);
         glfwSetMouseButtonCallback(window, &on_button);
         glfwSetCursorPosCallback(window, &on_cursor);
         glfwSetScrollCallback(window, &on_scroll);
         glfwSetKeyCallback(window, &on_key);
         glfwSetCharCallback(window, &on_character);
+        glfwSetWindowFocusCallback(window, &on_focus);
+        glfwSetWindowSizeCallback(window, &on_window_size);
+        glfwSetFramebufferSizeCallback(window, &on_framebuffer_size);
     }
     ~GlfwTangoInput() {
         glfwSetMouseButtonCallback(window, nullptr);
@@ -174,6 +180,9 @@ struct GlfwTangoInput final {
         glfwSetScrollCallback(window, nullptr);
         glfwSetKeyCallback(window, nullptr);
         glfwSetCharCallback(window, nullptr);
+        glfwSetWindowFocusCallback(window, nullptr);
+        glfwSetWindowSizeCallback(window, nullptr);
+        glfwSetFramebufferSizeCallback(window, nullptr);
         glfwSetWindowUserPointer(window, nullptr);
     }
     GlfwTangoInput(const GlfwTangoInput&) = delete;
@@ -236,8 +245,7 @@ struct GlfwTangoInput final {
     }
     void pointer_at(double x, double y, CellMouseAction action,
                     CellMouseButton button, std::uint8_t modifiers) {
-        dispatch(flex::tango_opengl::cell_input_pointer(
-            *presenter, x, y, extents(), action, button, modifiers));
+        dispatch(gate.pointer(x, y, extents(), action, button, modifiers));
     }
     static void on_button(GLFWwindow* host, int button, int action, int mods) {
         guarded(host, [&](GlfwTangoInput& self) {
@@ -288,14 +296,31 @@ struct GlfwTangoInput final {
                 throw std::invalid_argument("TangoGL unsupported key transition");
             const auto canonical = native_navigation_key(key);
             if (canonical == TUI_KEY_NONE) return;
-            self.dispatch(flex::tango_opengl::cell_input_key(
-                *self.presenter, canonical, native_modifiers(mods)));
+            self.dispatch(self.gate.key(
+                canonical, native_modifiers(mods), self.extents()));
         });
     }
     static void on_character(GLFWwindow* host, unsigned int scalar) {
         guarded(host, [&](GlfwTangoInput& self) {
-            self.dispatch(flex::tango_opengl::cell_input_character(
-                *self.presenter, scalar));
+            self.dispatch(self.gate.character(scalar, self.extents()));
+        });
+    }
+    static void on_focus(GLFWwindow* host, int focused) {
+        guarded(host, [&](GlfwTangoInput& self) {
+            self.gate.set_focus(focused == GLFW_TRUE);
+            self.wheel_remainder = 0.0; // Do not replay a pre-blur scroll.
+        });
+    }
+    static void on_window_size(GLFWwindow* host, int, int) {
+        guarded(host, [&](GlfwTangoInput& self) {
+            self.gate.invalidate_geometry();
+            self.wheel_remainder = 0.0;
+        });
+    }
+    static void on_framebuffer_size(GLFWwindow* host, int, int) {
+        guarded(host, [&](GlfwTangoInput& self) {
+            self.gate.invalidate_geometry();
+            self.wheel_remainder = 0.0;
         });
     }
 };
@@ -386,6 +411,9 @@ int main(int argc, char** argv) {
             }
             presenter->present(frame->snapshot, layout);
             glfwSwapBuffers(window);
+            // Focus/resize alone cannot make an old frame clickable.
+            // Admit only the exact just-presented native window+pixel frame.
+            input.gate.accept_presented_frame(input.extents());
         }
         // Presenter and gCanvas GPU resources destruct with current GL
         // context, before glfwDestroyWindow below.

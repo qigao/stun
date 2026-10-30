@@ -159,4 +159,92 @@ std::optional<CellHostInput> cell_input_character(
     return result;
 }
 
+
+CellHostFrameGate::CellHostFrameGate(CellPixelPresenter& presenter) noexcept
+    : presenter_(&presenter) {}
+
+void CellHostFrameGate::require_owner() const {
+    if (!presenter_->on_owner_thread())
+        throw std::logic_error(
+            "TangoOpenGL host frame admission accessed off its GL/UI owner");
+}
+
+void CellHostFrameGate::set_focus(bool focused) {
+    require_owner();
+    // Even true->true and false->false are conservative: the host must
+    // publish a freshly swapped frame after a focus notification.
+    focused_ = focused;
+    admitted_ = false;
+}
+
+void CellHostFrameGate::invalidate_geometry() {
+    require_owner();
+    admitted_ = false;
+}
+
+void CellHostFrameGate::accept_presented_frame(
+    const CellWindowExtents& observed) {
+    require_owner();
+    admitted_ = false;
+    if (!focused_) return;
+    const auto* plan = presenter_->last_submitted_plan();
+    if (!plan || !presenter_->submission_id())
+        throw std::logic_error(
+            "TangoOpenGL cannot admit input without a completed pixel frame");
+    if (presenter_->submission_id() <= submission_)
+        throw std::logic_error(
+            "TangoOpenGL focus/resize admission requires a fresh completed frame");
+    // The same function as pointer hit testing checks the actual painted
+    // framebuffer and rejects zero/mismatched dimensions; no guessed scaling.
+    if (!hit_test_window_pointer(
+            *plan, 0.0, 0.0, observed.window_width,
+            observed.window_height, observed.framebuffer_width,
+            observed.framebuffer_height))
+        throw std::logic_error(
+            "TangoOpenGL cannot admit an incoherent host pixel frame");
+    accepted_ = observed;
+    revision_ = plan->grid_revision();
+    submission_ = presenter_->submission_id();
+    admitted_ = true;
+}
+
+bool CellHostFrameGate::admitted_for(const CellWindowExtents& current) {
+    require_owner();
+    if (!focused_ || !admitted_) return false;
+    if (accepted_.window_width != current.window_width ||
+        accepted_.window_height != current.window_height ||
+        accepted_.framebuffer_width != current.framebuffer_width ||
+        accepted_.framebuffer_height != current.framebuffer_height) {
+        admitted_ = false;
+        return false;
+    }
+    const auto* plan = presenter_->last_submitted_plan();
+    if (!plan || plan->grid_revision() != revision_ ||
+        presenter_->submission_id() != submission_) {
+        admitted_ = false;
+        return false;
+    }
+    return true;
+}
+
+std::optional<CellHostInput> CellHostFrameGate::pointer(
+    double x, double y, const CellWindowExtents& current,
+    CellMouseAction action, CellMouseButton button, std::uint8_t modifiers) {
+    if (!admitted_for(current)) return std::nullopt;
+    return cell_input_pointer(
+        *presenter_, x, y, current, action, button, modifiers);
+}
+
+std::optional<CellHostInput> CellHostFrameGate::key(
+    tui_key_t key, std::uint8_t modifiers, const CellWindowExtents& current) {
+    if (!admitted_for(current)) return std::nullopt;
+    return cell_input_key(*presenter_, key, modifiers);
+}
+
+std::optional<CellHostInput> CellHostFrameGate::character(
+    std::uint32_t scalar, const CellWindowExtents& current) {
+    if (!admitted_for(current)) return std::nullopt;
+    return cell_input_character(*presenter_, scalar);
+}
+
 } // namespace flex::tango_opengl

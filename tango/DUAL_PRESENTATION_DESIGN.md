@@ -208,6 +208,39 @@ mouse capture/drag, resize/HiDPI transitions, focus-loss retirement,
 GL context loss/recreation and GPU fence ownership remain open. Keep
 the public TangoOpenGL backend unregistered.
 
+## Focus / resize-generation input retirement (experimental)
+
+`CellHostFrameGate` is a synchronous, owner-thread-only input **admission**
+layer around the existing `CellPixelPresenter`. The last source revision is
+not enough: two separate native draws can use the same C11 grid revision.
+The presenter therefore records a monotonically increasing successful
+`submission_id()` (zero if no completed frame is available). The host
+explicitly calls `accept_presented_frame(observed window+framebuffer size)`
+**after** native presentation and swap. Only that exact submitted id, source
+revision, current focus and matching logical/device-pixel dimensions can
+produce mouse, keyboard or committed-text `tui_event_t` values.
+
+GLFW focus-out/focus-in and logical-window/framebuffer size callbacks retire
+input. Neither a focus regain nor restoring old dimensions can reactivate a
+previous GPU plan; re-admission requires a **new successful draw and swap**.
+A failed native frame or silent metric change also retires input. Rejected
+pre-submit source/font validation does *not* retire a still-valid prior
+frame when focus and host geometry have remained coherent.
+
+The existing Mesa/Xvfb test now uses actual server-side X11 focus changes
+to the root window and back, with XTest keyboard injections while unfocused,
+then requires fresh GPU presentation before real keyboard recovery. It also
+uses an actual `XResizeWindow` event to prove that **unrepainted** resized
+geometry cannot accept a stale C11 event. This is a **negative resize gate**
+and does not implement successful live resize or DPI reflow. The same
+strict admission is used by the GLFW demo, with no second queue/model.
+
+**Still OPEN:** positive physical GPU resize and HiDPI adaptation,
+nonuniform scaling policy, IME preedit and system text services, drag capture
+outside window, accessibility, X11/Windows/macOS physical GUI acceptance,
+GPU fence completion and GL context loss/recreation. No production factory
+can be registered solely from these tests.
+
 ## Native TTY presenter
 
 Owns/borrows the terminal, validates the bounded buffer, produces VT diff

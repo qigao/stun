@@ -458,6 +458,98 @@ suite("Tango OpenGL cell-to-pixel staging on native Tango grid") {
         check(!tp::cell_input_character(presenter, 'A'));
     }
 
+    it("retires stale host input on focus, metrics and independent native draw generations") {
+        Snapshot src;
+        PixelRecorder backend;
+        tp::CellPixelPresenter presenter(backend);
+        tp::CellHostFrameGate host(presenter);
+        const tp::CellWindowExtents observed{32, 16, 32, 16};
+        host.set_focus(true);
+        check(!host.key(TUI_KEY_LEFT, TUI_MOD_NONE, observed));
+        check_throws_as(host.accept_presented_frame(observed), std::logic_error);
+        presenter.present(src.frame, metrics());
+        check(presenter.submission_id() != 0u);
+        host.accept_presented_frame(observed);
+
+        const auto press = host.pointer(
+            16.5, 5.0, observed, tp::CellMouseAction::Press,
+            tp::CellMouseButton::Left, TUI_MOD_NONE);
+        check(press.has_value());
+        if (press) {
+            check_equal(press->event.type, TUI_EVENT_MOUSE_PRESS);
+            check_equal(press->event.x, 2);
+            check_equal(press->leading_column, 1);
+            check_equal(press->grid_revision, 5u);
+        }
+        check(host.character('a', observed).has_value());
+        const auto initial_id = presenter.submission_id();
+
+        // A fresh draw with the SAME C11 grid revision cannot borrow a prior
+        // host admission: only the just-submitted frame can be input-active.
+        presenter.present(src.frame, metrics());
+        check(presenter.submission_id() > initial_id);
+        check(!host.key(TUI_KEY_LEFT, TUI_MOD_NONE, observed));
+        host.accept_presented_frame(observed);
+        check(host.key(TUI_KEY_LEFT, TUI_MOD_NONE, observed).has_value());
+
+        auto stale = metrics();
+        ++stale.expected_grid_revision;
+        const auto before_refusal = presenter.submission_id();
+        check_throws_as(presenter.present(src.frame, stale), std::logic_error);
+        check_equal(presenter.submission_id(), before_refusal);
+        // Pre-submit refusal does not touch the last actually painted frame.
+        check(host.key(TUI_KEY_LEFT, TUI_MOD_NONE, observed).has_value());
+
+        host.set_focus(false);
+        check(!host.key(TUI_KEY_LEFT, TUI_MOD_NONE, observed));
+        check(!host.character('a', observed));
+        host.set_focus(true);
+        check(!host.key(TUI_KEY_LEFT, TUI_MOD_NONE, observed));
+        check_throws_as(host.accept_presented_frame(observed), std::logic_error);
+        presenter.present(src.frame, metrics());
+        host.accept_presented_frame(observed);
+        check(host.key(TUI_KEY_LEFT, TUI_MOD_NONE, observed).has_value());
+
+        // Even logical-only host resize retires input if the framebuffer
+        // dimensions happen not to change. Do not guess the same frame.
+        auto resized = observed;
+        ++resized.window_width;
+        check(!host.key(TUI_KEY_LEFT, TUI_MOD_NONE, resized));
+        check(!host.key(TUI_KEY_LEFT, TUI_MOD_NONE, observed));
+        check_throws_as(host.accept_presented_frame(observed), std::logic_error);
+        presenter.present(src.frame, metrics());
+        host.accept_presented_frame(observed);
+        check(host.pointer(
+            16.5, 5.0, observed, tp::CellMouseAction::Press,
+            tp::CellMouseButton::Left, TUI_MOD_NONE).has_value());
+
+        host.invalidate_geometry();
+        check(!host.key(TUI_KEY_LEFT, TUI_MOD_NONE, observed));
+        check_throws_as(host.accept_presented_frame(observed), std::logic_error);
+        presenter.present(src.frame, metrics());
+        host.accept_presented_frame(observed);
+        check(host.character(0x4e2du, observed).has_value());
+
+        bool foreign_rejected = false;
+        std::thread foreign([&] {
+            try {
+                host.set_focus(false);
+            } catch (const std::logic_error&) {
+                foreign_rejected = true;
+            }
+        });
+        foreign.join();
+        check(foreign_rejected);
+        // Real draw failure is not an admissible frame; old input is retired.
+        backend.fail_draw = true;
+        check_throws_as(presenter.present(src.frame, metrics()), std::runtime_error);
+        check_equal(presenter.submission_id(), 0u);
+        check(!host.key(TUI_KEY_LEFT, TUI_MOD_NONE, observed));
+        check(!host.pointer(
+            16.5, 5.0, observed, tp::CellMouseAction::Press,
+            tp::CellMouseButton::Left, TUI_MOD_NONE));
+    }
+
     it("keeps the grid independent of source resize and enforces owner-thread presentation") {
         Snapshot src;
         PixelRecorder backend;

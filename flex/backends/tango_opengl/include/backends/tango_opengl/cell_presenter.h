@@ -140,6 +140,10 @@ public:
     void present(const tui_grid_snapshot_t* snapshot,
                  const CellPixelMetrics& metrics);
     bool on_owner_thread() const noexcept;
+    // Generation of the last successfully completed native draw. Zero means
+    // no submitted plan is available. This distinguishes two presents that
+    // happen to share the same C11 source revision.
+    std::uint64_t submission_id() const;
     // Hit testing is available only for the last frame whose synchronous
     // end_frame() succeeded, and only on the GL owner. An invalid input
     // rejected before rendering preserves the prior submitted plan.
@@ -161,6 +165,7 @@ private:
     Renderer* renderer_ = nullptr;
     std::thread::id owner_thread_;
     std::optional<CellPixelPlan> submitted_plan_;
+    std::uint64_t submission_id_ = 0;
 };
 
 } // namespace flex::tango_opengl
