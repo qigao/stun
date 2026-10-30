@@ -276,6 +276,39 @@ IME preedit, pointer capture/drag, physical GPU acceptance, platform-native
 Windows/macOS event injection and GL context retirement. No production
 TangoOpenGL registration is justified yet.
 
+## Controlled native GL context teardown and fresh-context acceptance (Draft)
+
+`CellHostFrameGate::retire_device()` now permanently disables one host
+gate **on its original UI/GL owner**, clears its captured submission
+identity, detaches its presenter pointer, and refuses input even if the gate
+outlives the native GPU renderer. A new GL context must create a **new**
+`CellPixelPresenter`, **new** `CellHostFrameGate`, successfully draw a frame,
+and publish the actual host dimensions before accepting input. Old gates
+cannot be reactivated by a refocus or a freshly created unrelated context.
+Wrong-thread retirement is rejected, and same-owner retirement is idempotent.
+The GLFW demo unregisters callbacks, then retires its gate while the GL
+presenter/window are still alive. Do not let callbacks hold a pointer past
+native GL presenter destruction.
+
+The existing native Mesa/Xvfb pixel qualification additionally creates
+**two sequential real GLFW OpenGL contexts** on the same X display, without
+a shared context or second renderer implementation. It draws and reads
+real native framebuffer pixels from the first context, drains the frame,
+retires the old input gate, destroys the actual gCanvas GL presenter
+while its own context is current, destroys that GLFW window/context,
+then creates a new GLFW context/presenter/gate and draws a *different*
+colored C11 frame at the **same source revision**. The replacement image
+is captured as `tango-gl-frame.ppm.recreated.ppm`. The old gate must still
+reject all events after the new context is created and after destruction,
+whereas the new gate admits its own newly submitted cell geometry.
+
+**Narrow scope:** this is an orderly/drained GL teardown and recreate,
+not a proof of abrupt device/context loss, uncompleted in-flight GPU work,
+async fence retirement, invalid GL resource deletion without a current
+context, or GL recovery after a native driver reset. Those remain strict
+OPEN gates along with physical GPU, true monitor HiDPI, IME and native
+Windows/macOS event injection. No production TangoOpenGL factory registration.
+
 ## Native TTY presenter
 
 Owns/borrows the terminal, validates the bounded buffer, produces VT diff

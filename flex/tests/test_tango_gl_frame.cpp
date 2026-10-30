@@ -521,6 +521,62 @@ suite("Tango OpenGL cell-to-pixel staging on native Tango grid") {
             src.frame, retina, invalid_font), std::invalid_argument);
     }
 
+    it("retires input permanently before orderly GL context owner destruction") {
+        Snapshot src;
+        PixelRecorder renderer;
+        auto old_presenter = std::make_unique<tp::CellPixelPresenter>(renderer);
+        auto old_gate = std::make_unique<tp::CellHostFrameGate>(*old_presenter);
+        const tp::CellWindowExtents observed{32, 16, 32, 16};
+        old_gate->set_focus(true);
+        old_presenter->present(src.frame, metrics());
+        old_gate->accept_presented_frame(observed);
+        check(old_gate->key(TUI_KEY_LEFT, TUI_MOD_NONE, observed).has_value());
+        const auto old_id = old_presenter->submission_id();
+        check(old_id != 0u);
+
+        bool foreign_rejected = false;
+        std::thread foreign([&] {
+            try {
+                old_gate->retire_device();
+            } catch (const std::logic_error&) {
+                foreign_rejected = true;
+            }
+        });
+        foreign.join();
+        check(foreign_rejected);
+        check(old_gate->key(TUI_KEY_LEFT, TUI_MOD_NONE, observed).has_value());
+
+        // An old gate may remain allocated after the GPU owner is destroyed;
+        // every operation must refuse without calling the freed presenter.
+        old_gate->retire_device();
+        old_gate->retire_device(); // Idempotent on the same owner.
+        old_presenter.reset();
+        old_gate->set_focus(true);
+        old_gate->invalidate_geometry();
+        check(!old_gate->key(TUI_KEY_LEFT, TUI_MOD_NONE, observed));
+        check(!old_gate->character('A', observed));
+        check(!old_gate->pointer(
+            16.5, 5.0, observed, tp::CellMouseAction::Press,
+            tp::CellMouseButton::Left, TUI_MOD_NONE));
+        check_throws_as(old_gate->accept_presented_frame(observed),
+                        std::logic_error);
+
+        // A *new* context/presenter may accept the SAME C11 source revision,
+        // but only its own freshly drawn frame and its own gate qualify.
+        tp::CellPixelPresenter replacement(renderer);
+        tp::CellHostFrameGate new_gate(replacement);
+        new_gate.set_focus(true);
+        check(!new_gate.key(TUI_KEY_LEFT, TUI_MOD_NONE, observed));
+        replacement.present(src.frame, metrics());
+        new_gate.accept_presented_frame(observed);
+        const auto new_key = new_gate.key(TUI_KEY_LEFT, TUI_MOD_NONE, observed);
+        check(new_key.has_value());
+        if (new_key) check_equal(new_key->grid_revision, 5u);
+        check(!old_gate->key(TUI_KEY_LEFT, TUI_MOD_NONE, observed));
+        new_gate.retire_device();
+        check(!new_gate.key(TUI_KEY_LEFT, TUI_MOD_NONE, observed));
+    }
+
     it("retires stale host input on focus, metrics and independent native draw generations") {
         Snapshot src;
         PixelRecorder backend;

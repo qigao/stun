@@ -235,16 +235,19 @@ CellPixelMetrics fit_cell_metrics_to_window(
 }
 
 CellHostFrameGate::CellHostFrameGate(CellPixelPresenter& presenter) noexcept
-    : presenter_(&presenter) {}
+    : presenter_(&presenter), owner_thread_(std::this_thread::get_id()) {}
 
 void CellHostFrameGate::require_owner() const {
-    if (!presenter_->on_owner_thread())
+    // After retire_device(), presenter_ is intentionally NULL. Do not call
+    // through a destroyed GPU presenter merely to check its owner thread.
+    if (std::this_thread::get_id() != owner_thread_)
         throw std::logic_error(
             "TangoOpenGL host frame admission accessed off its GL/UI owner");
 }
 
 void CellHostFrameGate::set_focus(bool focused) {
     require_owner();
+    if (!presenter_) return; // Retired GL device can never be resurrected.
     // Even true->true and false->false are conservative: the host must
     // publish a freshly swapped frame after a focus notification.
     focused_ = focused;
@@ -256,10 +259,25 @@ void CellHostFrameGate::invalidate_geometry() {
     admitted_ = false;
 }
 
+void CellHostFrameGate::retire_device() {
+    require_owner();
+    // Every callback must be detached from the host window before releasing
+    // the GL presenter/context. Keep this gate safe to query afterward.
+    admitted_ = false;
+    focused_ = false;
+    accepted_ = {};
+    revision_ = 0;
+    submission_ = 0;
+    presenter_ = nullptr;
+}
+
 void CellHostFrameGate::accept_presented_frame(
     const CellWindowExtents& observed) {
     require_owner();
     admitted_ = false;
+    if (!presenter_)
+        throw std::logic_error(
+            "TangoOpenGL retired context cannot publish an input frame");
     if (!focused_) return;
     const auto* plan = presenter_->last_submitted_plan();
     if (!plan || !presenter_->submission_id())
@@ -284,7 +302,7 @@ void CellHostFrameGate::accept_presented_frame(
 
 bool CellHostFrameGate::admitted_for(const CellWindowExtents& current) {
     require_owner();
-    if (!focused_ || !admitted_) return false;
+    if (!presenter_ || !focused_ || !admitted_) return false;
     if (accepted_.window_width != current.window_width ||
         accepted_.window_height != current.window_height ||
         accepted_.framebuffer_width != current.framebuffer_width ||

@@ -10,6 +10,7 @@
 
 #include <cstdint>
 #include <optional>
+#include <thread>
 
 namespace flex::tango_opengl {
 
@@ -92,6 +93,13 @@ public:
     // Call on ANY logical window, framebuffer or DPI generation change.
     void invalidate_geometry();
 
+    // Permanently disarm this host input gate on the GL/UI owner BEFORE
+    // releasing its native presenter and destroying the GL context. After
+    // retirement all input is rejected, even if set_focus(true) is called.
+    // This is an owner/lifetime gate, NOT GL object deletion or a
+    // substitute for device-loss resource reclamation.
+    void retire_device();
+
     // After a real present+swap, bind input to this EXACT successful submission,
     // grid revision and same-generation native host sizes. A missing frame or
     // incoherent framebuffer size fails, never accepting an old frame.
@@ -110,6 +118,7 @@ private:
     void require_owner() const;
     bool admitted_for(const CellWindowExtents& current);
     CellPixelPresenter* presenter_ = nullptr;
+    const std::thread::id owner_thread_;
     CellWindowExtents accepted_{};
     std::uint64_t revision_ = 0;
     std::uint64_t submission_ = 0;
