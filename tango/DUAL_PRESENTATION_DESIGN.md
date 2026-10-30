@@ -145,3 +145,187 @@ Until all matching target gates pass, the GL presenter is only a
 reserved public selection and a **synthetic CPU admission profile**.
 The existing TTY implementation and its tests must not be deleted,
 weakened or repurposed to pretend OpenGL support.
+
+
+## Neovim-informed terminal UI protocol and modern interaction design (2026-10-30)
+
+**Status: design/acceptance only, not implemented by #341.** This is a
+source-informed contract for the existing Tango engine, *not* a request to
+import Neovim/libtermkey, add an editor daemon, install ncurses, clone
+Neovim's widgets, or create another TUI runtime. Related: [TTY owner
+#165](https://github.com/qigao/stun/issues/165), [typed input and
+streaming #266](https://github.com/qigao/stun/issues/266), [shared C11 UI
+#167](https://github.com/qigao/stun/issues/167), [portable native
+Tailwind #267](https://github.com/qigao/stun/issues/267),
+[TangoOpenGL implementation #342](https://github.com/qigao/stun/issues/342),
+[unmount/lifetime PR #302](https://github.com/qigao/stun/pull/302).
+
+### 1. Source findings and the boundary to adopt
+
+Neovim's current [UI client](https://github.com/neovim/neovim/blob/master/src/nvim/ui_client.c)
+runs the TUI client against an editor server through Msgpack-RPC; its
+[UI API](https://github.com/neovim/neovim/blob/master/src/nvim/api/ui.c)
+emits redraw events. The [TUI renderer](https://github.com/neovim/neovim/blob/master/src/nvim/tui/tui.c)
+maintains a terminal grid, translates cell updates to terminfo/VT
+sequences, and flushes buffered output. Its [termkey input
+reader](https://github.com/neovim/neovim/blob/master/src/nvim/tui/input.c)
+normalizes keyboard, mouse and paste events. Neovim's *built-in* TUI
+attaches with \`ext_linegrid\`, not \`ext_multigrid\`; editor-side
+compositing prepares its screen for that client. External UIs may use
+different UI extensions. The separate embedded libvterm is for
+Neovim's \`:terminal\` child-process terminal, not its main UI rasterizer.
+
+**Adopt the separation of semantic state, redraw events and presentation;
+do not require Neovim's process split or RPC.** In Stun, the FlexUI/UiCore
+owner retains XML state, native Tailwind and TurboScript/binding meaning,
+layout, overlay ordering, focus and hit geometry. Existing
+\`tango/\` owns its C11 cell grid, Unicode terminal-column policy,
+PTY/ConPTY/TTY input/output, diff and terminal restoration. The
+\`flex/backends/tui\` adapter is *only* the Flex renderer-to-cell bridge,
+not a second layout engine, Unicode parser, input dispatcher or terminal.
+
+### 2. Current implementation inventory (do not reimplement)
+
+| Verified repository owner | Existing behavior | Missing contract or qualification |
+| --- | --- | --- |
+| \`tango/include/tui.h\`, \`tui_buffer.c\` | \`tui_cell_t\` stores owned bounded UTF-8 grapheme bytes, span and continuation; \`tui_buffer_t\` records cell dimensions and dirty bounds | Frozen/versioned frame read view with owner/generation; safe overlapping layered writes and explicit damage/scroll records |
+| \`tango/src/tui_terminal.c\` | Terminal output buffering, front/back diff, alternate screen and restoration, bounded write errors | Capability snapshot, optional synchronized-update admission, scroll optimization, presented-vs-candidate revision on partial output/error |
+| \`tango/src/tui_input.c\` | Stateful input parser, SGR mouse, paste handling and Win32 INPUT_RECORD decoding | Declared optional keyboard/focus extensions, ESC timeout/unknown-reply policy, split-protocol/trust tests and event parity |
+| \`flexUI/\`, \`flex/backends/tui\` | Retained Elements, layout/events, Flex drawing adapter using terminal cells | One overlay composition/hit-geometry contract; no silent GPU-only effects, no duplicate focus or widget tree |
+| #341 reserved TangoOpenGL slot | Explicit identity and CPU effect-admission profile only | **No** actual GL presenter, atlas, pixel projection, shader resources or screenshot qualification |
+
+The earlier assumption that Tango requires a brand-new \`TangoCell\` or
+front/back grid is **superseded by this source audit**. Reuse
+\`tui_cell_t\`, \`tui_buffer_t\` and existing diff logic. Add only the
+smallest versioned read/snapshot and redraw boundary justified by tests.
+
+### 3. Normative owner / redraw / presentation transaction
+
+\`\`\`mermaid
+flowchart TD
+  A["XML + native Tailwind + TurboScript / app state"] --> B["One UI owner: style, layout, focus, overlays"]
+  B --> C["One hit geometry + ordered damage / scroll"]
+  C --> D["Existing Tango tui_buffer_t cell grid"]
+  D --> E["Bounded immutable GridFrame snapshot / revision"]
+  E --> F["TangoTTY: terminal diff + VT + write completion"]
+  E --> G["TangoOpenGL: qualified cell-to-pixel projection"]
+  G --> H["Glyph atlas / GLSL / GPU present + completion"]
+  I["TTY/PTY/ConPTY input"] --> J["Normalized input and owner event queue"]
+  K["GL host input / IME"] --> J
+  J --> B
+\`\`\`
+
+The diagram is **logical**, not a declaration of a new always-on event
+transport, per-frame allocation or public ABI. At most one UI owner
+publishes a particular grid/frame revision. The frame boundary must
+carry checked \`grid_generation\`, \`ui_revision\`, \`viewport_revision\`,
+rows/columns, a borrowed-or-owned lifetime token, bounded cell/grapheme
+data, style/cursor state and dirty/scroll regions. A snapshot may borrow
+the existing buffer *only while the UI owner pins it*; asynchronous GL
+uploads need an immutable retained copy or an explicit completion-scoped
+lease. Resizing or retiring a buffer invalidates obsolete borrows.
+
+Proposed *internal* C11 semantic operations (names are sketches, **not
+current exported API**): \`GridResize\`, \`GridCells\`,
+\`GridDamage\`, \`GridScroll\`, \`Cursor\`, \`FrameFlush\`. An operation
+sequence has one version, bounded size, monotonic revision and a final
+commit marker. Coalesce repetitive invalidations and preserve the final
+visible state; never coalesce away semantically ordered scroll,
+focus or resize changes. The existing C11 grid and diff remain the
+canonical execution path; avoid forcing cells through a second
+Msgpack-RPC-like screen model.
+
+A paint or style/layout callback that requests another revision during
+record/replay must remain pending (see #337/#338); no stale callback
+may mark a newer frame as presented. UI input and hit-testing must use
+the same committed layout/overlay geometry as the visible frame, with
+an explicit policy for events arriving during a pending resize/frame.
+
+### 4. Layered components like modern Neovim plugins
+
+A file tree, searchable command palette with preview, tooltip,
+statusline and tab/list layout are **FlexUI components** (XML +
+class-based native Tailwind + bindings), not direct ANSI writers.
+Follow the reusable Popup/Layout/Picker *composition pattern* used by
+Neovim's Lua ecosystem; do not embed Lua, an editor buffer model or a
+second event framework simply to copy the visual result.
+
+An overlay requires a stable component ID/generation, parent-relative
+anchor, bounded rectangle, z-order, clip, keyboard focus, pointer
+capture and hit-test mapping, and an owner-checked lifetime. The cell
+compositor resolves foreground/background/style and wide-cell pairs in
+z-order **before** the TTY diff; no two widgets independently write
+stdout. Cursor placement follows the topmost active focus owner and
+must be restored when a popup closes. A popover cannot leave half of a
+CJK/emoji grapheme or a stale selection behind. Overlay retirement
+must honor Widget/Binding observer and plugin callback/worker join
+proofs (PR #302); hiding pixels is not a physical unmount.
+
+The **same logical component and interaction semantics** may run in a
+native pixel backend, but a TangoOpenGL presenter still draws **Tango
+cells**. Full arbitrary FlexUI pixel effects and shaping are not
+magically supported just because its output uses OpenGL. Desktop
+D2D/gCanvas keeps its distinct pixel renderer and admitted effects.
+Never silently approximate an unsupported native Tailwind effect in
+TTY or switch to OpenGL.
+
+### 5. Terminal capability and normalized input contract
+
+Start from the already working POSIX/Win32 paths. Add a bounded,
+owner-affine \`TerminalCapabilitySnapshot\` (conceptual) recording
+platform/terminal family, geometry, reliable color depth, mouse mode,
+paste mode, keyboard protocol, focus reporting, scroll/margin support
+and synchronized-output support. Unknown capabilities are **not
+supported**; enabled modes must be balanced and restored on teardown,
+error, suspend/resume and restart. This snapshot is a terminal IO
+capability, not a GPU/Shader capability manifest.
+
+- Preserve raw-mode/alternate-screen/mouse/bracketed-paste/Win32
+  restoration evidence. Capability detection must not hang on a reply
+  that never comes; bound bytes, time and reply state.
+- Preserve the current stateful CSI/SGR/UTF-8 parser and trusted
+  bracketed-paste boundary. Add explicitly qualified focus reports,
+  modified keys (CSI-u/Kitty where genuinely supported), split escape
+  sequences, malformed/unsolicited OSC/DCS/CSI replies, mouse drag,
+  release, wheel, resize and ESC-vs-Alt disambiguation.
+- Normalize key/text/IME, pointer coordinates, drag, scroll, paste,
+  focus and resize to **one** UI owner event path (see #266).
+  GL pixel pointer coordinates are mapped through the admitted cell
+  metrics and clip, not a guessed \`8x16\` constant.
+- Only the TTY presenter emits terminfo/ANSI/VT. Optional terminal
+  scroll-region commands may accelerate a scroll; when unavailable,
+  redraw the same cells through the *same* TangoTTY presenter (not a
+  backend fallback).
+- Optional DEC synchronized output \`CSI ? 2026 h/l\` is permitted only
+  after positive capability qualification. End the transaction even
+  on error/stop; never advertise it from a terminal name guess.
+  Batch terminal writes and minimize cursor/style transitions.
+
+TTY write completion is not GPU completion and cannot undo bytes
+already written. A failed/partial VT write must not advance the
+last-successfully-presented revision; require a bounded explicit
+full-resync or terminal reset before a new incremental diff, and
+surface the error rather than claiming frame success. Backpressure
+bounds queued invalidations, output bytes, pending snapshots and
+stale revisions; never drop user input or accepted streaming content
+merely to improve animation smoothness.
+
+### 6. Qualification plan / test evidence (all new gates OPEN)
+
+| Gate | Evidence required |
+| --- | --- |
+| M0 source and API boundary | Same \`tui_cell_t\` and single owner; recorded current API/feature inventory; no parallel terminal, parser, layout, Unicode or CSS implementation |
+| M1 overlay & input | One XML/Tailwind file-tree + picker/preview + statusline fixture; real keyboard focus, Escape close, mouse click/drag/scroll, popup z-order/clip, CJK/emoji wide-cell overwrite; post-unmount no borrowed callback |
+| M2 redraw and terminal output | Deterministic \`GridCells/Scroll/Flush\` contract; dirty-area vs full-grid replay equivalence; incremental terminal output measured in bytes/updates; optional sync-mode detection and balanced restoration |
+| M3 external terminal oracle | Real Linux/macOS PTY and Windows Console/ConPTY sessions: raw stream capture **and** independently reconstructed visible cells, split CSI/UTF-8/SGR/paste, unknown replies, alt-screen/termios/mouse restoration; test RED on a deliberately wrong visible frame |
+| M4 overload/lifecycle | UI owner reentrancy, cancel/resize/close overlap, output-allocation/write errors, partial output resync, blocked terminal, queue saturation, capacity and generation checks, sanitizer/native test evidence |
+| M5 TangoOpenGL independent | Real host GL context, atlas and resource owners, exact cell→pixel/IME/pointer mapping, screenshot/pixel+input oracle, context loss, in-flight frame retirement and effect/admission contract per #342 |
+
+Keep M0–M5 **open** until there is exact-HEAD source, real executable
+tests and result artifacts. A Neovim reference, Markdown design,
+CPU-only test, synthetic cell buffer, hidden-window smoke or renderer
+enum is **not** proof of modern UI/TangoOpenGL product readiness.
+Use existing workflow caches, FIFO cancellation and separate native
+TTY vs real graphical-window evidence. No new HTTP attestation service,
+CSS pass, second TUI engine, fallback renderer or unconditional GPU
+dependency is authorized by this design.
