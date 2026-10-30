@@ -98,7 +98,18 @@ def verify_labeled_workflow_isolation():
         else:
             assert group.endswith(suffix), (path.name, group)
         assert "  cancel-in-progress: true" in source, path.name
-    assert len(guarded) == 10, guarded
+    # The synthetic gCanvas package/consumer-only workflow was retired.
+    # Keep this an exact set so no new consumer-only lane can silently reappear.
+    assert set(guarded) == {
+        "gcanvas-android-egl.yml",
+        "gcanvas-android-runtime.yml",
+        "gcanvas-gles-runtime.yml",
+        "graphlayout-native.yml",
+        "gui-native-e2e.yml",
+        "public-dependency-contract.yml",
+        "runtime-conformance.yml",
+        "ui-core-c11.yml",
+    }, guarded
     assert master_push_and_dispatch.issubset(set(guarded)), guarded
 
 def main():

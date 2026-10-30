@@ -7,18 +7,8 @@ find_package(glfw3 CONFIG REQUIRED)
 find_package(glad CONFIG REQUIRED)
 find_package(OpenGL REQUIRED)
 find_package(nlohmann_json CONFIG REQUIRED)
-# Find parent flex and flexUI
-set(FLEX_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../flex)
+# Parent project owns Flex/FlexUI. Missing targets fail on real link.
 set(FLEXUI_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../flexUI)
-
-# Add flex and flexUI as subdirectories if not already added
-if(NOT TARGET flex)
-    add_subdirectory(${FLEX_DIR} ${CMAKE_BINARY_DIR}/flex)
-endif()
-
-if(NOT TARGET flexUI)
-    add_subdirectory(${FLEXUI_DIR} ${CMAKE_BINARY_DIR}/flexUI)
-endif() 
 
 # Meta Editor SDK library
 # Core SDK - always included

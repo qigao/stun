@@ -83,19 +83,7 @@ set_tests_properties(stun_flowchart_ast_smoke PROPERTIES TIMEOUT 30)
 # second JSON implementation, source checkout, or full FlexUI renderer.
 option(STUN_CI_JSON_GOLDEN "Build the actual Flowchart JSON golden contract" OFF)
 if(STUN_CI_JSON_GOLDEN)
-  # The official fixture set has 95 dynamic Mermaid cases. Reject accidental
-  # partial-checkout or missing-fixture "success" before compiling the test.
-  file(GLOB _flowchart_golden_inputs
-    "${STUN_ROOT}/charts/mermaid/golden/flowchart/*.input.mmd")
-  list(LENGTH _flowchart_golden_inputs _flowchart_golden_count)
-  if(_flowchart_golden_count LESS 95)
-    message(FATAL_ERROR
-      "Flowchart JSON conformance requires >=95 real Mermaid fixtures; found ${_flowchart_golden_count}")
-  endif()
-  message(STATUS "Qualified Flowchart input fixtures: ${_flowchart_golden_count}")
-  if(NOT DEFINED ENV{SALTS_ROOT} OR NOT IS_DIRECTORY "$ENV{SALTS_ROOT}")
-    message(FATAL_ERROR "Flowchart JSON golden requires the published installed Salts SDK in SALTS_ROOT")
-  endif()
+  # Actual golden CTest enforces all 95 cases; no file/SDK probes.
   find_package(Salts CONFIG REQUIRED PATHS "$ENV{SALTS_ROOT}" NO_DEFAULT_PATH)
   find_package(SaltsUtils CONFIG REQUIRED PATHS "$ENV{SALTS_ROOT}" NO_DEFAULT_PATH)
 

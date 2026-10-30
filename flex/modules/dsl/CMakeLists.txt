@@ -1,28 +1,9 @@
-# Flex DSL lexer/parser frontend
-
-if(NOT RE2C_EXECUTABLE)
-  find_program(RE2C_EXECUTABLE re2c)
-endif()
-if(NOT RE2C_EXECUTABLE)
-  message(FATAL_ERROR "Flex: re2c not found - required for DSL parser")
-endif()
-
-if(NOT LEMON_EXECUTABLE)
-  find_program(LEMON_EXECUTABLE lemon)
-endif()
-if(NOT LEMON_EXECUTABLE)
-  message(FATAL_ERROR "Flex: lemon not found - required for DSL parser")
-endif()
-
-if(NOT LEMPAR)
-  if(EXISTS "${FLEX_ENGINE_ROOT}/../tools/lemon/lempar.c")
-    set(LEMPAR "${FLEX_ENGINE_ROOT}/../tools/lemon/lempar.c")
-  elseif(EXISTS "${CMAKE_SOURCE_DIR}/tools/lemon/lempar.c")
-    set(LEMPAR "${CMAKE_SOURCE_DIR}/tools/lemon/lempar.c")
-  else()
-    message(FATAL_ERROR "Flex: lempar.c not found - required for DSL parser")
-  endif()
-endif()
+# Flex DSL lexer/parser frontend. No retry, warning-only probe or fallback.
+# A parent may supply generator executables; standalone configuration requires
+# the tools before generated-code build begins.
+find_program(RE2C_EXECUTABLE NAMES re2c REQUIRED)
+find_program(LEMON_EXECUTABLE NAMES lemon REQUIRED)
+set(LEMPAR "${FLEX_ENGINE_ROOT}/../tools/lemon/lempar.c")
 
 set(FLEX_PARSER_Y ${CMAKE_CURRENT_SOURCE_DIR}/flex_parser.y)
 set(FLEX_PARSER_GEN_C ${CMAKE_CURRENT_BINARY_DIR}/flex_parser_gen.c)

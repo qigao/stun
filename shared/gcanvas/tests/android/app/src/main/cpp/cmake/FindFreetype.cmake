@@ -1,7 +1,4 @@
-if(NOT TARGET freetype)
-  message(FATAL_ERROR "The Android qualification harness requires the fetched FreeType target")
-endif()
-
+# The fetched FreeType provider is linked by the actual gCanvas build.
 if(NOT TARGET Freetype::Freetype)
   add_library(Freetype::Freetype INTERFACE IMPORTED GLOBAL)
   set_target_properties(Freetype::Freetype PROPERTIES

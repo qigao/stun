@@ -144,6 +144,19 @@ class RequirementTests(unittest.TestCase):
         ):
             self.assertIn(".github/workflows/" + filename, result)
 
+    def test_no_synthetic_installed_consumer_projects_or_workflows(self):
+        for path in (
+            "flexUI/tests/plugin_install_consumer",
+            "flexUI/tests/unicode_install_consumer",
+            "shared/gcanvas/tests/install_consumer",
+            "flexUI/examples/plugin_echo",
+            ".github/workflows/gcanvas-package-contract.yml",
+            ".github/workflows/gcanvas-shader-tools-cache.yml",
+        ):
+            self.assertFalse((ROOT / path).exists(), path)
+        self.assertNotIn("gcanvas-package-contract.yml", policy.WORKFLOWS)
+        self.assertNotIn("gcanvas-shader-tools-cache.yml", policy.WORKFLOWS)
+
     def test_staged_policy_explicit_real_source_paths(self):
         # Only existing product modules are admitted; unknown modules still fail.
         for path in ("meta_editor/CMakeLists.txt",

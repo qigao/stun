@@ -631,15 +631,15 @@ Salts profile，并使用与 producer 一致的 OpenSSL package；FlexUI 配置�
 包版本当前为 `1.0.0`，major 与 `FLEXUI_PLUGIN_ABI_MAJOR` 同步；同 major package 使用 CMake
 `SameMajorVersion` 兼容规则。新增 reserved 字段解释、可选 target 或不改变既有字段含义的实现修复只增加
 minor/patch；改变调用约定、结构布局、ownership/lifetime 或错误语义必须提升 ABI 与 package major。
-独立示例 `flexUI/examples/plugin_echo` 消费安装包：它构建纯 C 动态模块，再由 C++ host 完成
-load/start/echo completion/stop/join/unload。`runtime-conformance.yml` 直接配置、构建并测试真实 production
-targets，以 `cmake --install ... --component FlexUIPlugin` 安装后，再单独 configure/build/CTest
-外部工程。`flexUI/tests/plugin_install_consumer` 通过 `FLEXUI_CONSUMER_COMPONENT=PluginSDK/Services`
-分别选择纯 C header 检查与真实 C++ registry 调用；两种消费都取消 Salts 环境变量并显式禁用包查找，
-PluginHost 示例则消费完整安装依赖。工作流保存编译、链接、CTest 与 loader 证据，并检查源码/构建路径泄漏。
-Linux profile 对 producer 和消费者启用 ASan/UBSan；示例的两项 sanitizer option 同时作用于 C 模块与
-C++ host。MSVC 保留 ASan，UBSan 请求明确拒绝。具体命令见
-[`plugin_echo/README.md`](../examples/plugin_echo/README.md)；该 Linux profile 不覆盖窗口或 GPU backend。
+上游不再维护专门的已安装包 consumer/installer 工程，也不创建用于生成临时
+`find_package` 消费者的 CI。原生 PluginHost 的 load/start/service completion/stop/join/unload
+以及错误生命周期由 `flexUI/tests/plugin-native-targets.cmake` 绑定的生产 PluginHost
+和真实动态插件 native 测试验证；不保留第二套测试应用或插件实现。
+若需要检验 SDK 的下游可用性，只使用**已经存在的真实下游应用/库**调用正式
+`find_package(FlexUI ...)` 和实际 UI/PluginHost 功能，在各下游原有构建/CI 中记录
+精确提交和运行结果；上游的 `install(TARGETS ...)`、正式导出 target 和 ABI 契约继续保留。
+这不意味着可用源码/Mock 测试假装独立安装消费者已被验收，也不允许删除原生功能。
+
 
 ### 9.7 桌面编辑器端到端参考实现
 

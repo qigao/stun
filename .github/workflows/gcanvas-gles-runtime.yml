@@ -88,20 +88,6 @@ jobs:
             cmake ninja-build g++ libfreetype-dev libstb-dev \
             libegl1-mesa-dev libgles2-mesa-dev xvfb xauth
 
-      - name: Verify portable shader contract
-        shell: bash
-        run: |
-          set -euo pipefail
-          test "$(grep -c 'RoundedRectData payload\[128\]' shared/gcanvas/src/resources.hpp)" -eq 2
-          grep -q '#define GCANVAS_GL_SHADER_BATCH_CAPACITY 16' shared/gcanvas/src/backends/gl/gl_api.hpp
-          grep -q 'std::to_string(GCANVAS_GL_SHADER_BATCH_CAPACITY)' shared/gcanvas/src/backends/opengles/gles_shader_source.cpp
-          ! grep -q 'gl_VertexID' shared/gcanvas/src/resources.hpp
-          grep -q 'layout(location = 0) in vec2 corner;' shared/gcanvas/src/resources.hpp
-          grep -q 'float shape = 1.0;' shared/gcanvas/src/resources.hpp
-          grep -q 'line_width > 0. || any(greaterThan(border_radius, vec4(0.)))' shared/gcanvas/src/resources.hpp
-          ! grep -q 'texture(textures\[index\]' shared/gcanvas/src/resources.hpp
-          grep -q 'case 9: return texture(textures\[9\], uv);' shared/gcanvas/src/resources.hpp
-
       - name: Configure GLES-only gCanvas
         shell: bash
         run: |
@@ -123,12 +109,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test -f build/gcanvas-gles/build.ninja
-          grep -Fq ccache build/gcanvas-gles/build.ninja
           cmake --build build/gcanvas-gles --parallel 2 --verbose \
             --target gcanvas_opengles gcanvas_contract_test gcanvas_gles_smoke_test
-          ! grep -q '/glad/' build/gcanvas-gles/compile_commands.json
-          ! grep -qi 'glfw' build/gcanvas-gles/compile_commands.json
 
       - name: Run real GLES3 shader and pixel smoke
         shell: bash

@@ -182,10 +182,8 @@ jobs:
             "$vcpkg_root/bootstrap-vcpkg.sh" -disableMetrics
             vcpkg_bin="$vcpkg_root/vcpkg"
           fi
-          test -f "$vcpkg_bin"
           "$vcpkg_bin" install --classic --triplet "$VCPKG_TRIPLET" \
             nlohmann-json pugixml stb freetype
-          test -f "$vcpkg_root/scripts/buildsystems/vcpkg.cmake"
 
       - name: Restore pinned native XML dependency builds
         id: xml_deps
@@ -239,14 +237,10 @@ jobs:
             -DCMAKE_BUILD_TYPE=Release -DRE2C_BUILD_RE2D=OFF \
             -DRE2C_BUILD_RE2GO=OFF -DRE2C_BUILD_RE2HS=OFF
           cmake --build build/re2c-headless --config Release --target re2c --parallel 2
-          workspace="$GITHUB_WORKSPACE"
+          tool="$GITHUB_WORKSPACE/build/re2c-headless/re2c"
           if [[ "$RUNNER_OS" == Windows ]]; then
-            workspace="$(cygpath -u "$GITHUB_WORKSPACE")"
+            tool="$tool.exe"
           fi
-          tool="$(find "$workspace/build/re2c-headless" -type f \
-            \( -name re2c -o -name re2c.exe \) -print -quit)"
-          test -n "$tool"
-          "$tool" --version
           printf 'RE2C_TOOL=%s\n' "$tool" >> "$GITHUB_ENV"
 
       - name: Configure real FlexUI + Tango + C11 RichDoc

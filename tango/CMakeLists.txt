@@ -37,12 +37,7 @@ if(WIN32)
         NOMINMAX
     )
 endif()
-if(NOT TARGET Salts::Unicode)
-    message(FATAL_ERROR "Tango requires the canonical installed Salts::Unicode target")
-endif()
-if(NOT TARGET Salts::Platform)
-    message(FATAL_ERROR "Tango async mailbox requires the installed Salts::Platform target")
-endif()
+# Required provider targets fail during CMake generation/link when absent.
 target_link_libraries(${TARGET_NAME} PUBLIC Salts::Unicode Salts::Platform)
 
 # tui_advanced.c uses sqrtf; static consumers need the math dependency.

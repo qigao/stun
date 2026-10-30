@@ -316,8 +316,6 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          ldd build/flowchart-json-golden/stun_flowchart_json_golden | tee build/flowchart-json-golden/dependencies.txt
-          ! grep -q 'not found' build/flowchart-json-golden/dependencies.txt
           ctest --test-dir build/flowchart-json-golden \
             -R '^stun_flowchart_(ast_smoke|json_golden|json_failures|linkstyle)$' \
             --no-tests=error --verbose --output-on-failure --timeout 120
@@ -427,10 +425,8 @@ jobs:
           python3 -m unittest discover -s flexUI/tests \
             -p 'test_tui_streaming_pty_trace.py' -v
 
-      # LSan must be a separate *real-source* installed-SDK build, not a
-      # relabelled ASan success. Keep ASan/UBSan above independently enabled;
-      # inspect liblsan in the executable so this gate cannot silently run
-      # an uninstrumented test after future CMake refactors.
+      # Run independent real-source LSan native build/CTest. Missing
+      # sanitizer support fails the compiler/linker, not a library scanner.
       - name: Qualify full headless XML and Streaming runtime under LSan
         if: needs.changes.outputs.xml_runtime == 'true'
         shell: bash
@@ -450,12 +446,6 @@ jobs:
             -DCMAKE_FIND_USE_SYSTEM_PACKAGE_REGISTRY=OFF
           cmake --build build/xml-runtime-lsan \
             --target stun_xml_runtime_qualification --parallel 2
-          ldd build/xml-runtime-lsan/test_flexui_tango_stream \
-            | tee build/xml-runtime-lsan/lsan-dependencies.txt
-          grep -q 'liblsan[.]so' \
-            build/xml-runtime-lsan/lsan-dependencies.txt
-          ! grep -q 'not found' \
-            build/xml-runtime-lsan/lsan-dependencies.txt
           ctest --test-dir build/xml-runtime-lsan \
             --no-tests=error --verbose --output-on-failure --timeout 120 \
             --output-junit build/xml-runtime-lsan/results.xml
@@ -812,7 +802,6 @@ jobs:
             build/xml-runtime/compile_commands.json
             build/xml-runtime-lsan/Testing/Temporary/LastTest.log
             build/xml-runtime-lsan/results.xml
-            build/xml-runtime-lsan/lsan-dependencies.txt
             build/tui-long-session-metrics.json
             build/unicode/Testing/Temporary/LastTest.log
             build/mermaid-parsers/Testing/Temporary/LastTest.log

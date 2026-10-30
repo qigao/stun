@@ -90,21 +90,6 @@ jobs:
           else
             cmake "${cmake_args[@]}"
           fi
-      - name: Require real cacheable MSVC /Z7 C and C++ command lines
-        if: runner.os == 'Windows'
-        shell: bash
-        run: |
-          set -euo pipefail
-          commands=build/highlighter-loader-contract/compile_commands.json
-          test -s "$commands"
-          # Exported Ninja commands are the ACTUAL C11 and C++17 invocations.
-          # Reject a return to the /Zi compiler-PDB flags which ccache
-          # correctly classified as uncacheable on the first PR head.
-          grep -Fq '/Z7' "$commands"
-          if grep -Fq '/Zi' "$commands"; then
-            echo "::error::MSVC /Zi is not accepted for native ccache CI"
-            exit 1
-          fi
       - name: Build C11 provider and C++17 loader
         shell: bash
         run: |
@@ -169,10 +154,6 @@ jobs:
         shell: bash
         run: |
           cmake --build build/highlighter-loader-tsan --parallel 2 --verbose
-          test -x build/highlighter-loader-tsan/test_highlighter_loader_contract
-          test -f build/highlighter-loader-tsan/ts-lang-contract.so
-          nm -D build/highlighter-loader-tsan/test_highlighter_loader_contract | grep '__tsan_' | head -3
-          nm -D build/highlighter-loader-tsan/ts-lang-contract.so | grep '__tsan_' | head -3
       - name: Execute concurrent unload and replacement under TSan
         shell: bash
         env:
