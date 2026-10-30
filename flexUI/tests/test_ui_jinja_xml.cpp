@@ -26,8 +26,12 @@ struct StudioTextInputs {
 };
 
 cmeta_reflect_data(StudioTextInputs, "stun.test.StudioTextInputs",
+    // vstr is not a builtin CMeta storage type. The exact public Jinja
+    // DataDesc and its storage witness must both be supplied; otherwise
+    // cmeta_data_desc_valid() rejects the complete root metadata at render.
     cmeta_data_field_id(vstr, title, "stun.test.StudioTextInputs.title",
-                        jinja_cmeta_vstr_data()));
+                        jinja_cmeta_vstr_data(),
+                        jinja_cmeta_vstr_data()->storage_type));
 
 flexUI::UiJinjaXmlCompileResult compile(
     std::string_view source, const StudioInputs& inputs,
@@ -57,10 +61,10 @@ spec("FlexUI uses installed JinjaCMeta only as a staged XML author compiler") {
     check_true(static_cast<bool>(compiled));
     if (compiled) {
       check_equal(compiled.program->name(), "JinjaStudio");
-    check_equal(compiled.program->definition().root.children.size(), 2u);
-    check_equal(compiled.program->definition().root.children[0].id, "action-0");
-    check_equal(compiled.program->definition().root.children[1].id, "action-1");
-    check_equal(compiled.program->event_bindings().size(), 2u);
+      check_equal(compiled.program->definition().root.children.size(), 2u);
+      check_equal(compiled.program->definition().root.children[0].id, "action-0");
+      check_equal(compiled.program->definition().root.children[1].id, "action-1");
+      check_equal(compiled.program->event_bindings().size(), 2u);
 
     // Real, unmodified production Widget factory and Box staging path.
     auto registry = flexUI::WidgetRegistry::builtins();
@@ -99,10 +103,10 @@ spec("FlexUI uses installed JinjaCMeta only as a staged XML author compiler") {
     check_true(static_cast<bool>(compiled));
     if (compiled) {
       const auto& root = compiled.program->definition().root;
-    check_equal(root.tag, "label");
-    check_equal(root.children.size(), 0u);
-    check_equal(std::get<std::string>(root.properties.at("text")),
-                "<button id=\"injected\" />");
+      check_equal(root.tag, "label");
+      check_equal(root.children.size(), 0u);
+      check_equal(std::get<std::string>(root.properties.at("text")),
+                  "<button id=\"injected\" />");
     }
   }
 
