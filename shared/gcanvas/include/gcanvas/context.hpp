@@ -86,6 +86,13 @@ namespace gcanvas
         // GPU in-flight references are counted in the resident bytes once.
         std::size_t max_image_update_modeled_peak_bytes =
             std::size_t{2} * 1024u * 1024u * 1024u;
+        // Separate creation-time *payload* peak for GL Image and Font Atlas:
+        // retained CPU and uploaded texture base bytes, new persistent
+        // pixels, transient decode/atlas staging and new texture base bytes.
+        // Not a promise about driver VRAM, FreeType internal memory, RSS or
+        // mipmap/allocator overhead. Added at END for aggregate compatibility.
+        std::size_t max_image_creation_modeled_peak_bytes =
+            std::size_t{2} * 1024u * 1024u * 1024u;
     };
 
     struct ImageUpdatePeakUsage final {
@@ -96,6 +103,17 @@ namespace gcanvas
         std::size_t limit_bytes = 0;
         // True only for a backend reporting its actual uploaded native
         // base image bytes; false means the model covers CPU payload only.
+        bool native_payload_known = false;
+    };
+
+    struct ImageCreationPeakUsage final {
+        std::size_t retained_cpu_bytes = 0;
+        std::size_t transient_cpu_bytes = 0;
+        std::size_t new_persistent_cpu_bytes = 0;
+        std::size_t native_uploaded_base_bytes = 0;
+        std::size_t new_native_base_bytes = 0;
+        std::size_t modeled_peak_bytes = 0;
+        std::size_t limit_bytes = 0;
         bool native_payload_known = false;
     };
 
@@ -133,6 +151,16 @@ namespace gcanvas
         // limit may block all updates until it is restored, which is
         // intentional under memory pressure.
         void set_image_update_modeled_peak_limit(std::size_t limit_bytes);
+
+        // Early pre-allocation check, independent from update transactions.
+        // All candidate dimensions and each temporary buffer are passed
+        // explicitly. In-flight fence references don't allocate an extra
+        // copy of already uploaded native texture payload.
+        ImageCreationPeakUsage image_creation_peak_usage(
+            std::size_t new_persistent_cpu_bytes,
+            std::size_t transient_cpu_bytes,
+            std::size_t new_native_base_bytes) const;
+        void set_image_creation_modeled_peak_limit(std::size_t limit_bytes);
 
         virtual void stroke_rect(float x, float y, float width, float height) = 0;
         virtual void stroke_rounded_rect(float x, float y, float width, float height,
@@ -501,6 +529,10 @@ namespace gcanvas
         // current ImageImplGl upload sizes; other backends return unknown.
         virtual bool uploaded_native_texture_payload_bytes(
             std::size_t& out) const { (void)out; return false; }
+        // Optional backend-owned internal CPU pixels (e.g. GL dummy image).
+        virtual std::size_t retained_internal_cpu_pixel_payload_bytes() const {
+            return 0u;
+        }
         virtual void draw_tessellated_path(const Path& path, const Paint& paint,
                                            float line_width, const Transform& transform) = 0;
         virtual void draw_tessellated_path_blur(

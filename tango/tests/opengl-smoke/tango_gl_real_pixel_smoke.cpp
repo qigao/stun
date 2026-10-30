@@ -879,7 +879,8 @@ void actual_context_framebuffer_size(void* user, int* width, int* height) {
 // denies while its previous real GLsync remains unacknowledged. A native
 // client wait completes the GPU and then green pixels must reach the same
 // real GL texture via glTexSubImage2D. Context teardown audits GL deletes.
-void exercise_actual_gl_mutation_barrier(GLFWwindow* window) {
+void exercise_actual_gl_mutation_barrier(
+    GLFWwindow* window, const std::string& font_file) {
     require(window && glfwGetCurrentContext() == window,
             "Native GPU mutation test requires exact current GLFW context");
     NativeMutationWitness audit{window};
@@ -1027,6 +1028,104 @@ void exercise_actual_gl_mutation_barrier(GLFWwindow* window) {
     require(zero_cap_denied,
             "Native Context admitted an unbounded zero-byte candidate limit");
 
+    // The SAME Context must reject creation before allocating an Image,
+    // font-source buffer or large FreeType glyph atlas. Use the real GL
+    // default-font and existing uploaded Image payload as the source.
+    const auto creation = context->image_creation_peak_usage(
+        red.size(), 0u, red.size());
+    require(creation.native_payload_known &&
+            creation.native_uploaded_base_bytes > red.size() &&
+            creation.retained_cpu_bytes > red.size() &&
+            creation.new_persistent_cpu_bytes == red.size() &&
+            creation.new_native_base_bytes == red.size() &&
+            creation.transient_cpu_bytes == 0u &&
+            creation.modeled_peak_bytes ==
+                creation.retained_cpu_bytes +
+                creation.native_uploaded_base_bytes +
+                creation.new_persistent_cpu_bytes +
+                creation.new_native_base_bytes &&
+            creation.modeled_peak_bytes <= creation.limit_bytes,
+            "Actual creation peak model omitted live CPU/GL image or atlas payload");
+
+    context->set_image_creation_modeled_peak_limit(
+        creation.modeled_peak_bytes - 1u);
+    const int old_native_uploads = audit.uploads;
+    const int old_native_denials = audit.denied;
+    bool creation_over_budget = false;
+    try { (void)context->create_image(
+        2, 2, 4, red.data(), red.size()); }
+    catch (const std::length_error&) { creation_over_budget = true; }
+    require(creation_over_budget &&
+            audit.uploads == old_native_uploads &&
+            audit.denied == old_native_denials &&
+            image.pixels().size() == green.size() &&
+            std::equal(image.pixels().begin(), image.pixels().end(), green.begin()),
+            "Rejected creation peak allocated/uploaded another GPU image or corrupted CPU state");
+
+    glBindTexture(GL_TEXTURE_2D, texture);
+    glGetTexImage(GL_TEXTURE_2D, 0, GL_RGBA, GL_UNSIGNED_BYTE, actual.data());
+    require(actual == green && glGetError() == GL_NO_ERROR,
+            "Rejected creation budget modified a previously uploaded GPU texture");
+
+    // A 1-byte cap also refuses source-file staging before allocating the
+    // font file, and refuses in-memory FreeType atlas staging before the
+    // enormous glyph pixel vector can be allocated. Both are real original
+    // gCanvas Font creation entry points.
+    context->set_image_creation_modeled_peak_limit(1u);
+    bool font_file_denied = false;
+    try { (void)context->create_font(font_file); }
+    catch (const std::length_error&) { font_file_denied = true; }
+    require(font_file_denied && audit.uploads == old_native_uploads,
+            "Font source file read bypassed its early creation peak admission");
+    std::ifstream font_stream(font_file, std::ios::binary | std::ios::ate);
+    require(static_cast<bool>(font_stream),
+            "Native atlas admission test could not open its known-good font");
+    const auto font_bytes_length = font_stream.tellg();
+    require(font_bytes_length > 0 &&
+            font_bytes_length < static_cast<std::streamoff>(16u * 1024u * 1024u),
+            "Known-good native atlas font source exceeds bounded test input");
+    std::vector<unsigned char> font_source(
+        static_cast<std::size_t>(font_bytes_length));
+    font_stream.seekg(0);
+    require(static_cast<bool>(font_stream.read(
+                reinterpret_cast<char*>(font_source.data()),
+                static_cast<std::streamsize>(font_source.size()))),
+            "Failed to read native atlas font source bytes for actual FreeType test");
+    bool atlas_staging_denied = false;
+    try {
+        (void)context->create_font(font_source.data(), font_source.size());
+    } catch (const std::length_error&) {
+        atlas_staging_denied = true;
+    }
+    require(atlas_staging_denied &&
+            audit.uploads == old_native_uploads &&
+            audit.denied == old_native_denials,
+            "Actual FreeType atlas staging allocated/uploaded despite a rejected peak");
+
+    // Restore admission and prove genuine new GL image resource creation
+    // without losing the original green texture or the previous Image.
+    context->set_image_creation_modeled_peak_limit(creation.limit_bytes);
+    const auto restored_creation = context->image_creation_peak_usage(
+        red.size(), 0u, red.size());
+    require(restored_creation.modeled_peak_bytes ==
+                creation.modeled_peak_bytes &&
+            restored_creation.limit_bytes == creation.limit_bytes,
+            "Restoring creation peak limit changed the Context's live resource inventory");
+    auto& second_image = context->create_image(
+        2, 2, 4, red.data(), red.size());
+    require(second_image.pixels().size() == red.size() &&
+            audit.uploads == old_native_uploads + 1,
+            "Allowed native GL image creation failed to allocate its real GPU texture");
+
+    std::vector<gcanvas::NativeGpuResourceId> creation_inventory;
+    require(context->native_gpu_resource_ids(creation_inventory) &&
+            std::count_if(
+                creation_inventory.begin(), creation_inventory.end(),
+                [](const auto& object) {
+                    return object.kind ==
+                        gcanvas::NativeGpuResourceKind::ImageTexture;
+                }) == 2,
+            "Accepted native GL creation did not add exactly one real image texture");
     // Failed validation (including a malformed input span) must not
     // overwrite old CPU bytes or issue a native driver update.
     bool invalid_span_refused = false;
@@ -1059,6 +1158,12 @@ void exercise_actual_gl_mutation_barrier(GLFWwindow* window) {
               << initial_peak.modeled_peak_bytes << "\n"
               << "TANGO_GL_IMAGE_PEAK_BUDGET_DENIED_BEFORE_ALLOC=1\n"
               << "TANGO_GL_IMAGE_PEAK_CPU_GPU_INTACT=1\n"
+              << "TANGO_GL_IMAGE_CREATION_PEAK_BYTES="
+              << creation.modeled_peak_bytes << "\n"
+              << "TANGO_GL_IMAGE_CREATION_EARLY_BUDGET_DENIED=1\n"
+              << "TANGO_GL_FONT_FILE_PREALLOC_BUDGET_DENIED=1\n"
+              << "TANGO_GL_FONT_ATLAS_PREALLOC_BUDGET_DENIED=1\n"
+              << "TANGO_GL_IMAGE_CREATION_AFTER_BUDGET_RESTORED=1\n"
               << "TANGO_GL_ACTUAL_GL_DELETE_AUDIT=1\n";
 }
 
@@ -1314,7 +1419,7 @@ void exercise_orderly_context_recreation(
             // Independent actual gCanvas Context drives the real
             // glTexSubImage2D/glDeleteTextures/glDeleteProgram paths through
             // the same optional host mutation-admission API.
-            exercise_actual_gl_mutation_barrier(native.handle);
+            exercise_actual_gl_mutation_barrier(native.handle, regular_font);
         } // Destroy the actual GLFW GL context AFTER GPU resource cleanup.
         require(glfwGetCurrentContext() == nullptr,
                 "Destroyed native GL context remains bound to the UI owner");

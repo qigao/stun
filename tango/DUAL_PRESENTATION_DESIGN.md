@@ -624,6 +624,67 @@ existing budgets; the new cap does not retroactively evict live resources.
 Crashed/partially written GL operations still require device quarantine.
 Physical GPU/HiDPI and production TangoOpenGL factory remain open gates.
 
+## Native gCanvas Image/Font creation-time modeled peak admission (Draft)
+
+The earlier image-update transaction budget does not stop the original
+gCanvas **Image constructor** from copying a new pixel buffer, nor
+FreeType from allocating an entire **Font Atlas staging buffer** before
+the GPU upload gate. Those are distinct allocation risks from updating
+an already-resident image.
+
+This slice adds `ResourceLimits::max_image_creation_modeled_peak_bytes`,
+an **independent 2 GiB default** (up to an explicit 4 GiB limit).
+The owning original `gcanvas::Context` computes
+`ImageCreationPeakUsage`: all retained CPU Image + Font Atlas pixels
+and internal GL dummy pixels, current uploaded **native base-level**
+GL/GLES texture bytes, plus the prospective persistent CPU pixels,
+all simultaneously live transient CPU staging buffers, and future
+native base texture pixels. Every addition is overflow-checked and
+the result must fit before allocating the new CPU buffer.
+
+For raw-memory Images, the existing `ContextImplGl::create_image()`
+checks dimensions and the exact borrowed byte span, then admits
+persistent CPU pixels + eventual native base texture storage before
+constructing the original `ImageImplGl`. For file-backed Images,
+STB image metadata is inspected before full decode; the model
+also counts STB's temporary forced-RGBA decode buffer alongside
+the persistent CPU copy and native base texture. A file that
+changes dimensions between inspection and decode is rejected
+rather than accepted against a stale preflight; file-content
+changes at identical dimensions remain outside this admission.
+
+For Fonts, the existing `Font::load_from_file()` admits its file
+buffer before allocation. The original `Font::load_from_memory()`
+knows the FreeType Atlas dimensions before it allocates its large
+temporary raster buffer and calls the same Context's peak admission
+through the sole native `FontImplGl` owner. This counts the file
+buffer when present, the **temporary raster pixels**, the new
+persistent Atlas Image copy and the future native texture base
+pixels together. The atlas source memory supplied by an external
+caller, FreeType private allocations and per-glyph map nodes
+are not included; they must be audited separately.
+
+The existing Mesa/Xvfb native Context test lowers the image creation
+budget to **one byte less than the measured real transaction**:
+a raw-memory Image creation must throw `length_error` before
+Image/GL allocation and preserve existing CPU and GPU texels.
+A tiny one-byte budget must separately reject font-file allocation
+and a real FreeType in-memory Font Atlas before any GPU upload.
+After restoring the cap, a new native GPU Image must be created
+and included in the original gCanvas uploaded-resource inventory.
+The same test retains native GLsync, XTest, Resize and shader/atlas
+resource retirement qualification.
+
+**Strict scope:** a *modeled pixel-payload admission*, not whole-process
+RSS or GPU VRAM. FreeType private buffers, font glyph maps, STB decoder
+bookkeeping, vector capacities, mipmaps, texture padding, fragment
+shader/uniform buffers, driver allocations, concurrent owners and
+pending cross-Context resources remain outside its accounting.
+A font-file staging check and atlas check are separate proofs.
+The existing GPU serial Fence/Lease, CPU rollback and original
+Context ownership requirements are unchanged. No production
+TangoOpenGL factory registration or additional CI/consumer.
+
 ## Native TTY presenter
 
 Owns/borrows the terminal, validates the bounded buffer, produces VT diff
