@@ -1,5 +1,5 @@
 # Tango C11 grid -> native pixel drawing recipe (CPU, headless, no GL SDK).
-add_library(flex_tango_gl_frame STATIC cell_presenter.cpp)
+add_library(flex_tango_gl_frame STATIC cell_presenter.cpp cell_input.cpp)
 target_link_libraries(flex_tango_gl_frame PUBLIC flex_render tango)
 target_include_directories(flex_tango_gl_frame
   PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)

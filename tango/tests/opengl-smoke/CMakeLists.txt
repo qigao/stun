@@ -19,6 +19,11 @@ find_package(glad CONFIG REQUIRED)
 find_package(plutosvg CONFIG REQUIRED)
 find_package(glfw3 CONFIG REQUIRED)
 find_package(OpenGL REQUIRED)
+# This existing Linux Mesa/Xvfb qualification uses server-injected XTest
+# events. Failure to find XTest is fatal; no direct-callback substitute.
+find_package(X11 REQUIRED)
+find_path(TANGO_XTEST_INCLUDE_DIR NAMES X11/extensions/XTest.h REQUIRED)
+find_library(TANGO_XTEST_LIBRARY NAMES Xtst REQUIRED)
 find_path(STB_INCLUDE_DIRS NAMES stb_image.h PATH_SUFFIXES stb REQUIRED)
 find_path(Stb_INCLUDE_DIR NAMES stb_sprintf.h PATH_SUFFIXES stb REQUIRED)
 if(NOT TARGET Salts::Unicode OR NOT TARGET Salts::Platform)
@@ -55,12 +60,15 @@ endif()
 
 add_executable(tango_gl_real_pixel_smoke tango_gl_real_pixel_smoke.cpp)
 target_compile_features(tango_gl_real_pixel_smoke PRIVATE cxx_std_17)
+target_include_directories(tango_gl_real_pixel_smoke PRIVATE
+  "${TANGO_XTEST_INCLUDE_DIR}")
 target_compile_options(tango_gl_real_pixel_smoke PRIVATE
   $<$<CXX_COMPILER_ID:GNU,Clang>:-Wall>
   $<$<CXX_COMPILER_ID:GNU,Clang>:-Wextra>
   $<$<CXX_COMPILER_ID:GNU,Clang>:-Werror>)
 target_link_libraries(tango_gl_real_pixel_smoke PRIVATE
-  flex_backend_tango_opengl glfw OpenGL::GL)
+  flex_backend_tango_opengl glfw OpenGL::GL X11::X11
+  "${TANGO_XTEST_LIBRARY}")
 enable_testing()
 
 set(TANGO_PIXEL_FONT "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf"

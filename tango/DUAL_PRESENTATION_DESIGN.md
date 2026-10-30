@@ -168,6 +168,46 @@ pointer/IME conformance, context recreation, device-generation invalidation
 and GPU in-flight completion/retirement. Do not register production
 `RendererBackend::TangoOpenGL` yet.
 
+## GLFW native callbacks -> canonical Tango C11 input (Draft)
+
+The OpenGL host can now convert real GLFW mouse-button/cursor/scroll,
+navigation-key and committed Unicode character callbacks directly into
+`tui_event_t`. `cell_input_pointer()` uses ONLY the last successfully
+submitted `CellPixelPresenter` geometry; the returned sidecar carries the
+frame revision and wide-grapheme leading column while native `event.x/y`
+retain physical cell coordinates. The adapter is a synchronous UI/GL-owner
+operation, **not** a new queue, parser, terminal model, or input thread.
+
+Special-key callbacks and committed-character callbacks are disjoint (no
+double delivery of printable text). Unsupported modifier/action combinations,
+stale host framebuffer metrics, and wrong-thread calls fail explicitly.
+Unicode input is accepted only as a valid committed scalar. GLFW does not
+provide cross-platform IME preedit through `glfwSetCharCallback`; composition,
+accessibility, key-up, keyboard layout/control chords, out-of-window capture,
+mouse drag, live resize, injected OS event/focus acceptance and GPU context
+recreation remain **open**. Real Mesa acceptance checks the event adapter
+against actual framebuffer pixels; that is **not** an OS-injection test.
+No production TangoOpenGL factory registration is authorized.
+
+## Real X11/XTest injected input acceptance (Mesa/Xvfb)
+
+The existing native Mesa/Xvfb test additionally requires the actual XTest
+server extension and a mapped, focused GLFW X11 window. Server-injected
+left-button press/release on the *real red and green GPU cells* and Left/A
+keyboard events must arrive through GLFW callbacks and be normalized into
+the canonical Tango C11 `tui_event_t`, preserving exact submitted frame
+revision 101. The first injected click drives a new native C11 source snapshot
+and **real GL framebuffer highlight** at revision 102, captured separately
+as `tango-gl-frame.ppm.input.ppm` alongside the initial GPU frame.
+No direct callback invocation, in-memory pixel substitution, synthetic
+`tui_event_t` queue or fallback renderer is accepted.
+
+This qualifies Xvfb/XTest input on the Linux software Mesa path only.
+Actual physical hardware, Windows/macOS event injection, IME preedit,
+mouse capture/drag, resize/HiDPI transitions, focus-loss retirement,
+GL context loss/recreation and GPU fence ownership remain open. Keep
+the public TangoOpenGL backend unregistered.
+
 ## Native TTY presenter
 
 Owns/borrows the terminal, validates the bounded buffer, produces VT diff
