@@ -449,6 +449,15 @@ namespace gcanvas
         // Returned references are owned by this context and remain valid until context teardown.
         virtual Image& create_image(const std::string& file_path,
                                     ImageConfig config = {}) = 0;
+        // Require an independently trusted, immutable COMPLETE encoded source
+        // revision. Compare exact bytes before STB metadata/decode or GPU
+        // publication. The caller must not modify this revision during use;
+        // reading it from the same untrusted path is NOT a revision proof.
+        // Backends without a qualified file reader reject this API.
+        virtual Image& create_image_verified(
+            const std::string& file_path,
+            const std::vector<std::uint8_t>& trusted_encoded_revision,
+            ImageConfig config = {});
         // size must equal width * height * components; input pixels are copied before return.
         virtual Image& create_image(int width, int height, int components,
                                     const unsigned char* data, std::size_t size,

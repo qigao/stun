@@ -745,6 +745,51 @@ temporary allocator overhead, physical VRAM and abrupt device
 loss remain separate qualification gates. The current
 TangoOpenGL production factory remains disabled.
 
+## Verified encoded Image content against a trusted revision (stacked Draft)
+
+The plain `Context::create_image(path)` continues to accept whichever complete
+bytes it captures during its single open/read. It does **not** guarantee a
+filesystem-atomic snapshot when another writer modifies the same opened
+file during that read. File size, path, inode and timestamps cannot prove
+a committed version, and computing a hash from the captured bytes alone
+would only certify those already-captured bytes.
+
+OpenGL/GLES additionally support `Context::create_image_verified(path,
+trusted_encoded_revision)`, where `trusted_encoded_revision` is the
+**complete independently trusted and immutable encoded byte sequence**,
+not another read of the same untrusted mutable pathname. The original
+bounded one-read implementation rejects empty/oversized expected data
+or length mismatch before staging, then compares **every captured
+encoded byte** with this version after the read and **before**
+`stbi_info_from_memory`, RGBA decode, GPU allocation or publication.
+Mismatch fails closed and leaves already-owned CPU/GPU Images unchanged.
+There is no second decoder, crypto provider, retry, fallback or new
+OpenGL engine. Unqualified non-GL backends reject this new API rather
+than silently calling the unverified file loader.
+
+The real Mesa/Xvfb suite checks exact original red source, independently
+published green PNG after an atomic rename, stale red version refusal,
+known same-size in-place corruption, plus an independent concurrent
+same-inode writer racing the initial read. The race permits **only**
+the complete trusted red image or rejection, never a mixed/green
+publication; stable old red/green CPU pixels and GL texture readback
+are required in both cases. A concurrent writer may run before or
+after the actual OS read; the acceptance is the outcome invariant,
+not a claim that the kernel took an atomic file snapshot.
+
+**Limits:** The caller must enforce trust and immutability of the supplied
+expected bytes and their publisher provenance; this API compares
+**content**, not inode generations or filesystem publication IDs.
+Content-identical ABA rewrites remain observationally equivalent; proving
+publication identity requires a separate writer-owned immutable revision
+protocol. Caller-owned reference bytes and physical VRAM/RSS are not
+included in the gCanvas modeled creation peak. For applications that can
+avoid file races entirely, a committed write-to-temp + sync + atomic
+rename protocol must also forbid in-place writes to published objects
+and preserve the open descriptor semantics on each supported platform.
+The production TangoOpenGL factory is still disabled and Issue #342
+remains open.
+
 ## Native TTY presenter
 
 Owns/borrows the terminal, validates the bounded buffer, produces VT diff
