@@ -6,6 +6,79 @@
 - 唯一实施 tracker：[#17](https://github.com/qigao/stun/issues/17)；XML schema 见 #16，平台交付见 #31，真实 GUI 验收见 #330。
 - 本文取代 `XML_CSS_TBS_ARCHITECTURE.md`、`TAILWIND_JIT_DEFAULT_DESIGN.md` 及相关计划中的 CSS-first、生成 CSS、可选应用 CSS 和 `@theme` 输入决策。原有 UI 所有权、controller、服务与组件退休契约继续有效。
 
+## 0. 开发模型：像现代 HTML 一样编写原生 FlexUI（2026-10-30）
+
+**唯一作者模型：FlexUI = XML + Native Tailwind + TurboScript。** 类似现代 HTML 应用的开发体验，不是 HTML/CSS/JavaScript 浏览器兼容性承诺。XML 遵循严格 XML 语法，`class` 是唯一的 Tailwind 样式作者入口，事件由 `on:*`、数据投影由 `bind:*` 接入现有编译器/Controller；业务应用逻辑、状态变更和服务调用使用受控 TurboScript。不得新增 CSS 中间编译、stylesheet、inline `style`、JavaScript/DOM 引擎、第二套布局树或脚本直写 GPU/TTY 的路径。
+
+### 0.1 DOM-like Element 与 Widget 的职责边界
+
+- **`div` 就是默认的通用容器 Element。** 行/列 Flex、Grid、Stack、内容尺寸、绝对定位、间距、裁剪、滚动和层叠等来自其原生 Tailwind 属性与唯一 Layout/Compositor；它们**不是**独立的 `ContainerWidget`/`FlexPanel`/`GridPanel`/`LinearLayout`。除非拥有无法表达为普通布局属性的独立行为/资源契约，不新增布局同义 Widget。
+- `span`、`main`、`section`、`header`、`footer`、`nav`、`form` 等是普通 Element/结构语义标签；标签不隐式创建第二套布局器或 OS Window。语义/无障碍角色可显式附着于现有 Element，具体平台投影须独立验收。
+- `button`、`input`、`tree`、`table`、`tabs` 等 **Widget** 拥有真正的控件交互状态、专用内部模型与可样式化 parts；Widget 的宿主及公开 parts 仍属于同一棵 Element/Box 树。结构标签与 Widget 标签均必须通过同一个严格 `WidgetRegistry` 声明/验证，未知标签不自动当成 `div`。
+- 控件内部数据结构与 XML 子节点有明确类型化内容模型。特别是 `tabs`/`tree`/`table`/`accordion` 的 C++ `add_tab/add_node/add_row/add_section` **不能被误认为已支持 XML 子节点自动装配**；见 #16。保持现有 C++ API 的行为，逐项迁移到声明式模型并做同一语义差分验收。
+
+### 0.2 单个应用的作者体验（目标示意，不是已完整交付的运行截图）
+
+~~~xml
+<ui name="Studio"
+    xmlns:on="urn:flexui:event"
+    xmlns:bind="urn:flexui:binding">
+  <main id="app" class="flex h-full flex-col">
+    <header id="toolbar" class="flex items-center gap-2 p-2">
+      <button id="save" on:click="save_document">Save</button>
+      <label id="status" bind:text="$status"/>
+    </header>
+    <div id="workspace" class="flex min-h-0 flex-1">
+      <div id="sidebar" class="w-64 overflow-auto">
+        <tree id="files"/>
+      </div>
+      <div id="editor" class="min-w-0 flex-1">
+        <textarea id="source"/>
+      </div>
+    </div>
+  </main>
+</ui>
+~~~
+
+- XML 编译为有界不可变的 `CompiledUiProgram`；`WidgetRegistry` 审核标签、属性、子节点内容模型和可绑定能力；只在目标 UI owner 上实例化和提交同一棵 Element/Box 树。
+- Native Tailwind 直接编译 `class` token、variant、Theme/Preset、状态和约束，降低为**同一个** typed property/layout/text/paint/hit-test/effect 管线消费的数据；后端只接收已求值/已准入的语义绘制计划，不重新解析 Tailwind。
+- TurboScript handler、application input、CMeta/Binding 与服务在同一作用域/修订协议内工作；不暴露可长期保存的 Element 裸指针给脚本。可编辑控件的值回写/两向绑定、可观察集合和模板是需要明确语义与回归测试的目标，不能宣称从 `bind:text` 已自动得到。
+- 组件复用使用明确的 scoped XML component、slot 和稳定身份，组合进**同一个** compiled program/runtime tree。数据驱动重复视图在现有 `UiKeyedRepeater` 的 owner/Key 机制上扩展，而非创造第二套 Virtual DOM 或重复生命周期管理。动态物理 `unmount(scope)` 必须遵守 #298/#302 的观察者、回调、worker join 与借用退休门禁。
+- 具体 `flex/grid/overflow` token 和动态绑定是否可用，必须分别通过当前 Native Tailwind profile 与真实运行时测试；以上示意不能作为 M1–M5 已实现或浏览器级 CSS 等价的证据。
+
+### 0.3 与网页开发相似的体验、不同的运行时
+
+~~~text
+author XML + class + TurboScript
+           |
+           v
+strict XML compile + WidgetRegistry + typed bindings
+           |
+           v
+native TailwindProgram + Theme/Preset + semantic property registry
+           |
+           v
+one Element/Box tree, layout, text, focus, event, hit geometry
+           |
+           v
+explicit backend admission and owned render plan
+      /            |            \
+     D2D        gCanvas       TangoTTY / TangoOpenGL
+~~~
+
+必须保留现代应用所需的声明式组合、事件、绑定、路由/服务接口与热重载的失败原子性；**不要求**实现浏览器 HTML 解析、CSSOM、JavaScript 或浏览器 DOM 全量 API，也不因 `div` 的通用性而取消结构语义或专用 Widget。
+
+### 0.4 XML 工作流与完成门禁（均未因本设计完成）
+
+- [ ] **#16：完整注册表类型契约。** 统一 `compile_ui_xml` 和 registry-aware semantic admission；验证 property 类型/单位/取值、事件/绑定目标、允许的子节点类型；补齐真正的 Text/mixed content、源码 span，错误发生在 Box/Widget mutation 之前。
+- [ ] **#16/#275：复合组件声明。** 通过同一 XML/Element 树定义 Tabs 页、Tree 节点、Table 列与数据项、Accordion Section；静态组件/slot 与可编辑 value、绑定/事件的装配必须无重复模型。
+- [ ] **#16/#275：数据驱动 UI。** 规范化 `bind:value`、列表的 `items`/`item template`、稳定 Key 与局部作用域，不把 C++ Repeater 已存在误认为 XML ItemTemplate 已存在。
+- [ ] **#16/#31：Designer/Runtime 同一种 XML。** `flexui_designer` 当前 `<ui><widget type=...><position/><size/></widget></ui>` 导出与生产 `<ui name=...><div .../></ui>` schema 不一致；必须让 Designer 生成的文件直接被生产 `compile_ui_xml`/registry 接受，完成 Save→Compile→Mount→Reload/Export 真实回归。
+- [ ] **#17：原生 Tailwind 完整迁移。** 保留旧 CSS 控件行为的迁移清单，但目标运行时不得存在 CSS/JS 生产 fallback；异常和不支持 token/effect 需要结构化诊断。
+- [ ] **平台验收。** 相同 XML/输入在 D2D、gCanvas 和 Tango 目标分别执行可支持的语义；TTY 使用字符网格和能力门禁，GPU 使用真实窗口/像素与事件验收；禁止因不支持效果而隐式切换 backend。
+
+当前 master 中旧的 CSS/JIT 与早期 XML/Designer 格式仍存在，原生 Tailwind 路径及全部组件契约正在分阶段迁移。**设计决策与已运行的生产功能必须分开记录**。跟踪：[#1](https://github.com/qigao/stun/issues/1)、[#16](https://github.com/qigao/stun/issues/16)、[#17](https://github.com/qigao/stun/issues/17)、[#275](https://github.com/qigao/stun/issues/275)、[PR #302](https://github.com/qigao/stun/pull/302)。
+
 ## 1. 决策与范围
 
 应用的唯一作者模型是 **XML + Tailwind + TurboScript**：XML 描述结构，标准 `class` 承载 Tailwind，TurboScript 通过有界命令修改状态。主题和控件默认样式分别使用原生类型化 Theme 与 Tailwind Preset。
