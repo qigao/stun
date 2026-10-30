@@ -12,6 +12,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <string>
 #include <thread>
 #include <vector>
@@ -45,8 +46,31 @@ struct PixelGlyph {
     bool bold = false;
 };
 
+struct CellPixelHit final {
+    int column = 0;         // Actual cell under the pointer.
+    int row = 0;
+    int leading_column = 0; // Leading cell for a wide grapheme.
+    bool continuation = false;
+    std::uint64_t grid_revision = 0;
+};
+
+// The same immutable plan used for GPU cell painting owns the hit geometry;
+// no second layout computation or borrowed grid is allowed.
 class CellPixelPlan final {
 public:
+    int columns() const noexcept { return columns_; }
+    int rows() const noexcept { return rows_; }
+    float cell_width() const noexcept { return cell_width_; }
+    float cell_height() const noexcept { return cell_height_; }
+
+    // Both coordinates are top-left-origin (matching Tango and GLFW).
+    // Logical coordinates are the existing draw_rect/draw_text coordinate
+    // space; framebuffer coordinates are device pixels. A boundary at the
+    // exclusive right/bottom edge is NOT a cell hit.
+    std::optional<CellPixelHit> hit_test_logical(
+        double x, double y) const noexcept;
+    std::optional<CellPixelHit> hit_test_framebuffer(
+        double framebuffer_x, double framebuffer_y) const noexcept;
     float width() const noexcept { return width_; }
     float height() const noexcept { return height_; }
     float pixel_ratio() const noexcept { return pixel_ratio_; }
@@ -69,7 +93,25 @@ private:
     std::vector<PixelRect> backgrounds_;
     std::vector<PixelGlyph> glyphs_;
     std::vector<PixelRect> decorations_;
+    // The source grid is no longer borrowed after plan construction. A
+    // continuation always maps to its canonical wide glyph's leading cell.
+    std::vector<int> leading_column_by_cell_;
+    int columns_ = 0;
+    int rows_ = 0;
+    float cell_width_ = 0;
+    float cell_height_ = 0;
+    std::optional<CellPixelHit> hit_test_projected(
+        double logical_x, double logical_y) const noexcept;
 };
+
+// Map host window logical points into the same device pixels actually painted
+// by this plan. Reject stale/mismatched framebuffer sizing (including HiDPI)
+// instead of inventing a guessed cursor-to-cell transform. The host must
+// obtain window/framebuffer dimensions from ONE coherent resize generation.
+std::optional<CellPixelHit> hit_test_window_pointer(
+    const CellPixelPlan& plan, double window_x, double window_y,
+    int window_width, int window_height,
+    int framebuffer_width, int framebuffer_height);
 
 // Stage a bounded copy of every draw operation, preserving the single Tango
 // grid and grapheme/continuation policy. This is a CPU plan with no native
@@ -98,11 +140,27 @@ public:
     void present(const tui_grid_snapshot_t* snapshot,
                  const CellPixelMetrics& metrics);
     bool on_owner_thread() const noexcept;
+    // Hit testing is available only for the last frame whose synchronous
+    // end_frame() succeeded, and only on the GL owner. An invalid input
+    // rejected before rendering preserves the prior submitted plan.
+    // A failure during backend drawing invalidates it: painted GPU pixels
+    // cannot be rolled back or trusted until the owner recovers.
+    // Direct, owner-thread-only input path. It never returns a borrowed
+    // plan pointer to input callbacks, and produces no hit after an
+    // incomplete/failed GPU submission.
+    std::optional<CellPixelHit> hit_test_window_pointer(
+        double window_x, double window_y,
+        int window_width, int window_height,
+        int framebuffer_width, int framebuffer_height) const;
+    // Diagnostic borrowed plan view: valid until the next present/reset
+    // or presenter destruction, and only on its owner thread.
+    const CellPixelPlan* last_submitted_plan() const;
 
 private:
     std::unique_ptr<Renderer> owned_;
     Renderer* renderer_ = nullptr;
     std::thread::id owner_thread_;
+    std::optional<CellPixelPlan> submitted_plan_;
 };
 
 } // namespace flex::tango_opengl

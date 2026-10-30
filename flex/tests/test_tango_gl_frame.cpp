@@ -1,6 +1,7 @@
 #include <backends/tango_opengl/cell_presenter.h>
 #include <tinytest.hpp>
 
+#include <limits>
 #include <memory>
 #include <stdexcept>
 #include <string>
@@ -18,6 +19,7 @@ struct PixelRecorder final : flex::Renderer {
     int text_draws = 0;
     int measurements = 0;
     bool reject_metrics = false;
+    bool fail_draw = false;
     std::vector<std::string> text;
 
     void begin_frame(float, float, float) override { ++begins; }
@@ -51,6 +53,7 @@ struct PixelRecorder final : flex::Renderer {
     void draw_text(const std::string& value, float, float,
                    const std::string&, float, bool,
                    const flex::Color&) override {
+        if (fail_draw) throw std::runtime_error("pixel test renderer rejected draw");
         ++text_draws;
         text.push_back(value);
     }
@@ -190,6 +193,157 @@ suite("Tango OpenGL cell-to-pixel staging on native Tango grid") {
         check_equal(target.begins, 0);
         check_equal(target.clears, 0);
         check_equal(target.text_draws, 0);
+    }
+
+
+    it("hit-tests the same frozen cells painted by the pixel plan, normalizing CJK continuation") {
+        Snapshot src;
+        const auto plan = tp::prepare_cell_pixel_plan(src.frame, metrics());
+        check_equal(plan.columns(), 4);
+        check_equal(plan.rows(), 1);
+        check_equal(plan.cell_width(), 8.0f);
+        check_equal(plan.cell_height(), 16.0f);
+        const auto first = plan.hit_test_logical(0.0, 0.0);
+        check(first.has_value());
+        if (first) {
+            check_equal(first->column, 0);
+            check_equal(first->leading_column, 0);
+            check(!first->continuation);
+            check_equal(first->grid_revision, 5u);
+        }
+        const auto lead = plan.hit_test_logical(8.0, 3.0);
+        const auto continuation = plan.hit_test_logical(16.0, 3.0);
+        check(lead.has_value());
+        check(continuation.has_value());
+        if (lead && continuation) {
+            check_equal(lead->column, 1);
+            check_equal(lead->leading_column, 1);
+            check(!lead->continuation);
+            check_equal(continuation->column, 2);
+            check_equal(continuation->leading_column, 1);
+            check(continuation->continuation);
+            check_equal(continuation->grid_revision, lead->grid_revision);
+        }
+        const auto last = plan.hit_test_logical(24.0, 15.99);
+        check(last.has_value());
+        if (last) check_equal(last->column, 3);
+        check(!plan.hit_test_logical(-0.00001, 0.0));
+        check(!plan.hit_test_logical(0.0, -1.0));
+        check(!plan.hit_test_logical(32.0, 0.0));
+        check(!plan.hit_test_logical(0.0, 16.0));
+        check(!plan.hit_test_logical(
+            (std::numeric_limits<double>::quiet_NaN)(), 1.0));
+        check(!plan.hit_test_logical(
+            (std::numeric_limits<double>::infinity)(), 1.0));
+        check(!plan.hit_test_framebuffer(32.0, 0.0));
+        check(!plan.hit_test_framebuffer(0.0, 16.0));
+        check(plan.hit_test_framebuffer(16.0, 3.0).has_value());
+    }
+
+    it("maps logical GLFW pointer positions through observed HiDPI framebuffer metrics") {
+        Snapshot src;
+        auto doubled = metrics();
+        doubled.pixel_ratio = 2.0f;
+        const auto plan = tp::prepare_cell_pixel_plan(src.frame, doubled);
+        // Retina-style 32x16 logical window -> 64x32 real framebuffer.
+        const auto hit = tp::hit_test_window_pointer(
+            plan, 20.0, 4.0, 32, 16, 64, 32);
+        check(hit.has_value());
+        if (hit) {
+            check_equal(hit->column, 2);
+            check_equal(hit->leading_column, 1);
+            check_equal(hit->row, 0);
+        }
+        // Window of 64 units with the *same* 64-pixel physical framebuffer.
+        const auto rescaled = tp::hit_test_window_pointer(
+            plan, 40.0, 8.0, 64, 32, 64, 32);
+        check(rescaled.has_value());
+        if (rescaled) {
+            check_equal(rescaled->column, 2);
+            check_equal(rescaled->leading_column, 1);
+        }
+        const auto outside = tp::hit_test_window_pointer(
+            plan, 32.0, 0.0, 32, 16, 64, 32);
+        check(!outside);
+        check(!tp::hit_test_window_pointer(
+            plan, (std::numeric_limits<double>::infinity)(),
+            0.0, 32, 16, 64, 32));
+        check_throws_as(tp::hit_test_window_pointer(
+            plan, 20.0, 4.0, 0, 16, 64, 32), std::invalid_argument);
+        check_throws_as(tp::hit_test_window_pointer(
+            plan, 20.0, 4.0, 32, 16, 63, 32), std::logic_error);
+        check_throws_as(tp::hit_test_window_pointer(
+            plan, 20.0, 4.0, 32, 16, 64, 31), std::logic_error);
+    }
+
+    it("keeps the last submitted hit geometry on preflight refusal, but retires it after backend failure") {
+        Snapshot src;
+        PixelRecorder backend;
+        tp::CellPixelPresenter presenter(backend);
+        check(presenter.last_submitted_plan() == nullptr);
+        presenter.present(src.frame, metrics());
+        const auto actual_input = presenter.hit_test_window_pointer(
+            16.5, 5.0, 32, 16, 32, 16);
+        check(actual_input.has_value());
+        if (actual_input) {
+            check_equal(actual_input->column, 2);
+            check_equal(actual_input->leading_column, 1);
+        }
+        const auto* first_plan = presenter.last_submitted_plan();
+        check(first_plan != nullptr);
+        if (first_plan) {
+            const auto hit = first_plan->hit_test_logical(16.5, 5.0);
+            check(hit.has_value());
+            if (hit) check_equal(hit->leading_column, 1);
+        }
+        const int frames = backend.begins;
+        auto stale = metrics();
+        ++stale.expected_grid_revision;
+        check_throws_as(presenter.present(src.frame, stale), std::logic_error);
+        check_equal(backend.begins, frames);
+        check(presenter.last_submitted_plan() == first_plan);
+        check(presenter.hit_test_window_pointer(
+            16.5, 5.0, 32, 16, 32, 16).has_value());
+
+        backend.reject_metrics = true;
+        check_throws_as(presenter.present(src.frame, metrics()), std::logic_error);
+        check_equal(backend.begins, frames);
+        check(presenter.last_submitted_plan() == first_plan);
+
+        backend.reject_metrics = false;
+        backend.fail_draw = true;
+        check_throws_as(presenter.present(src.frame, metrics()), std::runtime_error);
+        check_equal(backend.begins, frames + 1);
+        check(presenter.last_submitted_plan() == nullptr);
+        check(!presenter.hit_test_window_pointer(
+            16.5, 5.0, 32, 16, 32, 16));
+        backend.fail_draw = false;
+
+        presenter.present(src.frame, metrics());
+        check_equal(backend.begins, frames + 2);
+        check(presenter.last_submitted_plan() != nullptr);
+
+        bool foreign_rejected = false;
+        std::thread foreign([&] {
+            try {
+                (void)presenter.last_submitted_plan();
+            } catch (const std::logic_error&) {
+                foreign_rejected = true;
+            }
+        });
+        foreign.join();
+        check(foreign_rejected);
+        bool foreign_input_rejected = false;
+        std::thread foreign_input([&] {
+            try {
+                (void)presenter.hit_test_window_pointer(
+                    8.0, 5.0, 32, 16, 32, 16);
+            } catch (const std::logic_error&) {
+                foreign_input_rejected = true;
+            }
+        });
+        foreign_input.join();
+        check(foreign_input_rejected);
     }
 
     it("keeps the grid independent of source resize and enforces owner-thread presentation") {

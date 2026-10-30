@@ -213,6 +213,52 @@ void exercise_gpu(const std::string& font_path,
     layout.max_text_bytes = 1024;
 
     presenter->present(tango.frame, layout);
+    const auto* submitted = presenter->last_submitted_plan();
+    require(submitted != nullptr, "TangoGL did not retain its submitted pixel/hit plan");
+    require(submitted->grid_revision() == tui_grid_snapshot_revision(tango.frame),
+            "TangoGL displayed frame and hit geometry have different revisions");
+
+    int window_width = 0, window_height = 0;
+    int framebuffer_width = 0, framebuffer_height = 0;
+    glfwGetWindowSize(window.handle, &window_width, &window_height);
+    glfwGetFramebufferSize(window.handle, &framebuffer_width, &framebuffer_height);
+    require(framebuffer_width == kWidth && framebuffer_height == kHeight,
+            "TangoGL hit-test framebuffer extents differ from the actual GL pixels");
+    require(window_width > 0 && window_height > 0,
+            "TangoGL GLFW host returned an empty window");
+    const auto pick_physical_point = [&](int pixel_x, int pixel_y) {
+        return presenter->hit_test_window_pointer(
+            static_cast<double>(pixel_x) * window_width / framebuffer_width,
+            static_cast<double>(pixel_y) * window_height / framebuffer_height,
+            window_width, window_height, framebuffer_width, framebuffer_height);
+    };
+    const auto red_hit = pick_physical_point(
+        kCellWidth + 2, kCellHeight + 2);
+    const auto green_hit = pick_physical_point(
+        5 * kCellWidth + 2, kCellHeight + 2);
+    const auto bg_hit = pick_physical_point(4, 4);
+    require(red_hit && red_hit->column == 1 && red_hit->row == 1 &&
+            red_hit->leading_column == 1,
+            "Red framebuffer cell does not match the shared TangoGL hit plan");
+    require(green_hit && green_hit->column == 5 && green_hit->row == 1 &&
+            green_hit->leading_column == 5,
+            "Green framebuffer cell does not match the shared TangoGL hit plan");
+    require(bg_hit && bg_hit->column == 0 && bg_hit->row == 0,
+            "Background framebuffer cell does not match its hit position");
+    require(!pick_physical_point(kWidth, 0),
+            "Outside-right framebuffer pointer wrongly selected a Tango cell");
+
+    bool extent_rejected = false;
+    try {
+        (void)flex::tango_opengl::hit_test_window_pointer(
+            *submitted, 10.0, 10.0, window_width, window_height,
+            framebuffer_width + 1, framebuffer_height);
+    } catch (const std::logic_error&) {
+        extent_rejected = true;
+    }
+    require(extent_rejected,
+            "Mismatched live framebuffer extents were silently interpreted as cells");
+
     const auto first_frame = read_back_rgba();
     // Preserve the actual GPU pixels for audit EVEN when a subsequent color
     // or glyph assertion fails; never synthesize a fallback screenshot.
@@ -253,6 +299,13 @@ void exercise_gpu(const std::string& font_path,
         rejected = true;
     }
     require(rejected, "Tango OpenGL stale cell revision was silently accepted");
+    require(presenter->last_submitted_plan() == submitted,
+            "Pre-submit rejection unexpectedly replaced the last valid input/hit plan");
+    const auto post_rejection_hit = pick_physical_point(
+        kCellWidth + 2, kCellHeight + 2);
+    require(post_rejection_hit && post_rejection_hit->column == red_hit->column &&
+            post_rejection_hit->grid_revision == red_hit->grid_revision,
+            "Pre-submit rejection changed the last actually submitted hit geometry");
     require(read_back_rgba() == first_frame,
             "Rejected Tango grid mutation changed an already drawn GL frame");
 
