@@ -17,6 +17,8 @@ namespace gcanvas::opengl
         shared.host.swap_buffers = create_info.host.swap_buffers;
         shared.host.set_swap_interval = create_info.host.set_swap_interval;
         shared.host.framebuffer_size = create_info.host.framebuffer_size;
+        shared.host.resource_mutation_guard = create_info.host.resource_mutation_guard;
+        shared.host.resource_mutation_user_data = create_info.host.resource_mutation_user_data;
         shared.presentation = create_info.presentation == PresentationMode::External
             ? detail::GlPresentationMode::External
             : detail::GlPresentationMode::HostManaged;

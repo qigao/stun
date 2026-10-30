@@ -50,6 +50,19 @@ namespace gcanvas
         std::uint64_t native_name = 0;
     };
 
+    // Optional actual GL operation admission, NOT synthetic GL telemetry.
+    // If installed, this callback runs immediately BEFORE glTexImage2D,
+    // glTexSubImage2D, glDeleteTextures, glCreateProgram/glDeleteProgram.
+    // It must be noexcept and reject GPU mutation without throwing. A
+    // denied upload/update throws before GL work; a denied destructor
+    // terminates rather than deleting in-use driver resources.
+    enum class NativeGpuMutation : std::uint8_t {
+        TextureUpload, TextureUpdate, TextureDelete,
+        ProgramCreate, ProgramDelete
+    };
+    using NativeGpuMutationGuard =
+        bool (*)(void*, NativeGpuMutation, std::uint64_t, std::size_t) noexcept;
+
     struct ResourceLimits
     {
         std::size_t max_images = 256;

@@ -9,6 +9,8 @@
 #include <backends/tango_opengl/cell_input.h>
 #include <tui_grid_snapshot.h>
 #include <GLFW/glfw3.h>
+#include <GL/glext.h>
+#include <gcanvas/backends/opengl.hpp>
 // This existing Mesa/Xvfb-only test injects input at the X server, rather
 // than directly invoking an application callback or fabricating events.
 #define GLFW_EXPOSE_NATIVE_X11
@@ -825,6 +827,159 @@ void exercise_native_serial_atlas_frames(
             "Native gCanvas atlas owner failed to retire after both fences");
 }
 
+
+struct NativeMutationWitness final {
+    GLFWwindow* window = nullptr;
+    bool permit = true;
+    int uploads = 0;
+    int updates = 0;
+    int deletes = 0;
+    int program_creates = 0;
+    int program_deletes = 0;
+    int denied = 0;
+};
+
+bool admit_actual_native_gl_mutation(
+    void* user, gcanvas::NativeGpuMutation operation,
+    std::uint64_t, std::size_t bytes) noexcept {
+    auto* audit = static_cast<NativeMutationWitness*>(user);
+    if (!audit) return false;
+    if (!audit->permit || glfwGetCurrentContext() != audit->window) {
+        ++audit->denied;
+        return false;
+    }
+    switch (operation) {
+    case gcanvas::NativeGpuMutation::TextureUpload:
+        if (bytes == 0) return false;
+        ++audit->uploads;
+        return true;
+    case gcanvas::NativeGpuMutation::TextureUpdate:
+        if (bytes == 0) return false;
+        ++audit->updates;
+        return true;
+    case gcanvas::NativeGpuMutation::TextureDelete:
+        ++audit->deletes;
+        return true;
+    case gcanvas::NativeGpuMutation::ProgramCreate:
+        ++audit->program_creates;
+        return true;
+    case gcanvas::NativeGpuMutation::ProgramDelete:
+        ++audit->program_deletes;
+        return true;
+    }
+    return false;
+}
+
+void actual_context_framebuffer_size(void* user, int* width, int* height) {
+    glfwGetFramebufferSize(static_cast<GLFWwindow*>(user), width, height);
+}
+
+// This invokes the REAL gCanvas ImageImplGl::upload_update() and destructor,
+// not a fake callback: before glTexSubImage2D, the native Context's admission
+// denies while its previous real GLsync remains unacknowledged. A native
+// client wait completes the GPU and then green pixels must reach the same
+// real GL texture via glTexSubImage2D. Context teardown audits GL deletes.
+void exercise_actual_gl_mutation_barrier(GLFWwindow* window) {
+    require(window && glfwGetCurrentContext() == window,
+            "Native GPU mutation test requires exact current GLFW context");
+    NativeMutationWitness audit{window};
+    gcanvas::opengl::CreateInfo info;
+    info.metrics.width = kWidth;
+    info.metrics.height = kHeight;
+    info.host.get_proc_address = &gl_proc;
+    info.host.user_data = window;
+    info.host.framebuffer_size = &actual_context_framebuffer_size;
+    info.host.resource_mutation_guard = &admit_actual_native_gl_mutation;
+    info.host.resource_mutation_user_data = &audit;
+    info.presentation = gcanvas::opengl::PresentationMode::External;
+
+    auto context = gcanvas::opengl::create_context(info);
+    require(context && audit.program_creates != 0 && audit.uploads != 0,
+            "Actual gCanvas GL shader/texture creation bypassed host admission");
+    const std::array<std::uint8_t, 16> red{
+        230, 12, 18, 255, 230, 12, 18, 255,
+        230, 12, 18, 255, 230, 12, 18, 255};
+    const std::array<std::uint8_t, 16> green{
+        11, 230, 19, 255, 11, 230, 19, 255,
+        11, 230, 19, 255, 11, 230, 19, 255};
+    auto& image = context->create_image(2, 2, 4, red.data(), red.size());
+    std::vector<gcanvas::NativeGpuResourceId> resources;
+    require(context->native_gpu_resource_ids(resources),
+            "Actual gCanvas GL context did not expose resource identities");
+    auto image_id = std::find_if(
+        resources.begin(), resources.end(), [](const auto& resource) {
+            return resource.kind == gcanvas::NativeGpuResourceKind::ImageTexture;
+        });
+    require(image_id != resources.end() && image_id->native_name != 0,
+            "Actual GL ImageImplGl upload did not create a texture name");
+    const GLuint texture = static_cast<GLuint>(image_id->native_name);
+
+    const auto fence_create = reinterpret_cast<PFNGLFENCESYNCPROC>(
+        glfwGetProcAddress("glFenceSync"));
+    const auto fence_wait = reinterpret_cast<PFNGLCLIENTWAITSYNCPROC>(
+        glfwGetProcAddress("glClientWaitSync"));
+    const auto fence_delete = reinterpret_cast<PFNGLDELETESYNCPROC>(
+        glfwGetProcAddress("glDeleteSync"));
+    require(fence_create && fence_wait && fence_delete,
+            "Native OpenGL 3.2 fence API missing in real gCanvas context");
+    GLsync sync = fence_create(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
+    require(sync != nullptr && glGetError() == GL_NO_ERROR,
+            "Native GPU barrier could not create its actual GLsync");
+    glFlush();
+
+    audit.permit = false; // Fence not yet explicitly acknowledged/retired.
+    const int old_updates = audit.updates;
+    bool refused_update = false;
+    try { image.update_data(green.data(), green.size()); }
+    catch (const std::logic_error&) { refused_update = true; }
+    require(refused_update && audit.denied >= 1 &&
+            audit.updates == old_updates,
+            "Native gCanvas texture update bypassed its in-flight resource gate");
+
+    glBindTexture(GL_TEXTURE_2D, texture);
+    std::array<std::uint8_t, 16> actual{};
+    glGetTexImage(GL_TEXTURE_2D, 0, GL_RGBA, GL_UNSIGNED_BYTE, actual.data());
+    require(actual == red && glGetError() == GL_NO_ERROR,
+            "Denied real glTexSubImage2D changed GPU texels despite resource gate");
+
+    // This is a REAL GLsync wait. Do not use CPU booleans alone as evidence
+    // of completion, or pretend a swap/glFinish proves lease retirement.
+    bool signaled = false;
+    for (int attempt = 0; attempt != 20; ++attempt) {
+        const GLenum result = fence_wait(sync, GL_SYNC_FLUSH_COMMANDS_BIT,
+                                         100000000ULL);
+        if (result == GL_ALREADY_SIGNALED ||
+            result == GL_CONDITION_SATISFIED) {
+            signaled = true;
+            break;
+        }
+        require(result == GL_TIMEOUT_EXPIRED,
+                "Real gCanvas update fence wait returned native GL failure");
+    }
+    require(signaled && glGetError() == GL_NO_ERROR,
+            "Real gCanvas update fence did not signal");
+    fence_delete(sync);
+    require(glGetError() == GL_NO_ERROR,
+            "Actual GLsync deletion failed after the GPU completion");
+    audit.permit = true;
+
+    image.update_data(green.data(), green.size());
+    glBindTexture(GL_TEXTURE_2D, texture);
+    glGetTexImage(GL_TEXTURE_2D, 0, GL_RGBA, GL_UNSIGNED_BYTE, actual.data());
+    require(actual == green && audit.updates == old_updates + 1 &&
+            glGetError() == GL_NO_ERROR,
+            "Completed native fence did not allow real glTexSubImage2D green pixels");
+
+    context.reset(); // Actual ImageImplGl::~ and GL shader program deletion.
+    require(audit.deletes >= audit.uploads &&
+            audit.program_deletes == audit.program_creates &&
+            audit.program_deletes >= 1,
+            "Native GL resource destructors did not pass through the real admission");
+    std::cout << "TANGO_GL_ACTUAL_TEXSUBIMAGE_GUARD_DENIED=1\n"
+              << "TANGO_GL_ACTUAL_TEXSUBIMAGE_AFTER_FENCE=1\n"
+              << "TANGO_GL_ACTUAL_GL_DELETE_AUDIT=1\n";
+}
+
 void exercise_orderly_context_recreation(
     const std::string& regular_font, const std::string& bold_font,
     const std::string& screenshot) {
@@ -884,9 +1039,28 @@ void exercise_orderly_context_recreation(
             fence_config.device_generation =
                 static_cast<std::uint64_t>(generation);
             fence_config.max_in_flight = 1u;
+            // Strict cumulative upload-payload budget rejects oversized
+            // native Font Atlas before glGenTextures/glTexImage2D. This is
+            // NOT a full physical VRAM driver/mipmap budget.
+            auto tiny_budget = fence_config;
+            tiny_budget.max_total_texture_upload_bytes = 16u;
+            bool upload_budget_denied = false;
+            try {
+                flex::tango_opengl::NativeGLPresentationOwner rejected(gl, tiny_budget);
+            } catch (const std::logic_error&) {
+                upload_budget_denied = true;
+            }
+            require(upload_budget_denied,
+                    "Native gCanvas atlas upload bypassed the bounded texture payload gate");
             // One combined owner holds the actual gCanvas glyph/shader
             // assets, GPU fences and the original native input gate.
             flex::tango_opengl::NativeGLPresentationOwner gpu(gl, fence_config);
+            const auto initial_mutations = gpu.native_mutation_audit();
+            require(initial_mutations.program_creates >= 1u &&
+                    initial_mutations.texture_uploads >= 3u &&
+                    initial_mutations.uploaded_payload_bytes > 0u &&
+                    initial_mutations.denied == 0u,
+                    "Native TangoGL owner did not authorize real shader/atlas uploads");
             require(gpu.submitted_presenter().on_owner_thread() &&
                     gpu.device_generation() ==
                         static_cast<std::uint64_t>(generation),
@@ -1021,6 +1195,13 @@ void exercise_orderly_context_recreation(
             // Only this close may actually free the gCanvas renderer and
             // its glyph atlas, after ALL native GLsyncs are complete.
             gpu.close();
+            const auto final_mutations = gpu.native_mutation_audit();
+            require(final_mutations.program_deletes ==
+                        final_mutations.program_creates &&
+                    final_mutations.texture_deletes ==
+                        final_mutations.texture_uploads &&
+                    final_mutations.denied == 0u,
+                    "Native TangoGL gCanvas renderer bypassed texture/shader deletion audit");
             require(gpu.closed(),
                     "Combined owner failed to retire its actual gCanvas renderer");
             bool rejected_reuse = false;
@@ -1043,6 +1224,10 @@ void exercise_orderly_context_recreation(
             // It is created only AFTER the previous owner closed.
             exercise_native_serial_atlas_frames(
                 gl, fence_config, generation, screenshot + ".serial.ppm");
+            // Independent actual gCanvas Context drives the real
+            // glTexSubImage2D/glDeleteTextures/glDeleteProgram paths through
+            // the same optional host mutation-admission API.
+            exercise_actual_gl_mutation_barrier(native.handle);
         } // Destroy the actual GLFW GL context AFTER GPU resource cleanup.
         require(glfwGetCurrentContext() == nullptr,
                 "Destroyed native GL context remains bound to the UI owner");
@@ -1063,7 +1248,9 @@ void exercise_orderly_context_recreation(
               << "TANGO_GL_ATLAS_SERIAL_PENDING_REFUSED=2\n"
               << "TANGO_GL_ATLAS_SERIAL_AFTER_FENCE_REPAINT=2\n"
               << "TANGO_GL_NATIVE_SHADER_ATLAS_TEXTURE_LEASES=2\n"
-              << "TANGO_GL_NATIVE_RESOURCE_LEASE_REUSED_AFTER_FENCE=2\n";
+              << "TANGO_GL_NATIVE_RESOURCE_LEASE_REUSED_AFTER_FENCE=2\n"
+              << "TANGO_GL_NATIVE_TEXTURE_SHADER_OPS_AUDITED=2\n"
+              << "TANGO_GL_NATIVE_TEXTURE_UPLOAD_BUDGET_REFUSED=2\n";
 }
 
 void exercise_gpu(const std::string& font_path,

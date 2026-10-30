@@ -20,7 +20,7 @@ namespace GCANVAS_GL_PROFILE_NAMESPACE
                         std::size_t size, ImageConfig imageConfig);
         ~ImageImplGl();
 
-        GLuint _image;
+        GLuint _image = 0;
         int _sampler_index = -1;
         uint32_t _mipLevels = 1;
 

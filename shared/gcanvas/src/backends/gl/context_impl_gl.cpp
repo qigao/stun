@@ -5,6 +5,7 @@
 #include <cstring>
 #include <limits>
 #include <stdexcept>
+#include <exception>
 #include <utility>
 
 #include "font_impl_gl.hpp"

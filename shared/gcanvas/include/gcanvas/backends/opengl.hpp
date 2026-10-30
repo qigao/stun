@@ -26,6 +26,9 @@ namespace gcanvas
             void (*swap_buffers)(void* user_data) = nullptr;
             void (*set_swap_interval)(void* user_data, int interval) = nullptr;
             void (*framebuffer_size)(void* user_data, int* width, int* height) = nullptr;
+            // Optional host admission of actual texture/program GL operations.
+            NativeGpuMutationGuard resource_mutation_guard = nullptr;
+            void* resource_mutation_user_data = nullptr;
         };
 
         struct CreateInfo

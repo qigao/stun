@@ -16,7 +16,8 @@ std::unique_ptr<CellPixelPresenter> create_external_gl_presenter(
     // Use the existing gCanvas OpenGL shaders/atlas context without
     // registering the general OpenGL factory as TangoOpenGL.
     auto pixel = render::engines::gcanvas::create_external_opengl_renderer(
-        info.get_proc_address, info.proc_user_data);
+        info.get_proc_address, info.proc_user_data,
+        info.native_mutation_guard, info.native_mutation_user_data);
     if (!pixel) {
         throw std::runtime_error("TangoOpenGL failed to create gCanvas GL renderer");
     }
