@@ -7,12 +7,12 @@
 #include <salts/markdown.h>
 #include <salts/markdown_html.h>
 
-_Static_assert(STUN_UI_OK == SALTS_MD_OK, "status ABI changed");
-_Static_assert(STUN_UI_INVALID_ARGUMENT == SALTS_MD_INVALID_ARGUMENT,
+_Static_assert((int)STUN_UI_OK == (int)SALTS_MD_OK, "status ABI changed");
+_Static_assert((int)STUN_UI_INVALID_ARGUMENT == (int)SALTS_MD_INVALID_ARGUMENT,
                "status ABI changed");
-_Static_assert(STUN_UI_CAPACITY_EXCEEDED == SALTS_MD_CAPACITY_EXCEEDED,
+_Static_assert((int)STUN_UI_CAPACITY_EXCEEDED == (int)SALTS_MD_CAPACITY_EXCEEDED,
                "status ABI changed");
-_Static_assert(STUN_UI_OUT_OF_MEMORY == SALTS_MD_OUT_OF_MEMORY,
+_Static_assert((int)STUN_UI_OUT_OF_MEMORY == (int)SALTS_MD_OUT_OF_MEMORY,
                "status ABI changed");
 
 static stun_ui_status to_stun(salts_md_status code) {
