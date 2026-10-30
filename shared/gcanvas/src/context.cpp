@@ -108,7 +108,10 @@ namespace gcanvas
                 (std::uint64_t{4} * 1024u * 1024u * 1024u) ||
             _resource_limits.max_image_creation_modeled_peak_bytes == 0 ||
             _resource_limits.max_image_creation_modeled_peak_bytes >
-                (std::uint64_t{4} * 1024u * 1024u * 1024u))
+                (std::uint64_t{4} * 1024u * 1024u * 1024u) ||
+            _resource_limits.max_image_encoded_source_bytes == 0 ||
+            _resource_limits.max_image_encoded_source_bytes >
+                (std::size_t{512} * 1024u * 1024u))
         {
             throw std::invalid_argument("gCanvas resource limits are invalid");
         }
@@ -1028,6 +1031,15 @@ namespace gcanvas
             throw std::invalid_argument(
                 "gCanvas modeled image update peak limit must be within 1 byte and 4 GiB");
         _resource_limits.max_image_update_modeled_peak_bytes = limit_bytes;
+    }
+
+    void Context::set_image_encoded_source_limit(std::size_t limit_bytes)
+    {
+        if (limit_bytes == 0 ||
+            limit_bytes > (std::size_t{512} * 1024u * 1024u))
+            throw std::invalid_argument(
+                "gCanvas encoded Image source limit must be in [1, 512 MiB]");
+        _resource_limits.max_image_encoded_source_bytes = limit_bytes;
     }
 
     void Context::set_image_creation_modeled_peak_limit(std::size_t limit_bytes)

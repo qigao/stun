@@ -5,7 +5,9 @@
 #include <cstring>
 #include <cmath>
 #include <stdexcept>
+#include <limits>
 #include <exception>
+#include <utility>
 
 #include <stb_image.h>
 
@@ -13,39 +15,46 @@ namespace gcanvas
 {
 namespace GCANVAS_GL_PROFILE_NAMESPACE
 {
-    ImageImplGl::ImageImplGl(std::string file_path, ImageConfig imageConfig)
+    ImageImplGl::ImageImplGl(
+        std::string source_path, const unsigned char* frozen_encoded,
+        std::size_t frozen_size, int inspected_width, int inspected_height,
+        ImageConfig imageConfig)
     {
+        if (!frozen_encoded || frozen_size == 0 ||
+            frozen_size > static_cast<std::size_t>((std::numeric_limits<int>::max)()))
+            throw std::invalid_argument("gCanvas requires bounded frozen encoded image bytes");
+        if (inspected_width <= 0 || inspected_height <= 0)
+            throw std::invalid_argument("gCanvas frozen image metadata dimensions are invalid");
+
+        // Decode from the SAME frozen bytes used by stbi_info_from_memory,
+        // never from source_path. The path may already have been replaced
+        // and is kept only for useful diagnostics/name.
         _imageConfig = imageConfig;
-        stbi_uc* data =
-            stbi_load(file_path.c_str(), &_width, &_height, &_components, STBI_rgb_alpha);
-        if (data != nullptr)
+        stbi_uc* decoded = stbi_load_from_memory(
+            frozen_encoded, static_cast<int>(frozen_size),
+            &_width, &_height, &_components, STBI_rgb_alpha);
+        if (!decoded)
+            throw std::runtime_error("Could not decode frozen image: " + source_path);
+        try
         {
+            if (_width != inspected_width || _height != inspected_height)
+                throw std::logic_error(
+                    "gCanvas frozen image metadata and decoder disagree");
             _components = 4;
-            _name = file_path;
-            try
-            {
-                assign_pixels(data, required_pixel_bytes());
-            }
-            catch (...)
-            {
-                stbi_image_free(data);
-                throw;
-            }
-            stbi_image_free(data);
-            
-
-            if (imageConfig.mipmaps)
-            {
-                _mipLevels =
-                    static_cast<uint32_t>(std::floor(std::log2(std::max(_width, _height)))) + 1;
-            }
-
+            _name = std::move(source_path);
+            assign_pixels(decoded, required_pixel_bytes());
         }
-        else
+        catch (...)
         {
-            throw std::runtime_error("Could not load image: " + file_path);
+            stbi_image_free(decoded);
+            throw;
         }
+        stbi_image_free(decoded);
 
+        if (imageConfig.mipmaps)
+            _mipLevels =
+                static_cast<uint32_t>(std::floor(
+                    std::log2((std::max)(_width, _height)))) + 1;
         init_format();
     }
 

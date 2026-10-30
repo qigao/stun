@@ -93,6 +93,12 @@ namespace gcanvas
         // mipmap/allocator overhead. Added at END for aggregate compatibility.
         std::size_t max_image_creation_modeled_peak_bytes =
             std::size_t{2} * 1024u * 1024u * 1024u;
+        // Maximum captured encoded file-source bytes for ONE Image create.
+        // Enforced before reading a file into a single immutable buffer.
+        // Separate from decoded RGBA/CPU+GPU creation peak accounting.
+        // Added at the end to preserve existing aggregate initializers.
+        std::size_t max_image_encoded_source_bytes =
+            std::size_t{128} * 1024u * 1024u;
     };
 
     struct ImageUpdatePeakUsage final {
@@ -161,6 +167,12 @@ namespace gcanvas
             std::size_t transient_cpu_bytes,
             std::size_t new_native_base_bytes) const;
         void set_image_creation_modeled_peak_limit(std::size_t limit_bytes);
+        // Applies only to subsequent file-based image reads. This does not
+        // reopen, resize, rewrite or revalidate any already captured source.
+        std::size_t image_encoded_source_limit() const noexcept {
+            return _resource_limits.max_image_encoded_source_bytes;
+        }
+        void set_image_encoded_source_limit(std::size_t limit_bytes);
 
         virtual void stroke_rect(float x, float y, float width, float height) = 0;
         virtual void stroke_rounded_rect(float x, float y, float width, float height,
