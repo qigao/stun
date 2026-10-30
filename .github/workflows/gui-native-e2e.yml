@@ -137,6 +137,21 @@ jobs:
               -d "$RUNNER_TEMP/stun-gui/$package"
           done
           echo "SALTS_ROOT=$RUNNER_TEMP/stun-gui/salts/sdk/linux-x64" >> "$GITHUB_ENV"
+          # Confirm installed SaltsUtils canonical Markdown SDK BEFORE the
+          # expensive vcpkg/toolchain and GUI build. No fallback grammar.
+          utils_sdk="$RUNNER_TEMP/stun-gui/utils/sdk/linux-x64"
+          test -f "$utils_sdk/include/salts/markdown.h" || {
+            echo "RED: published SaltsUtils SDK lacks the canonical MarkdownParser header" >&2
+            exit 1
+          }
+          test -f "$utils_sdk/include/salts/markdown_html.h" || {
+            echo "RED: published SaltsUtils SDK lacks the MarkdownHtml header" >&2
+            exit 1
+          }
+          targets="$utils_sdk/lib/cmake/SaltsUtils/SaltsUtilsTargets.cmake"
+          test -f "$targets"
+          grep -Fq 'Salts::MarkdownParser' "$targets"
+          grep -Fq 'Salts::MarkdownHtml' "$targets"
           echo "SALTS_UTILS_ROOT=$RUNNER_TEMP/stun-gui/utils/sdk/linux-x64" >> "$GITHUB_ENV"
           echo "CHTTP_ROOT=$RUNNER_TEMP/stun-gui/chttp/sdk/linux-x64" >> "$GITHUB_ENV"
           echo "TURBOSCRIPT_ROOT=$RUNNER_TEMP/stun-gui/turboscript/sdk/linux-x64" >> "$GITHUB_ENV"
