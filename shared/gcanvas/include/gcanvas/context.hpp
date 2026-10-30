@@ -79,6 +79,24 @@ namespace gcanvas
         std::size_t max_blur_samples = 25;
         // Per blur call, including path mask and paint instances across every sample.
         std::size_t max_blur_commands = 65536;
+        // Maximum modeled payload bytes for ONE transactional image update:
+        // current context-owned CPU pixels + full CPU candidate copy +
+        // uploaded native GL base texture payload. This is NOT physical
+        // VRAM/RSS, allocator capacity, mipmaps, or a creation-time budget.
+        // GPU in-flight references are counted in the resident bytes once.
+        std::size_t max_image_update_modeled_peak_bytes =
+            std::size_t{2} * 1024u * 1024u * 1024u;
+    };
+
+    struct ImageUpdatePeakUsage final {
+        std::size_t retained_cpu_bytes = 0;
+        std::size_t candidate_cpu_bytes = 0;
+        std::size_t native_uploaded_base_bytes = 0;
+        std::size_t modeled_peak_bytes = 0;
+        std::size_t limit_bytes = 0;
+        // True only for a backend reporting its actual uploaded native
+        // base image bytes; false means the model covers CPU payload only.
+        bool native_payload_known = false;
     };
 
     class GCANVAS_API Context
@@ -100,6 +118,21 @@ namespace gcanvas
             (void)out;
             return false;
         }
+
+        // Compute and enforce the bounded *modeled* peak for an image
+        // update BEFORE the CPU candidate is allocated. It counts all
+        // currently retained context image/font-atlas CPU pixel payload,
+        // the additional candidate, and any qualified native uploaded
+        // base-level texture payload. It does not double-count a GPU
+        // texture merely because a native fence has not yet retired.
+        // This does not predict driver/mipmap/padding/VRAM allocations.
+        ImageUpdatePeakUsage image_update_peak_usage(
+            const Image& image, std::size_t candidate_bytes) const;
+        // Explicitly lower/raise future image-transaction admission without
+        // evicting live GPU objects or allocating another image. A lower
+        // limit may block all updates until it is restored, which is
+        // intentional under memory pressure.
+        void set_image_update_modeled_peak_limit(std::size_t limit_bytes);
 
         virtual void stroke_rect(float x, float y, float width, float height) = 0;
         virtual void stroke_rounded_rect(float x, float y, float width, float height,
@@ -464,6 +497,10 @@ namespace gcanvas
         virtual void register_image(Image* image) = 0;
         virtual void register_font(Font* font) = 0;
         virtual void update_image(Image* image) = 0;
+        // Optional backend payload evidence. GL and GLES return the actual
+        // current ImageImplGl upload sizes; other backends return unknown.
+        virtual bool uploaded_native_texture_payload_bytes(
+            std::size_t& out) const { (void)out; return false; }
         virtual void draw_tessellated_path(const Path& path, const Paint& paint,
                                            float line_width, const Transform& transform) = 0;
         virtual void draw_tessellated_path_blur(
