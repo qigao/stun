@@ -108,7 +108,6 @@ def verify_labeled_workflow_isolation():
         "gui-native-e2e.yml",
         "public-dependency-contract.yml",
         "runtime-conformance.yml",
-        "ui-core-c11.yml",
     }, guarded
     assert master_push_and_dispatch.issubset(set(guarded)), guarded
 
