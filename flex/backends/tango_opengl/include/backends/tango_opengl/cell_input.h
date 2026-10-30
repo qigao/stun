@@ -83,7 +83,7 @@ std::optional<CellHostInput> cell_input_character(
 // the renderer or inventing an event queue. This is not an IME model.
 class CellHostFrameGate final {
 public:
-    explicit CellHostFrameGate(CellPixelPresenter& presenter) noexcept;
+    explicit CellHostFrameGate(const CellPixelPresenter& presenter) noexcept;
     CellHostFrameGate(const CellHostFrameGate&) = delete;
     CellHostFrameGate& operator=(const CellHostFrameGate&) = delete;
 
@@ -117,7 +117,7 @@ public:
 private:
     void require_owner() const;
     bool admitted_for(const CellWindowExtents& current);
-    CellPixelPresenter* presenter_ = nullptr;
+    const CellPixelPresenter* presenter_ = nullptr;
     const std::thread::id owner_thread_;
     CellWindowExtents accepted_{};
     std::uint64_t revision_ = 0;

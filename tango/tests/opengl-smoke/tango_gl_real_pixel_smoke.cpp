@@ -639,7 +639,7 @@ void exercise_orderly_context_recreation(
     const std::string& regular_font, const std::string& bold_font,
     const std::string& screenshot) {
     GlfwSession glfw;
-    std::unique_ptr<flex::tango_opengl::CellHostFrameGate> old_gate;
+    std::shared_ptr<flex::tango_opengl::CellHostFrameGate> old_gate;
     Window first_x11_window = None;
     constexpr std::uint64_t kSameRevision = 303u;
 
@@ -685,10 +685,6 @@ void exercise_orderly_context_recreation(
             gl.font_family = "tango-pixel-test-mono";
             gl.font_path = regular_font;
             gl.bold_font_path = bold_font;
-            auto presenter = flex::tango_opengl::create_external_gl_presenter(gl);
-            require(presenter && presenter->on_owner_thread(),
-                    "New native GL presenter was not created on the GL owner");
-
             // Exact native context and independent device generation. Reuse
             // the current host GL loader; no global/secondary GL backend.
             flex::tango_opengl::NativeGLFenceConfig fence_config{};
@@ -698,13 +694,14 @@ void exercise_orderly_context_recreation(
             fence_config.device_generation =
                 static_cast<std::uint64_t>(generation);
             fence_config.max_in_flight = 1u;
-            flex::tango_opengl::NativeGLFrameFences fences(fence_config);
-            require(fences.device_generation() ==
-                    static_cast<std::uint64_t>(generation),
-                    "GPU fence owner has the wrong device generation");
-
-            auto gate = std::make_unique<flex::tango_opengl::CellHostFrameGate>(
-                *presenter);
+            // One combined owner holds the actual gCanvas glyph/shader
+            // assets, GPU fences and the original native input gate.
+            flex::tango_opengl::NativeGLPresentationOwner gpu(gl, fence_config);
+            require(gpu.submitted_presenter().on_owner_thread() &&
+                    gpu.device_generation() ==
+                        static_cast<std::uint64_t>(generation),
+                    "Native GPU owner did not bind the exact GLFW GL device");
+            auto gate = gpu.input_gate();
             gate->set_focus(true); // Separate XTest test qualifies real OS focus.
             const flex::tango_opengl::CellWindowExtents observed{
                 kWidth, kHeight, kWidth, kHeight};
@@ -725,23 +722,21 @@ void exercise_orderly_context_recreation(
             layout.max_cells = kColumns * kRows;
             layout.max_draw_ops = 128;
             layout.max_text_bytes = 1024;
-            fences.require_capacity();
-            presenter->present(grid.get(), layout);
-            // This GLsync is inserted AFTER the actual GPU draw commands,
-            // before any glFinish/glReadPixels. Frame resource retention must
-            // wait on this native GLsync, not a fabricated or CPU-only signal.
-            fences.record_submitted_frame(*presenter);
-            require(fences.in_flight() == 1u,
+            gpu.require_capacity();
+            // Caller cannot obtain mutable presenter/fences from the owner.
+            // All native GPU draws must insert a real GLsync atomically.
+            gpu.present_and_fence(grid.get(), layout);
+            require(gpu.in_flight() == 1u,
                     "Actual GL fence was not retained for the submitted frame");
 
             bool saturated = false;
-            try { fences.require_capacity(); }
+            try { gpu.require_capacity(); }
             catch (const std::length_error&) { saturated = true; }
             require(saturated,
                     "TangoGL allowed GPU frame submission beyond its fence budget");
 
             bool early_close = false;
-            try { fences.close(); }
+            try { gpu.close(); }
             catch (const std::logic_error&) { early_close = true; }
             require(early_close,
                     "TangoGL retired GPU resources while a real fence was outstanding");
@@ -750,7 +745,7 @@ void exercise_orderly_context_recreation(
             // function may be called in this state, even on the same thread.
             glfwMakeContextCurrent(nullptr);
             bool wrong_context_denied = false;
-            try { (void)fences.retire_completed(0); }
+            try { (void)gpu.retire_completed(0); }
             catch (const std::logic_error&) { wrong_context_denied = true; }
             glfwMakeContextCurrent(native.handle);
             require(wrong_context_denied,
@@ -758,7 +753,7 @@ void exercise_orderly_context_recreation(
 
             bool wrong_thread_denied = false;
             std::thread foreign([&] {
-                try { (void)fences.retire_completed(0); }
+                try { (void)gpu.retire_completed(0); }
                 catch (const std::logic_error&) { wrong_thread_denied = true; }
             });
             foreign.join();
@@ -770,27 +765,37 @@ void exercise_orderly_context_recreation(
             // GL_ALREADY_SIGNALED/GL_CONDITION_SATISFIED may retire it.
             bool completed = false;
             for (int attempt = 0; attempt != 20; ++attempt) {
-                const auto outcome = fences.retire_completed(100000000ULL);
+                const auto outcome = gpu.retire_completed(100000000ULL);
                 if (outcome == flex::tango_opengl::NativeGLFencePoll::Drained) {
                     completed = true;
                     break;
                 }
                 require(outcome == flex::tango_opengl::NativeGLFencePoll::Busy,
                         "GPU fence poll returned an unknown completion result");
-                require(fences.in_flight() == 1u,
+                require(gpu.in_flight() == 1u,
                         "An unsignaled native GL fence was discarded prematurely");
             }
-            require(completed && fences.in_flight() == 0u &&
-                    fences.last_retired_submission() ==
-                    presenter->submission_id(),
+            require(completed && gpu.in_flight() == 0u &&
+                    gpu.last_retired_submission() ==
+                    gpu.submitted_presenter().submission_id(),
                     "Native GPU fence did not signal and retire before resource teardown");
-            fences.close();
+            // Even with GPU work finished, the owner has NOT destroyed the
+            // GL renderer/atlas until an explicit context-owned close().
+            require(!gpu.closed() &&
+                    gpu.last_retired_submission() != 0u,
+                    "Native GPU owner retired before its context cleanup");
 
-            bool rejected_reuse = false;
-            try { fences.require_capacity(); }
-            catch (const std::logic_error&) { rejected_reuse = true; }
-            require(rejected_reuse,
-                    "Retired GPU fence owner could be reused across a context generation");
+            // Even after a signaled GPU fence, the real gCanvas renderer
+            // may only be destroyed against the ORIGINAL native GL context.
+            glfwMakeContextCurrent(nullptr);
+            bool wrong_context_close_denied = false;
+            try { gpu.close(); }
+            catch (const std::logic_error&) {
+                wrong_context_close_denied = true;
+            }
+            glfwMakeContextCurrent(native.handle);
+            require(wrong_context_close_denied && !gpu.closed(),
+                    "Native owner destroyed GPU resources without its GL context");
 
             // Prove native GPU bytes come from a NEW gCanvas renderer/context,
             // not an old framebuffer or a synthesized CPU test image.
@@ -823,8 +828,16 @@ void exercise_orderly_context_recreation(
             // Do not release GPU resources after destroying the host context.
             require(glfwGetCurrentContext() == native.handle,
                     "GPU resources would retire without their owning GL context");
-            gate->retire_device();
-            presenter.reset(); // Actual gCanvas GL cleanup while context alive.
+            // Only this close may actually free the gCanvas renderer and
+            // its glyph atlas, after ALL native GLsyncs are complete.
+            gpu.close();
+            require(gpu.closed(),
+                    "Combined owner failed to retire its actual gCanvas renderer");
+            bool rejected_reuse = false;
+            try { gpu.require_capacity(); }
+            catch (const std::logic_error&) { rejected_reuse = true; }
+            require(rejected_reuse,
+                    "Retired combined GPU owner accepted another submission");
             require(!gate->key(TUI_KEY_LEFT, TUI_MOD_NONE, observed) &&
                     !gate->character('a', observed),
                     "Destroyed GL presenter left input admitted on a stale gate");
@@ -834,7 +847,7 @@ void exercise_orderly_context_recreation(
             catch (const std::logic_error&) { rejected_reactivation = true; }
             require(rejected_reactivation,
                     "Retired host gate was illegally reattached to another GL device");
-            if (generation == 1) old_gate = std::move(gate);
+            if (generation == 1) old_gate = gate;
         } // Destroy the actual GLFW GL context AFTER GPU resource cleanup.
         require(glfwGetCurrentContext() == nullptr,
                 "Destroyed native GL context remains bound to the UI owner");
@@ -848,7 +861,10 @@ void exercise_orderly_context_recreation(
               << "TANGO_GL_FENCE_NATIVE_GPU_COMPLETION=2\n"
               << "TANGO_GL_FENCE_OVERLOAD_REFUSED=1\n"
               << "TANGO_GL_FENCE_WRONG_CONTEXT_REFUSED=1\n"
-              << "TANGO_GL_FENCE_WRONG_THREAD_REFUSED=1\n";
+              << "TANGO_GL_FENCE_WRONG_THREAD_REFUSED=1\n"
+              << "TANGO_GL_FENCED_RESOURCE_OWNER_CLOSE=2\n"
+              << "TANGO_GL_FENCED_RESOURCE_OWNER_EARLY_CLOSE_REFUSED=2\n"
+              << "TANGO_GL_FENCED_RESOURCE_OWNER_WRONG_CONTEXT_CLOSE_REFUSED=2\n";
 }
 
 void exercise_gpu(const std::string& font_path,

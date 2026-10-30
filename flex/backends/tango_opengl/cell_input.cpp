@@ -234,7 +234,7 @@ CellPixelMetrics fit_cell_metrics_to_window(
     return adapted;
 }
 
-CellHostFrameGate::CellHostFrameGate(CellPixelPresenter& presenter) noexcept
+CellHostFrameGate::CellHostFrameGate(const CellPixelPresenter& presenter) noexcept
     : presenter_(&presenter), owner_thread_(std::this_thread::get_id()) {}
 
 void CellHostFrameGate::require_owner() const {

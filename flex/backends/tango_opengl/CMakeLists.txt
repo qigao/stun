@@ -16,7 +16,7 @@ if(FLEX_BUILD_BACKEND_TANGO_OPENGL)
     message(FATAL_ERROR
       "TangoOpenGL requires an explicitly built gCanvas OpenGL backend")
   endif()
-  add_library(flex_backend_tango_opengl STATIC gl_presenter.cpp gl_fence.cpp)
+  add_library(flex_backend_tango_opengl STATIC gl_presenter.cpp gl_fence.cpp gl_owner.cpp)
   target_link_libraries(flex_backend_tango_opengl
     PUBLIC flex_tango_gl_frame flex_backend_opengl
     PRIVATE flex_render_engine_gcanvas glad::glad)
