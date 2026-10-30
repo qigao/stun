@@ -60,7 +60,7 @@ struct GlfwWindow final {
         glfwWindowHint(GLFW_STENCIL_BITS, 8);
         glfwWindowHint(GLFW_DOUBLEBUFFER, GLFW_TRUE);
         glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);
-        glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
+        glfwWindowHint(GLFW_RESIZABLE, GLFW_TRUE);
         handle = glfwCreateWindow(kWidth, kHeight, "Tango GL real pixel smoke",
                                   nullptr, nullptr);
         require(handle != nullptr, "GLFW cannot create a real OpenGL 4.1 context");
@@ -127,24 +127,31 @@ flex::opengl_backend::OpenGLProcAddress gl_proc(void*, const char* name) {
         glfwGetProcAddress(name));
 }
 
-std::vector<std::uint8_t> read_back_rgba() {
+std::vector<std::uint8_t> read_back_rgba(
+    int width = kWidth, int height = kHeight) {
+    require(width > 0 && height > 0 &&
+            static_cast<std::uint64_t>(width) * height <= 4096u * 4096u,
+            "TangoGL requested framebuffer readback exceeds bounded pixel budget");
     std::vector<std::uint8_t> pixels(
-        static_cast<std::size_t>(kWidth) * kHeight * 4u);
+        static_cast<std::size_t>(width) * height * 4u);
     glFinish();
     glReadBuffer(GL_BACK);
     glPixelStorei(GL_PACK_ALIGNMENT, 1);
-    glReadPixels(0, 0, kWidth, kHeight, GL_RGBA, GL_UNSIGNED_BYTE,
+    glReadPixels(0, 0, width, height, GL_RGBA, GL_UNSIGNED_BYTE,
                  pixels.data());
     require(glGetError() == GL_NO_ERROR,
             "Native glReadPixels failed; GPU framebuffer cannot be verified");
     return pixels;
 }
 
-Pixel at(const std::vector<std::uint8_t>& image, int x, int top_y) {
-    require(x >= 0 && x < kWidth && top_y >= 0 && top_y < kHeight,
-            "Invalid Tango GPU pixel sampling coordinates");
+Pixel at(const std::vector<std::uint8_t>& image, int x, int top_y,
+         int width = kWidth, int height = kHeight) {
+    require(width > 0 && height > 0 &&
+            x >= 0 && x < width && top_y >= 0 && top_y < height &&
+            image.size() == static_cast<std::size_t>(width) * height * 4u,
+            "Invalid Tango GPU pixel sampling coordinates or source size");
     const auto offset =
-        static_cast<std::size_t>(((kHeight - 1 - top_y) * kWidth + x) * 4);
+        static_cast<std::size_t>(((height - 1 - top_y) * width + x) * 4);
     return {image[offset], image[offset + 1], image[offset + 2],
             image[offset + 3]};
 }
@@ -162,13 +169,17 @@ bool has_white_glyph(const std::vector<std::uint8_t>& image,
 }
 
 void save_ppm(const std::vector<std::uint8_t>& rgba,
-              const std::string& destination) {
+              const std::string& destination,
+              int width = kWidth, int height = kHeight) {
     std::ofstream output(destination, std::ios::binary | std::ios::trunc);
     require(output.is_open(), "Cannot create exact-head Tango GL pixel artifact");
-    output << "P6\n" << kWidth << ' ' << kHeight << "\n255\n";
-    for (int y = 0; y < kHeight; ++y) {
-        for (int x = 0; x < kWidth; ++x) {
-            const Pixel p = at(rgba, x, y);
+    require(width > 0 && height > 0 &&
+            rgba.size() == static_cast<std::size_t>(width) * height * 4u,
+            "TangoGL cannot save mismatched resized pixel bytes");
+    output << "P6\n" << width << ' ' << height << "\n255\n";
+    for (int y = 0; y < height; ++y) {
+        for (int x = 0; x < width; ++x) {
+            const Pixel p = at(rgba, x, y, width, height);
             output.write(reinterpret_cast<const char*>(p.data()), 3);
         }
     }
@@ -443,6 +454,9 @@ void exercise_real_x11_input(
     const auto& selected = events.presses.front().event;
     tui_buffer_set(source.get(), selected.x, selected.y,
                    tui_cell('A', TUI_BLACK, TUI_COLOR(245, 215, 38)));
+    // Preserve the second GPU-green cell for a resized visual + hit audit.
+    tui_buffer_set(source.get(), 5, 1,
+                   tui_cell('B', TUI_WHITE, TUI_COLOR(22, 190, 35)));
     tui_grid_snapshot_t* raw = nullptr;
     require(tui_grid_snapshot_capture(
                 source.get(), 102u, kColumns * kRows, 8192, &raw) ==
@@ -514,20 +528,95 @@ void exercise_real_x11_input(
     require(events.keys.back().grid_revision == 102u,
             "X11 refocused keyboard was attached to a stale grid revision");
 
-    // Real X server resize: current framebuffer is intentionally NOT
-    // repainted for this new window generation, so all input must be retired.
+    // Real X server resize: both logical dimensions and the physical
+    // framebuffer change. The old frame is rejected before re-projection.
     XResizeWindow(display, native_window,
-                  static_cast<unsigned>(kWidth + 16),
-                  static_cast<unsigned>(kHeight));
+                  static_cast<unsigned>(kWidth + 48),
+                  static_cast<unsigned>(kHeight + 24));
     XSync(display, False);
     events.wait_for(
-        [&] { return events.extents().window_width == kWidth + 16 &&
+        [&] { return events.extents().window_width == kWidth + 48 &&
+                     events.extents().window_height == kHeight + 24 &&
                      events.resize_callbacks != 0; },
-        "Native X11 window resize was not observed by GLFW");
+        "Native X11 two-axis window resize was not observed by GLFW");
     require(!events.gate.key(TUI_KEY_LEFT, TUI_MOD_NONE, events.extents()) &&
             !events.gate.character('a', events.extents()),
             "Unpresented resized X11 viewport wrongly admitted stale input");
-    std::cout << "TANGO_GL_XTEST_FOCUS_RETIRE=1\n"
+
+    // POSITIVE resize: use the CURRENT native framebuffer metrics and the
+    // SAME canonical C11 grid snapshot/renderer. No second layout tree,
+    // guessed DPI, terminal-cell pixel equivalence, or synthetic screenshot.
+    const auto observed = events.extents();
+    const auto scaled = flex::tango_opengl::fit_cell_metrics_to_window(
+        updated.get(), observed, layout);
+    require(scaled.expected_grid_revision == 102u &&
+            scaled.cell_width > layout.cell_width &&
+            scaled.cell_height > layout.cell_height,
+            "Real host Resize did not reproject the existing C11 cell spans");
+    presenter.present(updated.get(), scaled);
+    const auto resized_image = read_back_rgba(
+        observed.framebuffer_width, observed.framebuffer_height);
+    const int new_red_x = static_cast<int>(scaled.cell_width + 3.0f);
+    const int new_green_x = static_cast<int>(5.0f * scaled.cell_width + 3.0f);
+    const int new_cell_y = static_cast<int>(scaled.cell_height + 3.0f);
+    const Pixel new_highlight = at(
+        resized_image, new_red_x, new_cell_y,
+        observed.framebuffer_width, observed.framebuffer_height);
+    const Pixel new_green = at(
+        resized_image, new_green_x, new_cell_y,
+        observed.framebuffer_width, observed.framebuffer_height);
+    require(new_highlight[0] > 175 && new_highlight[1] > 160 &&
+            new_highlight[2] < 85 && new_highlight[3] >= 240,
+            "Actual resized GL framebuffer did not relocate the yellow C11 cell");
+    require_rgb_dominance(
+        new_green, 1, "Actual resized GL framebuffer did not relocate green cell");
+    save_ppm(resized_image, pixel_artifact + ".resized.ppm",
+             observed.framebuffer_width, observed.framebuffer_height);
+    glfwSwapBuffers(window);
+    events.gate.accept_presented_frame(observed);
+    require(events.gate.key(TUI_KEY_LEFT, TUI_MOD_NONE, observed).has_value(),
+            "A genuinely resized and submitted GPU frame cannot admit C11 input");
+
+    // A real XTest click must now use the *resized* cell geometry. Checking
+    // (5,1) after both axes resize prevents passing by reusing 32x24 geometry.
+    int resized_root_x = 0, resized_root_y = 0;
+    Window resized_child = None;
+    require(XTranslateCoordinates(display, native_window,
+                                  DefaultRootWindow(display), 0, 0,
+                                  &resized_root_x, &resized_root_y,
+                                  &resized_child) == True,
+            "X11 failed to report resized native window origin");
+    const int new_pointer_x = resized_root_x +
+        static_cast<int>(5.0f * scaled.cell_width + scaled.cell_width * 0.5f);
+    const int new_pointer_y = resized_root_y +
+        static_cast<int>(scaled.cell_height + scaled.cell_height * 0.5f);
+    require(XTestFakeMotionEvent(
+                display, DefaultScreen(display),
+                new_pointer_x, new_pointer_y, 0) == True,
+            "XTest could not move to the resized GPU green cell");
+    XSync(display, False);
+    glfwPollEvents();
+    if (events.failure) std::rethrow_exception(events.failure);
+    const std::size_t old_presses = events.presses.size();
+    const std::size_t old_releases = events.releases.size();
+    require(XTestFakeButtonEvent(display, 1u, True, 0) == True &&
+            XTestFakeButtonEvent(display, 1u, False, 0) == True,
+            "XTest could not inject input into the resized host");
+    XSync(display, False);
+    events.wait_for(
+        [&] { return events.presses.size() == old_presses + 1u &&
+                     events.releases.size() == old_releases + 1u; },
+        "Native XTest mouse click did not reach the newly resized C11 frame");
+    const auto& resized_hit = events.presses.back();
+    require(resized_hit.event.x == 5 && resized_hit.event.y == 1 &&
+            resized_hit.grid_revision == 102u &&
+            events.releases.back().grid_revision == 102u,
+            "Resized X11 mouse selected an old physical cell/old frame revision");
+    std::cout << "TANGO_GL_XTEST_RESIZE_REPAINT="
+              << observed.framebuffer_width << 'x'
+              << observed.framebuffer_height << "\n"
+              << "TANGO_GL_XTEST_RESIZE_REHIT=5,1;revision=102\n"
+              << "TANGO_GL_XTEST_FOCUS_RETIRE=1\n"
               << "TANGO_GL_XTEST_FOCUS_REPRESENT=1\n"
               << "TANGO_GL_XTEST_RESIZE_RETIRE=1\n";
 

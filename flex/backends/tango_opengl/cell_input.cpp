@@ -1,6 +1,8 @@
 #include <backends/tango_opengl/cell_input.h>
 
 #include <stdexcept>
+#include <cmath>
+#include <limits>
 
 namespace flex::tango_opengl {
 namespace {
@@ -159,6 +161,78 @@ std::optional<CellHostInput> cell_input_character(
     return result;
 }
 
+
+
+CellPixelMetrics fit_cell_metrics_to_window(
+    const tui_grid_snapshot_t* snapshot,
+    const CellWindowExtents& observed,
+    const CellPixelMetrics& base) {
+    if (!snapshot ||
+        observed.window_width <= 0 || observed.window_height <= 0 ||
+        observed.framebuffer_width <= 0 || observed.framebuffer_height <= 0 ||
+        !std::isfinite(base.cell_width) || base.cell_width <= 0.0f ||
+        !std::isfinite(base.cell_height) || base.cell_height <= 0.0f ||
+        !std::isfinite(base.font_size) || base.font_size <= 0.0f ||
+        !std::isfinite(base.baseline) || base.baseline <= 0.0f ||
+        !base.expected_grid_revision)
+        throw std::invalid_argument(
+            "TangoOpenGL resize requires an exact positive source/profile and host");
+    if (tui_grid_snapshot_revision(snapshot) != base.expected_grid_revision)
+        throw std::logic_error(
+            "TangoOpenGL resize cannot reproject a stale C11 grid revision");
+    const int columns = tui_grid_snapshot_width(snapshot);
+    const int rows = tui_grid_snapshot_height(snapshot);
+    if (columns <= 0 || rows <= 0)
+        throw std::invalid_argument(
+            "TangoOpenGL resize source has no cell geometry");
+
+    const double ratio_x = static_cast<double>(observed.framebuffer_width) /
+                           observed.window_width;
+    const double ratio_y = static_cast<double>(observed.framebuffer_height) /
+                           observed.window_height;
+    // A single device-pixel ratio is the documented projection. Reject an
+    // X/Y mismatch, including an in-progress host generation, rather than
+    // warping CJK glyphs or pretending TTY cells are physical device pixels.
+    if (!std::isfinite(ratio_x) || !std::isfinite(ratio_y) ||
+        ratio_x <= 0.0 || ratio_y <= 0.0 ||
+        std::fabs(ratio_x - ratio_y) > ratio_x * 0.000001)
+        throw std::logic_error(
+            "TangoOpenGL resize observed nonuniform or inconsistent host DPI");
+
+    const double cell_width = static_cast<double>(observed.window_width) / columns;
+    const double cell_height = static_cast<double>(observed.window_height) / rows;
+    const double font_scale = cell_height / base.cell_height;
+    const double font_size = base.font_size * font_scale;
+    const double baseline = base.baseline * font_scale;
+    const double float_max = (std::numeric_limits<float>::max)();
+    if (cell_width <= 0.0 || cell_height <= 0.0 || font_size <= 0.0 ||
+        baseline <= 0.0 || cell_width > float_max ||
+        cell_height > float_max || font_size > float_max ||
+        baseline > float_max || ratio_x > float_max)
+        throw std::length_error("TangoOpenGL resize exceeds cell/font coordinate domain");
+
+    CellPixelMetrics adapted = base;
+    adapted.cell_width = static_cast<float>(cell_width);
+    adapted.cell_height = static_cast<float>(cell_height);
+    adapted.pixel_ratio = static_cast<float>(ratio_x);
+    adapted.font_size = static_cast<float>(font_size);
+    adapted.baseline = static_cast<float>(baseline);
+
+    // The exact floats sent to begin_frame MUST still round onto the same
+    // actual measured framebuffer, including fractional cell bounds.
+    const double projected_width =
+        static_cast<double>(adapted.cell_width) * columns * adapted.pixel_ratio;
+    const double projected_height =
+        static_cast<double>(adapted.cell_height) * rows * adapted.pixel_ratio;
+    const double int_max = (std::numeric_limits<int>::max)();
+    if (!std::isfinite(projected_width) || !std::isfinite(projected_height) ||
+        projected_width > int_max || projected_height > int_max ||
+        std::lround(projected_width) != observed.framebuffer_width ||
+        std::lround(projected_height) != observed.framebuffer_height)
+        throw std::logic_error(
+            "TangoOpenGL host framebuffer cannot be represented by exact cell metrics");
+    return adapted;
+}
 
 CellHostFrameGate::CellHostFrameGate(CellPixelPresenter& presenter) noexcept
     : presenter_(&presenter) {}

@@ -338,7 +338,7 @@ int main(int argc, char** argv) {
     glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 4);
     glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 1);
     glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
-    glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
+    glfwWindowHint(GLFW_RESIZABLE, GLFW_TRUE);
 #ifdef __APPLE__
     glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GLFW_TRUE);
 #endif
@@ -374,6 +374,7 @@ int main(int argc, char** argv) {
         layout.pixel_ratio = 1.0f;
         layout.font_family = gl.font_family;
         layout.expected_grid_revision = 1;
+        const CellPixelMetrics base_layout = layout;
 
         GlfwTangoInput input(window, *presenter);
         std::uint64_t revision = 1;
@@ -385,19 +386,14 @@ int main(int argc, char** argv) {
             int framebuffer_width = 0, framebuffer_height = 0;
             glfwGetWindowSize(window, &window_width, &window_height);
             glfwGetFramebufferSize(window, &framebuffer_width, &framebuffer_height);
-            if (window_width != 768 || window_height != 480 ||
+            if (window_width <= 0 || window_height <= 0 ||
                 framebuffer_width <= 0 || framebuffer_height <= 0) {
-                throw std::logic_error(
-                    "TangoGL demo requires its exact fixed window/framebuffer generation");
+                // Minimized/unmapped window has no drawable framebuffer.
+                // Do not guess a replacement frame or allow stale input.
+                input.gate.invalidate_geometry();
+                glfwWaitEventsTimeout(0.025);
+                continue;
             }
-            const float x_scale = static_cast<float>(framebuffer_width) / window_width;
-            const float y_scale = static_cast<float>(framebuffer_height) / window_height;
-            if (!std::isfinite(x_scale) || !std::isfinite(y_scale) ||
-                x_scale <= 0.0f || std::fabs(x_scale - y_scale) > 0.001f) {
-                throw std::logic_error(
-                    "TangoGL demo cannot map nonuniform host DPI into cell pixels");
-            }
-            layout.pixel_ratio = x_scale;
             if (input.dirty) {
                 // One existing Tango C11 source/grid. No second cell layout.
                 paint_demo_cells(grid.buffer);
@@ -406,9 +402,17 @@ int main(int argc, char** argv) {
                     throw std::overflow_error("TangoGL source revision exhausted");
                 ++revision;
                 frame = std::make_unique<TangoSnapshot>(grid.buffer, revision);
-                layout.expected_grid_revision = revision;
                 input.dirty = false;
             }
+            // Reproject the SAME immutable Tango C11 cell grid using the
+            // actual host-reported logical window and framebuffer extents.
+            // Unsupported/transitioning nonuniform DPI fails before GL work.
+            CellPixelMetrics intended = base_layout;
+            intended.expected_grid_revision = revision;
+            const CellWindowExtents current{
+                window_width, window_height, framebuffer_width, framebuffer_height};
+            layout = flex::tango_opengl::fit_cell_metrics_to_window(
+                frame->snapshot, current, intended);
             presenter->present(frame->snapshot, layout);
             glfwSwapBuffers(window);
             // Focus/resize alone cannot make an old frame clickable.
