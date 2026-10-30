@@ -10,7 +10,17 @@ on:
       - "flex/backends/tango_opengl/**"
       - "flex/render/engines/gcanvas/**"
       - "flex/modules/render/**"
-      - "shared/gcanvas/**"
+      # Only shared code and desktop GL/glyph paths that can affect TangoGL.
+      # Do not run a Mesa desktop GPU check for Vulkan/Android-only edits.
+      - "shared/gcanvas/src/backends/gl/**"
+      - "shared/gcanvas/src/backends/opengl/**"
+      - "shared/gcanvas/src/font.cpp"
+      - "shared/gcanvas/src/context.cpp"
+      - "shared/gcanvas/src/color.cpp"
+      - "shared/gcanvas/src/image.cpp"
+      - "shared/gcanvas/src/path.cpp"
+      - "shared/gcanvas/include/gcanvas/**"
+      - "shared/gcanvas/CMakeLists.txt"
       - ".github/workflows/tango-opengl-native-pixel.yml"
       - ".github/actions/setup-ccache/**"
   workflow_dispatch:

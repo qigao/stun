@@ -30,6 +30,11 @@ WORKFLOWS = {
         "Native C / ubuntu-latest", "Native C / macos-latest",
         "Native C / windows-latest",
     ),
+    # A real GL context and shader-generated pixels are not proven by
+    # the headless/CPU Tango gates. Keep the GPU publisher job distinct.
+    "tango-opengl-native-pixel.yml": (
+        "Native TangoGL / Mesa llvmpipe real framebuffer",
+    ),
     "ui-core-c11.yml": (
         "c11-headers", "C11 SDK compile / macos-15",
         "C11 SDK compile / windows-2022",

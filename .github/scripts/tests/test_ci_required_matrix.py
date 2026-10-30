@@ -63,6 +63,12 @@ class RequirementTests(unittest.TestCase):
         self.assertIn("android-default-cmake",
                       result[".github/workflows/gcanvas-package-contract.yml"])
 
+    def test_native_gcanvas_gl_shader_edit_requires_tango_pixel_check(self):
+        required = matrix("shared/gcanvas/src/backends/gl/context_impl_gl.cpp")
+        self.assertIn(".github/workflows/tango-opengl-native-pixel.yml", required)
+        android = matrix("shared/gcanvas/src/platform/android/egl_host.cpp")
+        self.assertNotIn(".github/workflows/tango-opengl-native-pixel.yml", android)
+
     def test_markdown_selects_sdk_and_headless(self):
         result = matrix("shared/markdown/src/markdown.c")
         self.assertIn(".github/workflows/ui-core-c11.yml", result)
@@ -74,6 +80,22 @@ class RequirementTests(unittest.TestCase):
         self.assertIn(".github/workflows/tango-core.yml", result)
         self.assertEqual(len(result[".github/workflows/tango-core.yml"]), 3)
         self.assertIn(".github/workflows/flexui-tango-headless.yml", result)
+        self.assertEqual(
+            result[".github/workflows/tango-opengl-native-pixel.yml"],
+            ["Native TangoGL / Mesa llvmpipe real framebuffer"],
+        )
+
+    def test_tango_opengl_changes_require_actual_gpu_pixel_acceptance(self):
+        required = matrix(
+            "flex/backends/tango_opengl/cell_presenter.cpp",
+            "tango/tests/opengl-smoke/tango_gl_real_pixel_smoke.cpp",
+        )
+        self.assertIn(policy.RUNTIME, required)
+        self.assertEqual(
+            required[".github/workflows/tango-opengl-native-pixel.yml"],
+            ["Native TangoGL / Mesa llvmpipe real framebuffer"],
+        )
+        self.assertIn(".github/workflows/flexui-tango-headless.yml", required)
 
     def test_graphlayout_requires_four_platform_matrix(self):
         result = matrix("shared/layout/src/layout.cpp")
@@ -96,6 +118,7 @@ class RequirementTests(unittest.TestCase):
             "gcanvas-gles-runtime.yml", "gcanvas-package-contract.yml",
             "graphlayout-native.yml", "ui-core-c11.yml", "tango-core.yml",
             "flexui-tango-headless.yml", "markdown-highlighter-loader.yml",
+            "tango-opengl-native-pixel.yml",
         ):
             self.assertIn(".github/workflows/" + filename, result)
 
