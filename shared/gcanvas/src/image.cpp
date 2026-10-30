@@ -62,10 +62,35 @@ namespace gcanvas
 
     void Image::update_data(const unsigned char* data, std::size_t size)
     {
-        assign_pixels(data, size);
-        if (_owner != nullptr)
+        // Stage and validate the complete candidate BEFORE modifying the
+        // retained bytes or their data pointer. This also supports input
+        // aliasing the current Image::pixels() buffer.
+        const std::size_t required = required_pixel_bytes();
+        if (data == nullptr || size != required)
+            throw std::invalid_argument("gCanvas image pixel span has the wrong size");
+        std::vector<std::uint8_t> candidate(data, data + size);
+
+        // The existing backend's update_image() reads Image::_data. Temporarily
+        // publish the candidate to that SAME original Context, and make CPU
+        // state strongly exception-safe if its real native guard rejects the
+        // driver operation before glTexSubImage2D is invoked. No second
+        // texture, GL renderer, callback protocol or fallback is introduced.
+        _pixels.swap(candidate);
+        _data = _pixels.data();
+        try
         {
-            _owner->image_pixels_updated(*this);
+            if (_owner != nullptr)
+                _owner->image_pixels_updated(*this);
+        }
+        catch (...)
+        {
+            // Both swaps are noexcept; the original byte array (now in
+            // candidate) and its owning data pointer are fully restored.
+            // A native GL error *after* a partial driver write would still
+            // require device quarantine: CPU rollback cannot undo GPU work.
+            _pixels.swap(candidate);
+            _data = _pixels.data();
+            throw;
         }
     }
 

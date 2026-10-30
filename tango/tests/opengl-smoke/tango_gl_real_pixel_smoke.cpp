@@ -935,6 +935,9 @@ void exercise_actual_gl_mutation_barrier(GLFWwindow* window) {
     require(refused_update && audit.denied >= 1 &&
             audit.updates == old_updates,
             "Native gCanvas texture update bypassed its in-flight resource gate");
+    require(image.pixels().size() == red.size() &&
+            std::equal(image.pixels().begin(), image.pixels().end(), red.begin()),
+            "Denied GL texture upload corrupted the original retained CPU pixels");
 
     glBindTexture(GL_TEXTURE_2D, texture);
     std::array<std::uint8_t, 16> actual{};
@@ -969,6 +972,27 @@ void exercise_actual_gl_mutation_barrier(GLFWwindow* window) {
     require(actual == green && audit.updates == old_updates + 1 &&
             glGetError() == GL_NO_ERROR,
             "Completed native fence did not allow real glTexSubImage2D green pixels");
+    require(image.pixels().size() == green.size() &&
+            std::equal(image.pixels().begin(), image.pixels().end(), green.begin()),
+            "Successful native update failed to commit its CPU pixel candidate");
+
+    // Failed validation (including a malformed input span) must not
+    // overwrite old CPU bytes or issue a native driver update.
+    bool invalid_span_refused = false;
+    try { image.update_data(red.data(), red.size() - 1u); }
+    catch (const std::invalid_argument&) { invalid_span_refused = true; }
+    require(invalid_span_refused && audit.updates == old_updates + 1 &&
+            image.pixels().size() == green.size() &&
+            std::equal(image.pixels().begin(), image.pixels().end(), green.begin()),
+            "Rejected image extent changed the retained CPU image");
+
+    // The source may explicitly alias Image::pixels(). Stage-before-swap
+    // keeps it safe, and the original native update path remains qualified.
+    const auto previous_pixels = image.pixels();
+    image.update_data(image.pixels().data(), image.pixels().size());
+    require(image.pixels() == previous_pixels &&
+            audit.updates == old_updates + 2,
+            "In-place aliased Image::update_data did not preserve its bytes");
 
     context.reset(); // Actual ImageImplGl::~ and GL shader program deletion.
     require(audit.deletes >= audit.uploads &&
@@ -977,6 +1001,9 @@ void exercise_actual_gl_mutation_barrier(GLFWwindow* window) {
             "Native GL resource destructors did not pass through the real admission");
     std::cout << "TANGO_GL_ACTUAL_TEXSUBIMAGE_GUARD_DENIED=1\n"
               << "TANGO_GL_ACTUAL_TEXSUBIMAGE_AFTER_FENCE=1\n"
+              << "TANGO_GL_CPU_IMAGE_ROLLBACK_ON_GPU_DENIAL=1\n"
+              << "TANGO_GL_CPU_IMAGE_INVALID_SPAN_ROLLBACK=1\n"
+              << "TANGO_GL_CPU_IMAGE_ALIAS_SAFE=1\n"
               << "TANGO_GL_ACTUAL_GL_DELETE_AUDIT=1\n";
 }
 
