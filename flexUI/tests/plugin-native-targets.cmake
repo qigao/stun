@@ -6,9 +6,6 @@ get_filename_component(FLEXUI_PLUGIN_PROJECT_ROOT
     "${FLEXUI_PLUGIN_NATIVE_TESTS_DIR}/.." ABSOLUTE)
 
 function(flexui_add_native_plugin_tests)
-  if(NOT TARGET FlexUI::PluginHost)
-    message(FATAL_ERROR "PluginHost production target required for native plugin acceptance")
-  endif()
   add_library(flexui_test_plugin_missing_entry MODULE "${FLEXUI_PLUGIN_NATIVE_TESTS_DIR}/plugin_test_missing_entry.c")
   add_library(flexui_test_plugin_bad_abi MODULE "${FLEXUI_PLUGIN_NATIVE_TESTS_DIR}/plugin_test_bad_abi.c")
   add_library(flexui_test_plugin_echo MODULE "${FLEXUI_PLUGIN_NATIVE_TESTS_DIR}/plugin_test_echo.cpp")

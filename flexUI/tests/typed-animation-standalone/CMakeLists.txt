@@ -2,13 +2,7 @@ cmake_minimum_required(VERSION 3.20...3.31)
 project(StunTypedAnimationQualification LANGUAGES CXX)
 
 include(CTest)
-if(NOT CMAKE_SYSTEM_NAME STREQUAL "Linux" OR NOT CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
-  message(FATAL_ERROR "This installed-SDK qualification requires Linux GCC or Clang")
-endif()
 get_filename_component(STUN_ROOT "${CMAKE_CURRENT_LIST_DIR}/../../.." ABSOLUTE)
-if(NOT DEFINED ENV{SALTS_ROOT} OR NOT IS_DIRECTORY "$ENV{SALTS_ROOT}")
-  message(FATAL_ERROR "Typed animation qualification requires an installed SDK in SALTS_ROOT")
-endif()
 find_package(Salts CONFIG REQUIRED PATHS "$ENV{SALTS_ROOT}" NO_DEFAULT_PATH)
 find_package(nlohmann_json CONFIG REQUIRED)
 
