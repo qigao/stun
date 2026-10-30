@@ -4,6 +4,12 @@ include(CTest)
 get_filename_component(STUN_ROOT "${CMAKE_CURRENT_LIST_DIR}/../../.." ABSOLUTE)
 find_package(Salts CONFIG REQUIRED PATHS "$ENV{SALTS_ROOT}" NO_DEFAULT_PATH)
 find_package(SaltsUtils CONFIG REQUIRED PATHS "$ENV{SALTS_ROOT}" NO_DEFAULT_PATH)
+# The Jinja XML author-compiler slice must link the REAL installed SaltsUtils
+# provider. An incomplete installed SDK is a RED gate, never a mock or fallback.
+if(NOT TARGET Salts::JinjaCMeta)
+  message(FATAL_ERROR
+    "XML runtime qualification requires installed Salts::JinjaCMeta")
+endif()
 find_package(Threads REQUIRED)
 find_program(RE2C_EXECUTABLE re2c REQUIRED)
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_LIST_DIR}")
@@ -21,6 +27,7 @@ set(BUILD_SHARED_LIBS OFF)
 set(NANOGUI_BUILD_EXAMPLES OFF)
 set(FLEXUI_ENABLE_PLUGINS ON)
 set(FLEXUI_ENABLE_TURBOSCRIPT OFF)
+set(FLEXUI_ENABLE_JINJA_XML ON CACHE BOOL "Test real installed Jinja XML admission" FORCE)
 foreach(option IN ITEMS GCANVAS_BUILD_OPENGL GCANVAS_BUILD_GLES
     GCANVAS_BUILD_ANDROID_EGL GCANVAS_BUILD_VULKAN GCANVAS_BUILD_SVG
     GCANVAS_BUILD_WINDOW GCANVAS_BUILD_TESTS GCANVAS_BUILD_EXAMPLES
@@ -63,6 +70,23 @@ foreach(test IN ITEMS test_ui_content_models test_ui_xml_admission test_ui_xml
   set_tests_properties(${test} PROPERTIES TIMEOUT 120)
   add_dependencies(stun_xml_runtime_qualification ${test})
 endforeach()
+
+# No cloned XML tokenizer or synthetic template adapter: the exact optional
+# production library runs Jinja -> real XML compiler -> built-in registry and
+# instantiates a genuine Box/Widget in this installed-SDK qualification target.
+add_executable(test_ui_jinja_xml
+    "${STUN_ROOT}/flexUI/tests/test_ui_jinja_xml.cpp")
+target_link_libraries(test_ui_jinja_xml PRIVATE
+    FlexUI::JinjaXml Salts::JinjaCMeta Salts::TinyTest)
+add_test(NAME test_ui_jinja_xml COMMAND test_ui_jinja_xml)
+set_tests_properties(test_ui_jinja_xml PROPERTIES TIMEOUT 120)
+add_dependencies(stun_xml_runtime_qualification test_ui_jinja_xml)
+if(WIN32)
+  add_custom_command(TARGET test_ui_jinja_xml POST_BUILD
+      COMMAND ${CMAKE_COMMAND} -E copy_if_different
+          $<TARGET_FILE:Salts::JinjaCMeta>
+          $<TARGET_FILE_DIR:test_ui_jinja_xml>)
+endif()
 # This exact production Controller/service boundary now includes the registry,
 # bounded MPSC mailbox, and owner-thread dispatcher; all run with ASan/UBSan
 # and a separate LSan build, plus Windows/macOS headless native CTest.
