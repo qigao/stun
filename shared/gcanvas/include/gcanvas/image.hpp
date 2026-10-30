@@ -3,6 +3,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -12,6 +13,25 @@ namespace gcanvas
 {
     class Context;
     class Font;
+
+    // Producer-assigned, never-reused publication identity. Identical
+    // encoded content across separate A -> B -> A publications must retain
+    // different generation numbers. This tag is NOT a filesystem inode or
+    // hash and its authenticity is supplied by the producing owner.
+    struct ImagePublicationIdentity final {
+        std::string publisher_id;
+        std::string asset_id;
+        std::uint64_t generation = 0;
+        bool operator==(const ImagePublicationIdentity& other) const {
+            return publisher_id == other.publisher_id &&
+                   asset_id == other.asset_id &&
+                   generation == other.generation;
+        }
+        bool operator!=(const ImagePublicationIdentity& other) const {
+            return !(*this == other);
+        }
+    };
+
     enum ImageFiltering
     {
         NEAREST,
@@ -34,6 +54,11 @@ namespace gcanvas
         int get_height() const noexcept;
         int get_channels() const noexcept;
         const std::vector<std::uint8_t>& pixels() const noexcept { return _pixels; }
+        // Null for legacy/unverified/raw images, and after a successful
+        // caller-side pixel mutation. This is producer-provided provenance.
+        const ImagePublicationIdentity* source_publication() const noexcept {
+            return _source_publication ? &*_source_publication : nullptr;
+        }
         void set_name(std::string name);
 
         // Validate/stage a full candidate image. On a rejected backend
@@ -52,6 +77,7 @@ namespace gcanvas
         ImageConfig _imageConfig = {};
 
         std::string _name;
+        std::optional<ImagePublicationIdentity> _source_publication;
 
         std::vector<std::uint8_t> _pixels;
         unsigned char* _data = nullptr;

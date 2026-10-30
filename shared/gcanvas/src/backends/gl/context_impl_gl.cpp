@@ -1379,6 +1379,35 @@ namespace GCANVAS_GL_PROFILE_NAMESPACE
         return create_file_image(file_path, &trusted_encoded_revision, config);
     }
 
+    Image& ContextImplGl::create_image_published(
+        const PublishedEncodedImage& published, ImageConfig config)
+    {
+        const auto& id = published.publication;
+        const auto& encoded = published.encoded_bytes;
+        if (id.publisher_id.empty() || id.asset_id.empty() ||
+            id.publisher_id.size() > 256u || id.asset_id.size() > 256u ||
+            id.generation == 0)
+            throw std::invalid_argument(
+                "gCanvas published image requires a bounded nonzero owner revision");
+        if (encoded.empty() ||
+            encoded.size() > _resource_limits.max_image_encoded_source_bytes ||
+            encoded.size() > static_cast<std::size_t>(
+                (std::numeric_limits<int>::max)()))
+            throw std::length_error(
+                "gCanvas published encoded image exceeds bounded source cap");
+        if (_owned_images.size() >= _resource_limits.max_images)
+            throw std::length_error("gCanvas image limit reached");
+
+        // The producer pins an immutable complete encoded version for this
+        // call. Capture it into one owned buffer BEFORE original STB and GL.
+        // No path or OS descriptor is opened here. Avoid copy allocation
+        // until the resource owner has approved the encoded staging bytes.
+        (void)image_creation_peak_usage(0u, encoded.size(), 0u);
+        const std::vector<std::uint8_t> frozen(encoded.begin(), encoded.end());
+        return finish_frozen_encoded_image(
+            id.asset_id, frozen, &id, config);
+    }
+
     Image& ContextImplGl::create_file_image(
         const std::string& file_path,
         const std::vector<std::uint8_t>* trusted_encoded_revision,
@@ -1433,11 +1462,24 @@ namespace GCANVAS_GL_PROFILE_NAMESPACE
             throw std::runtime_error(
                 "gCanvas encoded source differs from the trusted revision");
 
+        return finish_frozen_encoded_image(
+            file_path, frozen, nullptr, config);
+    }
+
+    Image& ContextImplGl::finish_frozen_encoded_image(
+        const std::string& source_name,
+        const std::vector<std::uint8_t>& frozen,
+        const ImagePublicationIdentity* publication,
+        ImageConfig config)
+    {
+        // Both file-based and producer-pinned paths use the same original
+        // STB metadata/decode, peak model, and ImageImplGl native uploader.
+        const auto encoded_size = frozen.size();
         int width = 0, height = 0, source_components = 0;
         if (!stbi_info_from_memory(
                 frozen.data(), static_cast<int>(frozen.size()),
                 &width, &height, &source_components))
-            throw std::runtime_error("Could not inspect frozen image: " + file_path);
+            throw std::runtime_error("Could not inspect frozen image: " + source_name);
         (void)source_components;
         const auto base_bytes = checked_new_image_bytes(width, height, 4);
         if (encoded_size > (std::numeric_limits<std::size_t>::max)() - base_bytes)
@@ -1448,7 +1490,9 @@ namespace GCANVAS_GL_PROFILE_NAMESPACE
         (void)image_creation_peak_usage(base_bytes, encoded_size + base_bytes,
                                         base_bytes);
         auto owned = std::make_unique<ImageImplGl>(
-            file_path, frozen.data(), frozen.size(), width, height, config);
+            source_name, frozen.data(), frozen.size(), width, height, config);
+        if (publication)
+            mark_image_publication(*owned, *publication);
         Image& image = *owned;
         register_image(&image);
         return own_image(std::move(owned));

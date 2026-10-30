@@ -86,6 +86,10 @@ namespace gcanvas
         {
             if (_owner != nullptr)
                 _owner->image_pixels_updated(*this);
+            // User mutation no longer represents the original published
+            // encoded revision, even if the replacement pixels happen to
+            // compare equal. A failed GPU update retains old provenance.
+            _source_publication.reset();
         }
         catch (...)
         {
