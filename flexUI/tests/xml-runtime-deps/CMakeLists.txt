@@ -7,26 +7,15 @@ set(LEXBOR_BUILD_SHARED OFF CACHE BOOL "" FORCE)
 set(LEXBOR_BUILD_STATIC ON CACHE BOOL "" FORCE)
 set(BOX2D_SAMPLES OFF CACHE BOOL "" FORCE)
 set(BOX2D_UNIT_TESTS OFF CACHE BOOL "" FORCE)
-# Exact upstream release commits; no window/GPU libraries or vcpkg bootstrap.
+# Lock exact immutable commits at FetchContent admission; no git-revision
+# detection script or second source checkout. Missing sources fail configure.
 FetchContent_Declare(lexbor GIT_REPOSITORY https://github.com/lexbor/lexbor.git
-  GIT_TAG v3.0.0 GIT_SHALLOW TRUE)
+  GIT_TAG 2ae88a1c6b5261830eff73ee12bb3cdf805f3cfe)
 FetchContent_Declare(box2d GIT_REPOSITORY https://github.com/erincatto/box2d.git
-  GIT_TAG v3.1.1 GIT_SHALLOW TRUE)
+  GIT_TAG 8c661469c9507d3ad6fbd2fea3f1aa71669c2fe3)
 FetchContent_Declare(tree_sitter GIT_REPOSITORY https://github.com/tree-sitter/tree-sitter.git
-  GIT_TAG v0.25.10 GIT_SHALLOW TRUE SOURCE_SUBDIR lib)
+  GIT_TAG da6fe9beb4f7f67beb75914ca8e0d48ae48d6406 SOURCE_SUBDIR lib)
 FetchContent_MakeAvailable(lexbor box2d tree_sitter)
-function(verify_revision dependency expected)
-  execute_process(COMMAND git -C "${${dependency}_SOURCE_DIR}" rev-parse HEAD
-    OUTPUT_VARIABLE actual OUTPUT_STRIP_TRAILING_WHITESPACE
-    COMMAND_ERROR_IS_FATAL ANY)
-  if(NOT actual STREQUAL expected)
-    message(FATAL_ERROR "${dependency} revision mismatch: ${actual}, expected ${expected}")
-  endif()
-  message(STATUS "XML dependency ${dependency}: ${actual}")
-endfunction()
-verify_revision(lexbor 2ae88a1c6b5261830eff73ee12bb3cdf805f3cfe)
-verify_revision(box2d 8c661469c9507d3ad6fbd2fea3f1aa71669c2fe3)
-verify_revision(tree_sitter da6fe9beb4f7f67beb75914ca8e0d48ae48d6406)
 
 # FlexUI consumes vcpkg's package spelling. Export the actual upstream static
 # library under that spelling, with its installed public headers.

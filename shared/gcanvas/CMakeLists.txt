@@ -242,15 +242,6 @@ if(GCANVAS_BUILD_VULKAN)
     POSITION_INDEPENDENT_CODE ON)
 endif()
 
-foreach(_gcanvas_renderer_target IN ITEMS gcanvas_opengl gcanvas_opengles gcanvas_vulkan)
-  if(TARGET ${_gcanvas_renderer_target})
-    get_target_property(_gcanvas_renderer_links ${_gcanvas_renderer_target} LINK_LIBRARIES)
-    if("${_gcanvas_renderer_links}" MATCHES "(^|;)glfw($|;)|glfw3")
-      message(FATAL_ERROR "${_gcanvas_renderer_target} must not link GLFW")
-    endif()
-  endif()
-endforeach()
-
 if(GCANVAS_BUILD_WINDOW)
   find_package(glfw3 CONFIG REQUIRED)
   add_library(gcanvas_window STATIC

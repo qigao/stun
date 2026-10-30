@@ -2,6 +2,10 @@
 
 #include <turbo_script.h>
 
+// The actual production compiler rejects incompatible TurboScript headers.
+static_assert(TURBO_SCRIPT_HOST_ABI_VERSION == 1u,
+              "FlexUI requires TurboScript host ABI v1");
+
 #include <array>
 #include <cmath>
 #include <exception>

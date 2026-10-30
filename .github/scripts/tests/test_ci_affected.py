@@ -104,7 +104,6 @@ def verify_labeled_workflow_isolation():
         "gcanvas-android-egl.yml",
         "gcanvas-android-runtime.yml",
         "gcanvas-gles-runtime.yml",
-        "gcanvas-shader-tools-cache.yml",
         "graphlayout-native.yml",
         "gui-native-e2e.yml",
         "public-dependency-contract.yml",

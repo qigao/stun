@@ -104,7 +104,7 @@ class RequirementTests(unittest.TestCase):
         self.assertIn(policy.RUNTIME, result)
         for workflow in (
             "gcanvas-android-egl.yml", "gcanvas-android-runtime.yml",
-            "gcanvas-gles-runtime.yml", "gcanvas-shader-tools-cache.yml",
+            "gcanvas-gles-runtime.yml",
         ):
             self.assertIn(".github/workflows/" + workflow, result)
 
@@ -151,9 +151,11 @@ class RequirementTests(unittest.TestCase):
             "shared/gcanvas/tests/install_consumer",
             "flexUI/examples/plugin_echo",
             ".github/workflows/gcanvas-package-contract.yml",
+            ".github/workflows/gcanvas-shader-tools-cache.yml",
         ):
             self.assertFalse((ROOT / path).exists(), path)
         self.assertNotIn("gcanvas-package-contract.yml", policy.WORKFLOWS)
+        self.assertNotIn("gcanvas-shader-tools-cache.yml", policy.WORKFLOWS)
 
     def test_unknown_sources_fail_closed_even_with_docs(self):
         for paths in (

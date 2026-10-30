@@ -184,6 +184,29 @@ for the required always-created GitHub status and administrator-enabled
 ruleset. Do not merge based solely on this validator or a green workflow
 summary.
 
+## Fail-fast CI/CMake policy (2026-10-30)
+
+**No detect-then-build probes.** CI should run real CMake configure, native
+build/link and actual CTest/application behavior. Do not add shell
+`grep`/file-existence/loaded-library/compile-command-text inspections, manual
+CMake header parsing, tool/package version sniffing, warnings followed by
+silent fallback, or synthetic installer/consumer projects and CI. A missing
+requested compiler, generator, imported target, resource or ABI must produce
+a failed REQUIRED configuration, compiler error, linker error or real test.
+
+Native semantic assertions stay in **tests**, including real terminal, GUI
+screenshots, shader/pixel, Android and lifecycle behavior; explicit product
+feature choices, trusted exact-head CI routing and release checksums are not
+substitutes for a build, but remain required for provenance. Compiler caches
+remain accelerators; report actual invocations, not source/manifest greps.
+Producer installation/export APIs remain part of the library; verify SDK
+integration using an **existing real downstream application/library** and its
+ordinary CI, not a dedicated consumer/installer fixture.
+
+The existing sole public CI policy job continues to execute real Python
+source-routing tests. It no longer duplicates static CMake/provider scans or
+compile-only pseudo-consumers that cannot establish runtime correctness.
+
 ## Trusted source-delta CI requirement matrix (stage M1)
 
 The default-branch `.github/scripts/ci_required_matrix.py` now derives a

@@ -17,7 +17,6 @@ WORKFLOWS = {
     "gcanvas-android-egl.yml": ("android-egl-compile",),
     "gcanvas-android-runtime.yml": ("android-surface-lifecycle",),
     "gcanvas-gles-runtime.yml": ("gles-runtime",),
-    "gcanvas-shader-tools-cache.yml": ("Linux shared shader-tool cache",),
     "graphlayout-native.yml": (
         "ubuntu-24.04 / gcc", "ubuntu-24.04 / clang",
         "windows-2022 / msvc", "macos-15 / appleclang",

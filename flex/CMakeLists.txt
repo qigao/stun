@@ -25,12 +25,8 @@ add_subdirectory(modules/engine)
 option(FLEX_BUILD_RENDER_ENGINE_GCANVAS
        "Build the internal gCanvas rendering engine" ON)
 if(FLEX_BUILD_RENDER_ENGINE_GCANVAS)
-  if(TARGET gCanvas::Core)
-    add_subdirectory(render/engines/gcanvas)
-  else()
-    message(STATUS
-      "Flex: gCanvas engine disabled because gCanvas::Core is unavailable")
-  endif()
+  # Never silently disable a requested backend when its provider is absent.
+  add_subdirectory(render/engines/gcanvas)
 endif()
 
 set(FLEX_OPENGL_RENDER_ENGINE "gcanvas" CACHE STRING

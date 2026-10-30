@@ -312,6 +312,14 @@ cache hit statistics instead of relying on the presence of archives.
 
 ## gCanvas native GLES and Android gates
 
+The former shader-tool **cache-only** workflow was retired: package status,
+manifest greps and restore-log probes are not build or runtime evidence. When
+shader tooling is needed, its actual compiler/linker invocation in a production
+gCanvas renderer or an existing real application is the acceptance gate.
+Cache summaries may be informational, never a substitute for a successful
+build/test. Do not add a replacement cache-probe CI.
+
+
 The active upstream qualifications test **production gCanvas targets**, not
 synthetic installed-package consumer projects: the Linux
 `gcanvas-gles-runtime.yml` compiles/executes the real OpenGLES renderer and

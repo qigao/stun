@@ -21,26 +21,10 @@ set(FLEXUI_ROOT "${CMAKE_CURRENT_SOURCE_DIR}")
 set(FLEXUI_INCLUDE_DIR "${FLEXUI_ROOT}/include")
 add_subdirectory(modules/tailwindcss)
 
-# Find lexbor for CSS parsing
-find_path(LEXBOR_INCLUDE_DIR NAMES lexbor/core/base.h)
-find_library(LEXBOR_LIBRARY NAMES lexbor lexbor_static NAMES_PER_DIR)
-
-# Find tree-sitter for syntax highlighting (core only, languages via plugins)
+# Canonical REQUIRED dependency resolution; compiler/linker own the failure.
+find_path(LEXBOR_INCLUDE_DIR NAMES lexbor/core/base.h REQUIRED)
+find_library(LEXBOR_LIBRARY NAMES lexbor lexbor_static NAMES_PER_DIR REQUIRED)
 find_package(unofficial-tree-sitter CONFIG REQUIRED)
-
-if(NOT LEXBOR_INCLUDE_DIR)
-    message(FATAL_ERROR
-      "flexUI: Lexbor include directory not found. Please install via vcpkg: vcpkg install lexbor"
-    )
-endif()
-
-if(NOT LEXBOR_LIBRARY)
-    message(FATAL_ERROR
-      "flexUI: Lexbor library not found. Please install via vcpkg: vcpkg install lexbor"
-    )
-endif()
-
-message(STATUS "flexUI: Using lexbor from ${LEXBOR_INCLUDE_DIR}")
 include_directories(${LEXBOR_INCLUDE_DIR})
 
 set(FLEXUI_UTILITY_WHITELIST

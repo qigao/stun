@@ -15,7 +15,6 @@ on:
       - gCanvas OpenGLES runtime
       - gCanvas Android EGL compile
       - gCanvas Android runtime
-      - gCanvas shader toolchain cache contract
       - Markdown highlighter loader portability
       - FlexUI Tango cross-platform headless
       - Tango Native C Core

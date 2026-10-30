@@ -317,7 +317,3 @@ if(STUN_BUILD_TUI_STREAMING_DEMO)
   endif()
 endif()
 
-if(TARGET gCanvas::Window OR TARGET flex_render_engine_gcanvas OR
-   TARGET FlexUI::ControllerTurboScript)
-  message(FATAL_ERROR "XML runtime gate must remain headless and independent of TurboScript JIT")
-endif()

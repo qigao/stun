@@ -28,53 +28,8 @@ if(FLEXUI_ENABLE_TURBOSCRIPT)
   endif()
   find_package(TurboScript CONFIG REQUIRED HINTS ${_flexui_turboscript_hints})
 
-  get_target_property(
-    _flexui_turboscript_link_libraries
-    TurboScript::TurboScript INTERFACE_LINK_LIBRARIES)
-  if(_flexui_turboscript_link_libraries MATCHES "TurboNet")
-    message(
-      FATAL_ERROR
-        "TurboScript::TurboScript must publish its current Salts-owned dependency graph, not a retired TurboNet target")
-  endif()
-
-  get_target_property(
-    _flexui_turboscript_include_dirs
-    TurboScript::TurboScript INTERFACE_INCLUDE_DIRECTORIES)
-  set(_flexui_turboscript_public_header)
-  foreach(_flexui_turboscript_include_dir
-          IN LISTS _flexui_turboscript_include_dirs)
-    if(IS_DIRECTORY "${_flexui_turboscript_include_dir}"
-       AND EXISTS "${_flexui_turboscript_include_dir}/turbo_script.h")
-      set(_flexui_turboscript_public_header
-          "${_flexui_turboscript_include_dir}/turbo_script.h")
-      break()
-    endif()
-  endforeach()
-  if(NOT _flexui_turboscript_public_header)
-    message(
-      FATAL_ERROR
-        "TurboScript::TurboScript does not publish a readable turbo_script.h include directory")
-  endif()
-  file(READ "${_flexui_turboscript_public_header}"
-       _flexui_turboscript_public_header_content LIMIT 131072)
-  foreach(_flexui_turboscript_required_token
-          IN ITEMS TURBO_SCRIPT_HOST_ABI_VERSION turbo_script_string_view_t
-                   turbo_script_value_view_t turbo_script_export_handle_t)
-    string(FIND "${_flexui_turboscript_public_header_content}"
-           "${_flexui_turboscript_required_token}"
-           _flexui_turboscript_required_token_offset)
-    if(_flexui_turboscript_required_token_offset EQUAL -1)
-      message(
-        FATAL_ERROR
-          "FlexUI ControllerTurboScript requires the TurboScript 3 host ABI v1 public header; ${_flexui_turboscript_public_header} does not define ${_flexui_turboscript_required_token}. Reinstall the matching TurboScript package for this build profile")
-    endif()
-  endforeach()
-  if(NOT _flexui_turboscript_public_header_content MATCHES
-     "#define[ \t]+TURBO_SCRIPT_HOST_ABI_VERSION[ \t]+1u")
-    message(
-      FATAL_ERROR
-        "FlexUI ControllerTurboScript requires TURBO_SCRIPT_HOST_ABI_VERSION 1u in ${_flexui_turboscript_public_header}")
-  endif()
+  # Compile controller_turboscript.cpp against the actual installed API/ABI.
+  # No CMake header inspection, package sniffing or replacement provider.
 
   add_library(flexUI_controller_turboscript STATIC
               application_turboscript.cpp controller_turboscript.cpp)
