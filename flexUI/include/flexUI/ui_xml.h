@@ -2,7 +2,9 @@
 
 #include <flexUI/ui_document.h>
 
+#include <string>
 #include <string_view>
+#include <vector>
 
 namespace flexUI {
 
@@ -39,5 +41,36 @@ UiDocumentCompileResult compile_ui_xml(std::string_view source,
 UiDocumentCompileResult compile_ui_xml(std::string_view source,
                                        const WidgetRegistry &registry,
                                        const UiDocumentLimits &limits);
+
+
+/**
+ * Immutable, host-admitted module source bytes. The caller owns the storage
+ * for the duration of the synchronous compilation. This is NOT a loader or
+ * file-system/network capability: the app's explicit <import> must name a
+ * matching relative source and verified SHA-256 before its declarations can
+ * enter the one WidgetRegistry / CompiledUiProgram pipeline.
+ */
+struct UiXmlModuleSource {
+  std::string source;
+  std::string xml;
+};
+
+/**
+ * M2c: compile explicit, SHA-256-pinned <imports> from a bounded immutable
+ * source catalog. Each module source is <module namespace="urn:..." version="1">
+ * <components>...</components></module>; only its native component definitions
+ * are admitted. Imported tags are bound by <import prefix="studio"
+ * namespace="urn:studio:ui" source="components/editor.ui.xml"
+ * version="1" sha256="lowercase64hex"/> and a matching ui xmlns:studio.
+ *
+ * All parsing uses the existing XML adapter and static scoped component
+ * compiler. No implicit filesystem/network imports, recursive module
+ * dependencies, dynamic module runtime, or fallback. The prior overloads
+ * remain source-compatible and reject undeclared imported tags.
+ */
+UiDocumentCompileResult compile_ui_xml(
+    std::string_view source, const WidgetRegistry &registry,
+    const std::vector<UiXmlModuleSource> &modules,
+    const UiDocumentLimits &limits = {});
 
 } // namespace flexUI

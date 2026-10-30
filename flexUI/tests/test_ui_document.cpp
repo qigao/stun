@@ -2325,3 +2325,140 @@ spec("FlexUI XML component declarations lower through the one scoped compiler") 
     check_null(legacy.program.get());
   }
 }
+
+
+spec("FlexUI explicit immutable XML module imports use the one component compiler") {
+  static const std::string module_source = R"module(<module namespace="urn:studio:ui" version="1"><components><component name="EditorPanel"><interface><prop name="title" type="string" required="true"/><slot name="actions"/></interface><template><section id="panel"><label id="heading" text="$props.title"/><slot name="actions"/></section></template></component></components></module>)module";
+  static const char *module_digest =
+      "386d0ecf9934261ca948423c8f501365cc8b98a35b03c6581dc4bba38144756b";
+  static const std::string app = R"xml(
+    <ui name="Studio" xmlns:studio="urn:studio:ui"
+        xmlns:on="urn:flexui:event" xmlns:bind="urn:flexui:binding">
+      <imports>
+        <import namespace="urn:studio:ui" prefix="studio"
+                source="components/editor.ui.xml" version="1"
+                sha256="386d0ecf9934261ca948423c8f501365cc8b98a35b03c6581dc4bba38144756b"/>
+      </imports>
+      <main id="root">
+        <studio:EditorPanel id="editor" title="007">
+          <fill name="actions">
+            <button id="save" on:click="save_document" bind:text="$caption"/>
+          </fill>
+        </studio:EditorPanel>
+      </main>
+    </ui>
+  )xml";
+
+  it("verifies source bytes, URI, version and SHA-256 and mounts a scoped native tree") {
+    const auto registry = flexUI::WidgetRegistry::builtins();
+    const std::vector<flexUI::UiXmlModuleSource> modules{
+        {"components/editor.ui.xml", module_source}};
+    const auto compiled = flexUI::compile_ui_xml(
+        app, registry, modules, flexUI::UiDocumentLimits{});
+    check(static_cast<bool>(compiled));
+    if (!compiled) return;
+    check_equal(compiled.scoped_ownership.size(), std::size_t{1});
+    check_equal(compiled.scoped_ownership.front().scope, "editor");
+    check_equal(compiled.scoped_ownership.front().nodes.size(), std::size_t{3});
+    check_equal(compiled.program->event_bindings().size(), std::size_t{1});
+    check_equal(compiled.program->event_bindings().front().element_id, "save");
+    check_equal(compiled.program->event_bindings().front().handler, "save_document");
+    check_equal(compiled.program->bindings().size(), std::size_t{1});
+    check_equal(compiled.program->bindings().front().expression, "caption");
+    check_equal(compiled.program->bindings().front().element_id, "save");
+
+    flexUI::Box box(nullptr);
+    box.bindings().inputs().set_string("caption", "Save");
+    const auto mounted = flexUI::UiDocumentInstantiator::instantiate(
+        box, *compiled.program, registry);
+    check(static_cast<bool>(mounted));
+    if (!mounted) return;
+    check_not_null(box.get_by_id("editor"));
+    check_not_null(box.get_by_id("editor::panel"));
+    check_not_null(box.get_by_id("editor::heading"));
+    check_not_null(box.get_by_id("save"));
+    check_null(box.get_by_id("heading"));
+    box.update();
+    check_equal(box.get_by_id("editor::heading")->text(), "007");
+  }
+
+  it("rejects source substitutions, false hashes, forged imports and rebindings") {
+    const auto registry = flexUI::WidgetRegistry::builtins();
+    const std::vector<flexUI::UiXmlModuleSource> real{
+        {"components/editor.ui.xml", module_source}};
+    const auto rejected = [&](const std::string &xml,
+                              const std::vector<flexUI::UiXmlModuleSource> &sources) {
+      const auto compiled = flexUI::compile_ui_xml(
+          xml, registry, sources, flexUI::UiDocumentLimits{});
+      check_false(static_cast<bool>(compiled));
+      check_null(compiled.program.get());
+      check(compiled.scoped_ownership.empty());
+    };
+    const auto modified = [&](std::string old_value, std::string new_value) {
+      std::string xml = app;
+      const auto pos = xml.find(old_value);
+      check(pos != std::string::npos);
+      if (pos != std::string::npos)
+        xml.replace(pos, old_value.size(), new_value);
+      return xml;
+    };
+    rejected(app, {}); // No automatic host loader.
+    rejected(app, {{"components/editor.ui.xml", module_source + " "}});
+    rejected(app, {{"components/editor.ui.xml", module_source},
+                   {"extra/ui.xml", module_source}});
+    rejected(app, {{"components/editor.ui.xml", module_source},
+                   {"components/editor.ui.xml", module_source}});
+    rejected(modified("source=\"components/editor.ui.xml\"",
+                      "source=\"../editor.ui.xml\""), real);
+    rejected(modified("source=\"components/editor.ui.xml\"",
+                      "source=\"https://example.org/editor.xml\""), real);
+    rejected(modified("version=\"1\"", "version=\"2\""), real);
+    rejected(modified("namespace=\"urn:studio:ui\"",
+                      "namespace=\"urn:other:ui\""), real);
+    rejected(modified("prefix=\"studio\"", "prefix=\"unbound\""), real);
+    rejected(modified(std::string(module_digest),
+                      "086d0ecf9934261ca948423c8f501365cc8b98a35b03c6581dc4bba38144756b"),
+             real);
+    rejected(modified("<main id=\"root\">",
+                      "<main id=\"root\" xmlns:studio=\"urn:other:ui\">"), real);
+    rejected(modified("<studio:EditorPanel id=\"editor\" title=\"007\">",
+                      "<studio:Other id=\"editor\" title=\"007\">"), real);
+    rejected(modified("<imports>", "<imports><import namespace=\"urn:other:ui\" "
+                      "prefix=\"other\" source=\"components/editor.ui.xml\" "
+                      "version=\"1\" sha256=\"386d0ecf9934261ca948423c8f501365cc8b98a35b03c6581dc4bba38144756b\"/>"),
+             real);
+    // The older registry-aware and legacy overloads never infer a loader
+    // or admit <imports> simply because a namespace appears in XML.
+    const auto legacy = flexUI::compile_ui_xml(
+        app, registry, flexUI::UiDocumentLimits{});
+    check_false(static_cast<bool>(legacy));
+    check_null(legacy.program.get());
+  }
+
+  it("enforces cumulative bytes and refuses recursive module declarations") {
+    const auto registry = flexUI::WidgetRegistry::builtins();
+    const std::vector<flexUI::UiXmlModuleSource> real{
+        {"components/editor.ui.xml", module_source}};
+    flexUI::UiDocumentLimits limits;
+    limits.max_source_bytes = app.size() + module_source.size() - 1;
+    const auto limited = flexUI::compile_ui_xml(app, registry, real, limits);
+    check_false(static_cast<bool>(limited));
+    check(limited.error.code == flexUI::UiDocumentErrorCode::SourceTooLarge);
+    check_null(limited.program.get());
+    check(limited.scoped_ownership.empty());
+
+    const std::string bad_module =
+        "<module namespace=\"urn:studio:ui\" version=\"1\"><imports/><components/></module>";
+    std::string changed = app;
+    const auto old_hash = changed.find(module_digest);
+    check(old_hash != std::string::npos);
+    if (old_hash == std::string::npos) return;
+    changed.replace(old_hash, std::string(module_digest).size(),
+                    "f53657108a69f653e4a672014084b723e960abc73ab122ba0673ee1cb19e459a");
+    const auto recursive = flexUI::compile_ui_xml(
+        changed, registry, std::vector<flexUI::UiXmlModuleSource>{
+            {"components/editor.ui.xml", bad_module}}, flexUI::UiDocumentLimits{});
+    check_false(static_cast<bool>(recursive));
+    check_null(recursive.program.get());
+  }
+}

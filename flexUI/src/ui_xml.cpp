@@ -1,10 +1,12 @@
 #include <flexUI/ui_xml.h>
 #include <flexUI/widget_registry.h>
+#include <crypto/sha256.h>
 
 #include <pugixml.hpp>
 #include "ui_xml_admission.h"
 
 #include <algorithm>
+#include <array>
 #include <charconv>
 #include <cmath>
 #include <cstddef>
@@ -624,6 +626,19 @@ UiDocumentError lower_xml_component_calls(
     UiNodeDefinition &node, const UiDocumentLimits &limits,
     const WidgetRegistry &registry, const XmlComponentCatalog &catalog,
     std::vector<UiScopedComponent> &instances, bool allow_calls) {
+  // Namespace prefixes are fixed by the application's explicit root
+  // import. No descendant may shadow an imported binding: pugixml retains
+  // qualified tag names, not a second namespace-aware type registry.
+  for (const auto &attribute : xml_node.attributes()) {
+    const std::string_view name(attribute.name());
+    if (name.rfind("xmlns:", 0) != 0) continue;
+    const std::string prefix(name.substr(6));
+    for (const auto &entry : catalog) {
+      if (entry.first.rfind(prefix + ":", 0) == 0)
+        return node_error(source, xml_node, UiDocumentErrorCode::InvalidComponentScope,
+                          "imported component namespace cannot be rebound in a subtree");
+    }
+  }
   const auto component = catalog.find(std::string(xml_node.name()));
   if (component != catalog.end()) {
     if (!allow_calls)
@@ -796,8 +811,219 @@ UiDocumentError lower_xml_component_calls(
   return {};
 }
 
-XmlSource parse_xml_source(std::string_view source, const UiDocumentLimits &limits,
-                           const WidgetRegistry *registry = nullptr) {
+
+// A module is a source-identity-bound, immutable input supplied by the real
+// compiler host. No source lookup, path normalization, file access, native
+// loader callback, network fetch or second template engine exists here.
+bool xml_module_uri(std::string_view uri) {
+  if (uri.size() < 5 || uri.rfind("urn:", 0) != 0) return false;
+  bool segment = false;
+  for (std::size_t i = 4; i < uri.size(); ++i) {
+    const char c = uri[i];
+    if (c == ':') {
+      if (!segment) return false;
+      segment = false;
+    } else if ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
+               (c >= '0' && c <= '9') || c == '-' || c == '_') {
+      segment = true;
+    } else {
+      return false;
+    }
+  }
+  return segment;
+}
+
+bool xml_module_source_key(std::string_view name) {
+  if (name.empty() || name.front() == '/' || name.front() == '.' ||
+      name.find('\\') != std::string_view::npos) return false;
+  std::size_t begin = 0;
+  while (begin < name.size()) {
+    const auto end = name.find('/', begin);
+    const auto length = (end == std::string_view::npos ? name.size() : end) - begin;
+    if (length == 0) return false;
+    const auto segment = name.substr(begin, length);
+    if (segment == "." || segment == ".." || segment.back() == '.') return false;
+    for (const char c : segment) {
+      if (!((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
+            (c >= '0' && c <= '9') || c == '.' || c == '-' || c == '_'))
+        return false;
+    }
+    if (end == std::string_view::npos) return true;
+    begin = end + 1;
+  }
+  return false;
+}
+
+bool xml_module_version(std::string_view text) {
+  if (text.empty() || text.front() == '0') return false;
+  unsigned version = 0;
+  const auto parsed = std::from_chars(text.data(), text.data() + text.size(), version);
+  return parsed.ec == std::errc{} &&
+         parsed.ptr == text.data() + text.size() && version != 0;
+}
+
+bool xml_module_sha256(std::string_view source, std::string_view hexdigest) {
+  constexpr char hex[] = "0123456789abcdef";
+  if (hexdigest.size() != SALTS_CRYPTO_SHA256_DIGEST_SIZE * 2) return false;
+  std::array<uint8_t, SALTS_CRYPTO_SHA256_DIGEST_SIZE> digest{};
+  if (salts_crypto_sha256(source.data(), source.size(), digest.data()) != SALTS_CRYPTO_OK)
+    return false;
+  for (std::size_t i = 0; i < digest.size(); ++i) {
+    if (hexdigest[i * 2] != hex[digest[i] >> 4] ||
+        hexdigest[i * 2 + 1] != hex[digest[i] & 15u]) return false;
+  }
+  return true;
+}
+
+UiDocumentError read_xml_imports(
+    std::string_view application_source, const pugi::xml_node &ui,
+    const pugi::xml_node &imports, const UiDocumentLimits &limits,
+    const WidgetRegistry &registry, const std::vector<UiXmlModuleSource> &modules,
+    XmlComponentCatalog &catalog) {
+  if (!xml_attributes_only(imports, {}) ||
+      !xml_structural_children_only(imports))
+    return node_error(application_source, imports, UiDocumentErrorCode::InvalidNode,
+                      "imports may contain only declared module references");
+  if (modules.size() > limits.max_resources || modules.size() > limits.max_nodes)
+    return node_error(application_source, imports, UiDocumentErrorCode::ResourceLimitExceeded,
+                      "source catalog exceeds the declared module count budget");
+  std::unordered_set<std::string> catalog_names;
+  for (const auto &module : modules) {
+    if (module.source.size() > limits.max_string_bytes ||
+        !xml_module_source_key(module.source) ||
+        !catalog_names.emplace(module.source).second)
+      return node_error(application_source, imports, UiDocumentErrorCode::InvalidProperty,
+                        "module source catalog must contain unique safe relative keys");
+  }
+
+  std::unordered_set<std::string> used_sources, used_uris, used_prefixes;
+  std::size_t admitted_bytes = application_source.size();
+  std::size_t import_count = 0;
+  for (const auto &entry : imports.children()) {
+    if (entry.type() != pugi::node_element) continue;
+    if (++import_count > limits.max_resources ||
+        std::string_view(entry.name()) != "import" ||
+        !xml_attributes_only(entry, {"namespace", "prefix", "source", "version", "sha256"}) ||
+        !xml_structural_children_only(entry))
+      return node_error(application_source, entry, UiDocumentErrorCode::InvalidNode,
+                        "imports require bounded standalone import declarations");
+    for (const auto &nested : entry.children()) {
+      if (nested.type() == pugi::node_element)
+        return node_error(application_source, nested, UiDocumentErrorCode::InvalidNode,
+                          "import declarations must not have children");
+    }
+    const std::string uri = entry.attribute("namespace").value();
+    const std::string prefix = entry.attribute("prefix").value();
+    const std::string source_key = entry.attribute("source").value();
+    const std::string version = entry.attribute("version").value();
+    const std::string expected_hash = entry.attribute("sha256").value();
+    if (uri.size() > limits.max_string_bytes ||
+        prefix.size() > limits.max_string_bytes ||
+        source_key.size() > limits.max_string_bytes ||
+        !xml_module_uri(uri) || !xml_component_identifier(prefix) ||
+        prefix == "xml" || prefix == "xmlns" || prefix == "on" ||
+        prefix == "bind" || prefix == "attr" || prefix == "var" ||
+        !xml_module_source_key(source_key) || !xml_module_version(version) ||
+        !used_sources.emplace(source_key).second ||
+        !used_uris.emplace(uri).second || !used_prefixes.emplace(prefix).second)
+      return node_error(application_source, entry, UiDocumentErrorCode::InvalidComponentScope,
+                        "module import requires unique namespace, prefix, version and source");
+
+    const std::string namespace_attribute = "xmlns:" + prefix;
+    std::size_t binding_count = 0;
+    for (const auto &attr : ui.attributes()) {
+      if (namespace_attribute == attr.name()) {
+        if (std::string_view(attr.value()) != uri)
+          return node_error(application_source, entry, UiDocumentErrorCode::InvalidComponentScope,
+                            "import prefix must match its application XML namespace URI");
+        ++binding_count;
+      }
+    }
+    if (binding_count != 1)
+      return node_error(application_source, entry, UiDocumentErrorCode::InvalidComponentScope,
+                        "import needs exactly one matching application xmlns binding");
+
+    const UiXmlModuleSource *selected = nullptr;
+    for (const auto &candidate : modules) {
+      if (candidate.source == source_key) {
+        selected = &candidate;
+        break;
+      }
+    }
+    if (!selected)
+      return node_error(application_source, entry, UiDocumentErrorCode::InvalidComponentScope,
+                        "import source is absent from the trusted immutable source catalog");
+    if (admitted_bytes > limits.max_source_bytes ||
+        selected->xml.size() > limits.max_source_bytes - admitted_bytes)
+      return node_error(application_source, entry, UiDocumentErrorCode::SourceTooLarge,
+                        "application and imported module sources exceed the cumulative byte budget");
+    admitted_bytes += selected->xml.size();
+    if (!xml_module_sha256(selected->xml, expected_hash))
+      return node_error(application_source, entry, UiDocumentErrorCode::InvalidComponentScope,
+                        "imported module content does not match the declared SHA-256");
+
+    const auto &text = selected->xml;
+    if (text.find('\0') != std::string::npos)
+      return node_error(application_source, entry, UiDocumentErrorCode::ParseError,
+                        "module source contains an embedded NUL");
+    if (auto error = detail::validate_ui_xml_utf8(text)) {
+      error.message = "module " + source_key + ": " + error.message;
+      return error;
+    }
+    pugi::xml_document document;
+    const auto parsed = document.load_buffer(
+        text.data(), text.size(), pugi::parse_default | pugi::parse_ws_pcdata,
+        pugi::encoding_utf8);
+    if (!parsed) {
+      const auto place = detail::xml_source_span(text, parsed.offset);
+      return make_error(UiDocumentErrorCode::ParseError,
+                        "module " + source_key + ": invalid XML: " + parsed.description(),
+                        place.line, place.column);
+    }
+    const auto root = document.document_element();
+    if (!root || std::string_view(root.name()) != "module" ||
+        !xml_attributes_only(root, {"namespace", "version"}) ||
+        !xml_structural_children_only(root) ||
+        root.attribute("namespace").value() != uri ||
+        root.attribute("version").value() != version)
+      return node_error(application_source, entry, UiDocumentErrorCode::InvalidComponentScope,
+                        "module identity must match its declared namespace and exact version");
+    pugi::xml_node definitions;
+    for (const auto &part : root.children()) {
+      if (part.type() != pugi::node_element) continue;
+      if (std::string_view(part.name()) != "components" || definitions)
+        return node_error(text, part, UiDocumentErrorCode::InvalidNode,
+                          "modules accept only one components section, no recursive imports");
+      definitions = part;
+    }
+    if (!definitions)
+      return node_error(application_source, entry, UiDocumentErrorCode::InvalidNode,
+                        "imported module needs one components declaration section");
+    XmlComponentCatalog namespace_definitions;
+    if (auto error = read_xml_components(
+            text, definitions, limits, registry, namespace_definitions)) {
+      error.message = "module " + source_key + ": " + error.message;
+      return error;
+    }
+    for (auto &definition : namespace_definitions) {
+      const std::string qualified = prefix + ":" + definition.first;
+      if (qualified.size() > limits.max_string_bytes ||
+          catalog.size() >= limits.max_nodes ||
+          !catalog.emplace(qualified, std::move(definition.second)).second)
+        return node_error(application_source, entry, UiDocumentErrorCode::InvalidNode,
+                          "import collides with an existing qualified component");
+    }
+  }
+  if (used_sources.size() != modules.size())
+    return node_error(application_source, imports, UiDocumentErrorCode::InvalidComponentScope,
+                      "source catalog contains an unreferenced or unadmitted module");
+  return {};
+}
+
+XmlSource parse_xml_source(
+    std::string_view source, const UiDocumentLimits &limits,
+    const WidgetRegistry *registry = nullptr,
+    const std::vector<UiXmlModuleSource> *modules = nullptr) {
   XmlSource result;
   if (source.size() > limits.max_source_bytes) {
     result.error =
@@ -854,6 +1080,7 @@ XmlSource parse_xml_source(std::string_view source, const UiDocumentLimits &limi
 
   pugi::xml_node widget_root;
   pugi::xml_node components_root;
+  pugi::xml_node imports_root;
   bool saw_resources = false;
   for (const auto &child : ui.children()) {
     if (child.type() == pugi::node_pcdata || child.type() == pugi::node_cdata) {
@@ -867,7 +1094,14 @@ XmlSource parse_xml_source(std::string_view source, const UiDocumentLimits &limi
     if (child.type() != pugi::node_element) {
       continue;
     }
-    if (std::string_view(child.name()) == "components" && registry != nullptr) {
+    if (std::string_view(child.name()) == "imports" && modules != nullptr) {
+      if (imports_root) {
+        result.error = node_error(source, child, UiDocumentErrorCode::InvalidRootCount,
+                                  "UI XML may declare one imports section");
+        return result;
+      }
+      imports_root = child;
+    } else if (std::string_view(child.name()) == "components" && registry != nullptr) {
       if (components_root) {
         result.error = node_error(source, child, UiDocumentErrorCode::InvalidRootCount,
                                   "UI XML may declare one components section");
@@ -904,15 +1138,26 @@ XmlSource parse_xml_source(std::string_view source, const UiDocumentLimits &limi
   // Components are compile-only declarations. Only the registry-aware
   // frontend admits them; the legacy XML frontend remains unchanged.
   XmlComponentCatalog components;
+  if (imports_root) {
+    if (auto error = read_xml_imports(
+            source, ui, imports_root, limits, *registry, *modules, components)) {
+      result.error = std::move(error);
+      return result;
+    }
+  } else if (modules != nullptr && !modules->empty()) {
+    result.error = node_error(source, ui, UiDocumentErrorCode::InvalidComponentScope,
+                              "supplied immutable module catalog needs explicit XML imports");
+    return result;
+  }
   if (components_root) {
     result.error = read_xml_components(source, components_root, limits, *registry, components);
     if (result.error) return result;
   }
   result.error = parse_widget_node(source, widget_root, limits,
-                                   components_root ? nullptr : registry,
+                                   (components_root || imports_root) ? nullptr : registry,
                                    1, node_count, ids, result.definition.root);
   if (result.error) return result;
-  if (components_root) {
+  if (components_root || imports_root) {
     result.error = lower_xml_component_calls(
         source, widget_root, result.definition.root, limits, *registry,
         components, result.scoped_components, true);
@@ -965,6 +1210,23 @@ UiDocumentParseResult parse_ui_xml(std::string_view source,
   auto compiled = compile_ui_xml(source, registry, limits);
   if (!compiled) return {{}, std::move(compiled.error)};
   return {std::make_shared<const UiDocumentDefinition>(compiled.program->definition()), {}};
+}
+
+UiDocumentCompileResult compile_ui_xml(
+    std::string_view source, const WidgetRegistry &registry,
+    const std::vector<UiXmlModuleSource> &modules,
+    const UiDocumentLimits &limits) {
+  auto parsed = parse_xml_source(source, limits, &registry, &modules);
+  if (!parsed) return {{}, std::move(parsed.error)};
+  auto compiled = compile_ui_definition(
+      std::move(parsed.definition), std::move(parsed.resources), limits);
+  if (!compiled) return compiled;
+  if (!parsed.scoped_components.empty())
+    return compile_scoped_ui_components(
+        *compiled.program, parsed.scoped_components, registry, limits);
+  if (auto error = registry.validate(*compiled.program, limits))
+    return {{}, std::move(error)};
+  return compiled;
 }
 
 } // namespace flexUI
