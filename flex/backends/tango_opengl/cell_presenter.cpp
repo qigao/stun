@@ -54,6 +54,80 @@ void consume_text(std::size_t& used, std::size_t added, std::size_t limit) {
 
 } // namespace
 
+std::optional<CellPixelHit> CellPixelPlan::hit_test_projected(
+    double logical_x, double logical_y) const noexcept {
+    if (!std::isfinite(logical_x) || !std::isfinite(logical_y) ||
+        logical_x < 0.0 || logical_y < 0.0 ||
+        logical_x >= static_cast<double>(width_) ||
+        logical_y >= static_cast<double>(height_) ||
+        !positive_finite(cell_width_) || !positive_finite(cell_height_) ||
+        columns_ <= 0 || rows_ <= 0) return std::nullopt;
+    const double col = logical_x / static_cast<double>(cell_width_);
+    const double row = logical_y / static_cast<double>(cell_height_);
+    // Reject at the actual painted cell geometry rather than clamping into
+    // another cell when float framebuffer metrics are inconsistent.
+    if (col < 0.0 || row < 0.0 ||
+        col >= static_cast<double>(columns_) ||
+        row >= static_cast<double>(rows_)) return std::nullopt;
+    const int column = static_cast<int>(col);
+    const int cell_row = static_cast<int>(row);
+    const std::size_t offset =
+        static_cast<std::size_t>(cell_row) *
+        static_cast<std::size_t>(columns_) +
+        static_cast<std::size_t>(column);
+    if (offset >= leading_column_by_cell_.size())
+        return std::nullopt;
+    const int lead = leading_column_by_cell_[offset];
+    if (lead < 0 || lead > column || column - lead > 1)
+        return std::nullopt;
+    return CellPixelHit{
+        column, cell_row, lead, column != lead, grid_revision_
+    };
+}
+
+std::optional<CellPixelHit> CellPixelPlan::hit_test_logical(
+    double x, double y) const noexcept {
+    return hit_test_projected(x, y);
+}
+
+std::optional<CellPixelHit> CellPixelPlan::hit_test_framebuffer(
+    double framebuffer_x, double framebuffer_y) const noexcept {
+    if (!std::isfinite(framebuffer_x) || !std::isfinite(framebuffer_y) ||
+        !positive_finite(pixel_ratio_)) return std::nullopt;
+    return hit_test_projected(
+        framebuffer_x / static_cast<double>(pixel_ratio_),
+        framebuffer_y / static_cast<double>(pixel_ratio_));
+}
+
+std::optional<CellPixelHit> hit_test_window_pointer(
+    const CellPixelPlan& plan, double window_x, double window_y,
+    int window_width, int window_height,
+    int framebuffer_width, int framebuffer_height) {
+    if (window_width <= 0 || window_height <= 0 ||
+        framebuffer_width <= 0 || framebuffer_height <= 0)
+        throw std::invalid_argument(
+            "TangoOpenGL window and framebuffer extents must be positive");
+
+    const double expected_width =
+        static_cast<double>(plan.width()) * plan.pixel_ratio();
+    const double expected_height =
+        static_cast<double>(plan.height()) * plan.pixel_ratio();
+    if (!std::isfinite(expected_width) || !std::isfinite(expected_height) ||
+        std::lround(expected_width) != framebuffer_width ||
+        std::lround(expected_height) != framebuffer_height)
+        throw std::logic_error(
+            "TangoOpenGL pointer extents do not match the last painted cell frame");
+
+    if (!std::isfinite(window_x) || !std::isfinite(window_y) ||
+        window_x < 0.0 || window_y < 0.0 ||
+        window_x >= window_width || window_y >= window_height)
+        return std::nullopt;
+
+    return plan.hit_test_framebuffer(
+        window_x * (static_cast<double>(framebuffer_width) / window_width),
+        window_y * (static_cast<double>(framebuffer_height) / window_height));
+}
+
 CellPixelPlan prepare_cell_pixel_plan(const tui_grid_snapshot_t* snapshot,
                                       const CellPixelMetrics& metrics) {
     if (!snapshot || !metrics.expected_grid_revision ||
@@ -100,6 +174,11 @@ CellPixelPlan prepare_cell_pixel_plan(const tui_grid_snapshot_t* snapshot,
     plan.font_family_ = metrics.font_family;
     plan.font_size_ = metrics.font_size;
     plan.grid_revision_ = metrics.expected_grid_revision;
+    plan.columns_ = columns;
+    plan.rows_ = rows;
+    plan.cell_width_ = metrics.cell_width;
+    plan.cell_height_ = metrics.cell_height;
+    plan.leading_column_by_cell_.resize(count);
 
     std::size_t draw_ops = 0;
     std::size_t text_bytes = 0;
@@ -126,6 +205,12 @@ CellPixelPlan prepare_cell_pixel_plan(const tui_grid_snapshot_t* snapshot,
             const tui_color_t fg = reversed ? cell.bg : cell.fg;
             const float px = x * metrics.cell_width;
             const float py = y * metrics.cell_height;
+
+            const std::size_t cell_index =
+                static_cast<std::size_t>(y) * static_cast<std::size_t>(columns) +
+                static_cast<std::size_t>(x);
+            plan.leading_column_by_cell_[cell_index] =
+                cell.span == TUI_CELL_SPAN_CONTINUATION ? x - 1 : x;
 
             consume_op(draw_ops, metrics.max_draw_ops);
             plan.backgrounds_.push_back(
@@ -215,12 +300,41 @@ bool CellPixelPresenter::on_owner_thread() const noexcept {
     return std::this_thread::get_id() == owner_thread_;
 }
 
+std::optional<CellPixelHit> CellPixelPresenter::hit_test_window_pointer(
+    double window_x, double window_y,
+    int window_width, int window_height,
+    int framebuffer_width, int framebuffer_height) const {
+    if (!on_owner_thread())
+        throw std::logic_error(
+            "TangoOpenGL pointer input accessed outside its GL owner thread");
+    if (!submitted_plan_) return std::nullopt;
+    return tango_opengl::hit_test_window_pointer(
+        *submitted_plan_, window_x, window_y,
+        window_width, window_height, framebuffer_width, framebuffer_height);
+}
+
+const CellPixelPlan* CellPixelPresenter::last_submitted_plan() const {
+    if (!on_owner_thread())
+        throw std::logic_error(
+            "TangoOpenGL hit geometry accessed outside its GL owner thread");
+    return submitted_plan_ ? &*submitted_plan_ : nullptr;
+}
+
 void CellPixelPresenter::present(const tui_grid_snapshot_t* snapshot,
                                  const CellPixelMetrics& metrics) {
     if (!on_owner_thread())
-        throw std::logic_error("TangoOpenGL presenter accessed outside its GL owner thread");
-    const auto plan = prepare_cell_pixel_plan(snapshot, metrics);
+        throw std::logic_error(
+            "TangoOpenGL presenter accessed outside its GL owner thread");
+    auto plan = prepare_cell_pixel_plan(snapshot, metrics);
+
+    // Invalid font state is still a PRE-submit error: keep the previously
+    // submitted frame/hit plan. Once actual backend drawing begins, any
+    // error may have partially altered the external framebuffer, so never
+    // retain old pointer-hit geometry as if the old image were guaranteed.
+    validate_cell_pixel_font(*renderer_, plan);
+    submitted_plan_.reset();
     paint_cell_pixel_plan(*renderer_, plan);
+    submitted_plan_.emplace(std::move(plan));
 }
 
 } // namespace flex::tango_opengl

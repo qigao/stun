@@ -128,6 +128,46 @@ testing, window IME, device-loss/retirement or a bounded atlas-wide
 pipeline. Keep the public `RendererBackend::TangoOpenGL` factory
 unregistered, and #342 open, until those separate production gates pass.
 
+## Pixel-hit geometry from the actual submitted cell frame
+
+`CellPixelPlan` now freezes row/column extents, cell width/height and a
+canonical leading-cell map alongside the exact GPU background/glyph commands.
+`hit_test_logical()` and `hit_test_framebuffer()` use **those same**
+top-left-origin drawn cell bounds, returning a `CellPixelHit` with both
+the physical cell and the leading column for a wide grapheme. A click in a
+CJK continuation cell retains its physical column but targets the leading
+grapheme. Edges are left/top inclusive and right/bottom exclusive; NaN,
+infinite, negative and outside coordinates are not hits.
+
+`hit_test_window_pointer()` maps GLFW window logical coordinates through
+the **observed, same-generation** window/framebuffer extents and the plan's
+pixel ratio. Mismatched DPI/resize dimensions cause an explicit diagnostic,
+not a guessed scale or silent fallback. No terminal-cell layout is recomputed.
+
+`CellPixelPresenter::hit_test_window_pointer()` reads only the last
+synchronously successful submitted frame on its UI/GL owner thread. The
+presenter retains its owned plan rather than borrowing the mutable Tango
+source. Invalid source revision and unqualified font metrics are rejected
+**before** native drawing and preserve the old submitted hit plan. Failure
+after native drawing begins makes the previous hit plan unavailable, because
+partial external GPU output cannot be rolled back or trusted. The diagnostic
+`last_submitted_plan()` is a borrowed pointer for synchronous inspection
+only; do not retain it across another `present()`.
+
+The existing real Mesa framebuffer test asserts that physically sampled
+red/green/background pixels select precisely their expected cell from the
+GLFW-reported window/framebuffer dimensions and that stale-grid rejection
+keeps both the old GPU pixels and hit generation. Native CPU tests include
+CJK wide continuation, 1x/2x DPI mapping, exclusive boundaries, malformed
+coordinates, resize mismatch, owner-thread refusal and draw failures.
+
+The GLFW desktop demo can report mapped left-button cell clicks for
+diagnostics. **Still pending:** wiring actual window keyboard/IME/wheel and
+mouse events into the canonical Tango event queue, a real injected X11
+pointer/IME conformance, context recreation, device-generation invalidation
+and GPU in-flight completion/retirement. Do not register production
+`RendererBackend::TangoOpenGL` yet.
+
 ## Native TTY presenter
 
 Owns/borrows the terminal, validates the bounded buffer, produces VT diff

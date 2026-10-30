@@ -10,6 +10,7 @@
 #include <tui_grid_snapshot.h>
 #include <GLFW/glfw3.h>
 
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <exception>
@@ -117,12 +118,54 @@ int main(int argc, char** argv) {
         layout.font_family = gl.font_family;
         layout.expected_grid_revision = 1;
 
+        bool mouse_pressed = false;
         while (!glfwWindowShouldClose(window)) {
             glfwPollEvents();
             if (glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS)
                 glfwSetWindowShouldClose(window, GLFW_TRUE);
+
+            int window_width = 0, window_height = 0;
+            int framebuffer_width = 0, framebuffer_height = 0;
+            glfwGetWindowSize(window, &window_width, &window_height);
+            glfwGetFramebufferSize(window, &framebuffer_width, &framebuffer_height);
+            if (window_width != 768 || window_height != 480 ||
+                framebuffer_width <= 0 || framebuffer_height <= 0) {
+                throw std::logic_error(
+                    "TangoGL demo requires its exact fixed window/framebuffer generation");
+            }
+            const float x_scale = static_cast<float>(framebuffer_width) / window_width;
+            const float y_scale = static_cast<float>(framebuffer_height) / window_height;
+            if (!std::isfinite(x_scale) || !std::isfinite(y_scale) ||
+                x_scale <= 0.0f || std::fabs(x_scale - y_scale) > 0.001f) {
+                throw std::logic_error(
+                    "TangoGL demo cannot map nonuniform host DPI into cell pixels");
+            }
+            layout.pixel_ratio = x_scale;
             presenter->present(frame.snapshot, layout);
             glfwSwapBuffers(window);
+
+            // Diagnostic host pointer mapping only. Future product work must
+            // route events into Tango's existing input model, not a second VM.
+            const bool pressed =
+                glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS;
+            if (pressed && !mouse_pressed) {
+                const auto* submitted = presenter->last_submitted_plan();
+                if (!submitted)
+                    throw std::logic_error("TangoGL has no submitted frame for hit testing");
+                double mouse_x = 0.0, mouse_y = 0.0;
+                glfwGetCursorPos(window, &mouse_x, &mouse_y);
+                const auto hit = presenter->hit_test_window_pointer(
+                    mouse_x, mouse_y, window_width, window_height,
+                    framebuffer_width, framebuffer_height);
+                if (hit) {
+                    std::cout << "TANGO_GL_CELL_HIT row=" << hit->row
+                              << " column=" << hit->column
+                              << " leading=" << hit->leading_column
+                              << " continuation=" << hit->continuation
+                              << " revision=" << hit->grid_revision << '\n';
+                }
+            }
+            mouse_pressed = pressed;
         }
         // Presenter and gCanvas GPU resources destruct with current GL
         // context, before glfwDestroyWindow below.
