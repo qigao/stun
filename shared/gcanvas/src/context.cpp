@@ -125,6 +125,18 @@ namespace gcanvas
 
     Context::~Context() = default;
 
+    Image& Context::create_image_verified(
+        const std::string& file_path,
+        const std::vector<std::uint8_t>& trusted_encoded_revision,
+        ImageConfig config)
+    {
+        (void)file_path;
+        (void)trusted_encoded_revision;
+        (void)config;
+        throw std::logic_error(
+            "gCanvas verified encoded file revisions are unsupported by this backend");
+    }
+
     Context::ShadowKernel Context::make_filter_kernel(float blur_radius, float spread_radius,
                                                        float target_alpha,
                                                        std::size_t maximum_samples,

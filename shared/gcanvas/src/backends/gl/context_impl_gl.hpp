@@ -220,6 +220,10 @@ namespace GCANVAS_GL_PROFILE_NAMESPACE
         void resize_context(int width, int height) override;
         void set_vsync(bool enabled) override;
         Image& create_image(const std::string& file_path, ImageConfig config = {}) override;
+        Image& create_image_verified(
+            const std::string& file_path,
+            const std::vector<std::uint8_t>& trusted_encoded_revision,
+            ImageConfig config = {}) override;
         Image& create_image(int width, int height, int components, const unsigned char* data,
                             std::size_t size, ImageConfig config = {}) override;
         Font& create_font(const std::string& file_path) override;
@@ -276,6 +280,12 @@ namespace GCANVAS_GL_PROFILE_NAMESPACE
                                          float dilation_radius,
                                          const Transform& transform) override;
         void draw_inset_shadow(const InsetShadow& shadow) override;
+        // Shared existing GL/GLES file reader: optional independently trusted
+        // expected encoded revision, checked before touching STB or GPU.
+        Image& create_file_image(
+            const std::string& file_path,
+            const std::vector<std::uint8_t>* trusted_encoded_revision,
+            ImageConfig config);
         void draw_text_impl(float x, float y, const std::u32string& text,
                             const Transform& transform, bool alpha_mask,
                             const vec2* inset_sample_offset = nullptr,

@@ -1365,6 +1365,30 @@ namespace GCANVAS_GL_PROFILE_NAMESPACE
 
     Image& ContextImplGl::create_image(const std::string& file_path, ImageConfig config)
     {
+        return create_file_image(file_path, nullptr, config);
+    }
+
+    Image& ContextImplGl::create_image_verified(
+        const std::string& file_path,
+        const std::vector<std::uint8_t>& trusted_encoded_revision,
+        ImageConfig config)
+    {
+        if (trusted_encoded_revision.empty())
+            throw std::invalid_argument(
+                "gCanvas trusted encoded source revision must not be empty");
+        return create_file_image(file_path, &trusted_encoded_revision, config);
+    }
+
+    Image& ContextImplGl::create_file_image(
+        const std::string& file_path,
+        const std::vector<std::uint8_t>* trusted_encoded_revision,
+        ImageConfig config)
+    {
+        if (trusted_encoded_revision &&
+            trusted_encoded_revision->size() >
+                _resource_limits.max_image_encoded_source_bytes)
+            throw std::length_error(
+                "gCanvas trusted source exceeds encoded file limit");
         if (_owned_images.size() >= _resource_limits.max_images)
             throw std::length_error("gCanvas image limit reached");
 
@@ -1388,6 +1412,10 @@ namespace GCANVAS_GL_PROFILE_NAMESPACE
             throw std::length_error("gCanvas STB image encoded input exceeds INT_MAX");
 
         const auto encoded_size = static_cast<std::size_t>(encoded_length);
+        if (trusted_encoded_revision &&
+            encoded_size != trusted_encoded_revision->size())
+            throw std::runtime_error(
+                "gCanvas encoded source is not the trusted revision length");
         (void)image_creation_peak_usage(0u, encoded_size, 0u);
         std::vector<stbi_uc> frozen(encoded_size);
         source.seekg(0, std::ios::beg);
@@ -1395,6 +1423,15 @@ namespace GCANVAS_GL_PROFILE_NAMESPACE
                          static_cast<std::streamsize>(encoded_size)))
             throw std::runtime_error("Could not capture complete image source: " + file_path);
         source.close(); // Path identity is no longer read by this transaction.
+        // Strict content admission. A concurrent in-place rewrite may produce
+        // old, new or torn bytes; only the exact independently trusted source
+        // is allowed to reach STB and GPU. Equal content does NOT prove inode
+        // generation, publication time or absence of an ABA rewrite.
+        if (trusted_encoded_revision &&
+            !std::equal(frozen.begin(), frozen.end(),
+                        trusted_encoded_revision->begin()))
+            throw std::runtime_error(
+                "gCanvas encoded source differs from the trusted revision");
 
         int width = 0, height = 0, source_components = 0;
         if (!stbi_info_from_memory(

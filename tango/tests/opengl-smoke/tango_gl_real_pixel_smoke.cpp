@@ -20,6 +20,7 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <chrono>
 #include <cstdint>
 #include <cstdio>
@@ -1143,6 +1144,14 @@ void exercise_actual_gl_mutation_barrier(
             "Real encoded PNG was not written to the native snapshot path");
     const auto encoded_bytes =
         static_cast<std::size_t>(static_cast<std::streamoff>(captured_file.tellg()));
+    // The trusted revision comes from this test's completed single-writer
+    // publication, not from the concurrently mutable source being checked.
+    std::vector<std::uint8_t> trusted_red_encoded(encoded_bytes);
+    captured_file.seekg(0);
+    require(static_cast<bool>(captured_file.read(
+                reinterpret_cast<char*>(trusted_red_encoded.data()),
+                static_cast<std::streamsize>(trusted_red_encoded.size()))),
+            "Could not capture independently committed red PNG version");
     captured_file.close();
     const auto original_source_limit = context->image_encoded_source_limit();
     require(original_source_limit >= encoded_bytes,
@@ -1159,7 +1168,8 @@ void exercise_actual_gl_mutation_barrier(
             "Encoded PNG source-size limit failed before staging a real file");
 
     context->set_image_encoded_source_limit(encoded_bytes);
-    auto& frozen_red = context->create_image(frozen_path);
+    auto& frozen_red = context->create_image_verified(
+        frozen_path, trusted_red_encoded);
     require(frozen_red.pixels().size() == red.size() &&
             std::equal(frozen_red.pixels().begin(),
                        frozen_red.pixels().end(), red.begin()) &&
@@ -1201,9 +1211,26 @@ void exercise_actual_gl_mutation_barrier(
     // later path replacement. Creating a second Image reads the NEW green
     // PNG and uses its own fresh encoded byte snapshot.
     image.write_to_file(replacement_path); // Already committed green image.
+    std::ifstream green_file(replacement_path, std::ios::binary | std::ios::ate);
+    require(static_cast<bool>(green_file) && green_file.tellg() > 0,
+            "Missing independently published green PNG");
+    std::vector<std::uint8_t> trusted_green_encoded(
+        static_cast<std::size_t>(static_cast<std::streamoff>(green_file.tellg())));
+    green_file.seekg(0);
+    require(static_cast<bool>(green_file.read(
+                reinterpret_cast<char*>(trusted_green_encoded.data()),
+                static_cast<std::streamsize>(trusted_green_encoded.size()))),
+            "Could not read independently committed green PNG version");
+    green_file.close();
     require(std::rename(replacement_path.c_str(), frozen_path.c_str()) == 0,
             "Unable to replace the real PNG source pathname atomically");
-    auto& frozen_green = context->create_image(frozen_path);
+    bool stale_revision_denied = false;
+    try { (void)context->create_image_verified(frozen_path, trusted_red_encoded); }
+    catch (const std::runtime_error&) { stale_revision_denied = true; }
+    require(stale_revision_denied && audit.uploads == initial_file_uploads + 1,
+            "Atomic path replacement silently accepted a stale encoded revision");
+    auto& frozen_green = context->create_image_verified(
+        frozen_path, trusted_green_encoded);
     require(frozen_green.pixels().size() == green.size() &&
             std::equal(frozen_green.pixels().begin(),
                        frozen_green.pixels().end(), green.begin()) &&
@@ -1247,6 +1274,75 @@ void exercise_actual_gl_mutation_barrier(
             std::equal(frozen_green.pixels().begin(),
                        frozen_green.pixels().end(), green.begin()),
             "Invalid frozen source corrupted previous Images or uploaded GL data");
+    // Same-length in-place edits cannot be qualified by size or inode.
+    // The real native file and GL upload owner must accept only exactly
+    // trusted red source bytes or reject the first-read writer race.
+    {
+        std::ofstream reset(frozen_path, std::ios::binary | std::ios::trunc);
+        reset.write(reinterpret_cast<const char*>(trusted_red_encoded.data()),
+                    static_cast<std::streamsize>(trusted_red_encoded.size()));
+        require(static_cast<bool>(reset),
+                "Could not restore committed source for writer-race test");
+    }
+    const int race_uploads_before = audit.uploads;
+    std::atomic<bool> race_start{false};
+    std::atomic<bool> writer_succeeded{false};
+    std::thread concurrent_writer([&] {
+        while (!race_start.load(std::memory_order_acquire))
+            std::this_thread::yield();
+        std::fstream changing(frozen_path,
+                              std::ios::binary | std::ios::in | std::ios::out);
+        if (changing) {
+            changing.seekp(0);
+            changing.put('Q'); // Same encoded length/inode, invalid PNG.
+            changing.flush();
+            writer_succeeded.store(static_cast<bool>(changing),
+                                   std::memory_order_release);
+        }
+    });
+    race_start.store(true, std::memory_order_release);
+    bool accepted_trusted_red = false;
+    bool rejected_concurrent_source = false;
+    try {
+        auto& raced = context->create_image_verified(
+            frozen_path, trusted_red_encoded);
+        accepted_trusted_red =
+            raced.pixels().size() == red.size() &&
+            std::equal(raced.pixels().begin(), raced.pixels().end(),
+                       red.begin());
+    } catch (const std::runtime_error&) {
+        rejected_concurrent_source = true;
+    }
+    concurrent_writer.join();
+    require(writer_succeeded.load(std::memory_order_acquire),
+            "Real concurrent same-inode source writer did not complete");
+    require((accepted_trusted_red &&
+             audit.uploads == race_uploads_before + 1) ||
+            (rejected_concurrent_source &&
+             audit.uploads == race_uploads_before),
+            "Writer race accepted untrusted bytes or published a partial GPU image");
+    bool changed_revision_denied = false;
+    try { (void)context->create_image_verified(frozen_path, trusted_red_encoded); }
+    catch (const std::runtime_error&) { changed_revision_denied = true; }
+    require(changed_revision_denied &&
+            audit.uploads == race_uploads_before +
+                (accepted_trusted_red ? 1 : 0),
+            "Known same-size in-place overwrite bypassed version verification");
+    require(frozen_red.pixels().size() == red.size() &&
+            std::equal(frozen_red.pixels().begin(), frozen_red.pixels().end(),
+                       red.begin()) &&
+            frozen_green.pixels().size() == green.size() &&
+            std::equal(frozen_green.pixels().begin(), frozen_green.pixels().end(),
+                       green.begin()),
+            "External source rewrite corrupted existing CPU Image versions");
+    glBindTexture(GL_TEXTURE_2D, frozen_red_id);
+    glGetTexImage(GL_TEXTURE_2D, 0, GL_RGBA, GL_UNSIGNED_BYTE, actual.data());
+    require(actual == red && glGetError() == GL_NO_ERROR,
+            "Concurrent source rewrite modified prior red GPU texels");
+    glBindTexture(GL_TEXTURE_2D, frozen_green_id);
+    glGetTexImage(GL_TEXTURE_2D, 0, GL_RGBA, GL_UNSIGNED_BYTE, actual.data());
+    require(actual == green && glGetError() == GL_NO_ERROR,
+            "Concurrent source rewrite modified prior green GPU texels");
     require(std::remove(frozen_path.c_str()) == 0,
             "Native frozen PNG regression did not clean its temporary source");
     context->set_image_encoded_source_limit(original_source_limit);
@@ -1292,6 +1388,8 @@ void exercise_actual_gl_mutation_barrier(
               << "TANGO_GL_FROZEN_ENCODED_PNG_LIMIT_REFUSED=1\n"
               << "TANGO_GL_FROZEN_PNG_SOURCE_REPLACEMENT=1\n"
               << "TANGO_GL_FROZEN_PNG_INVALID_REJECTED=1\n"
+              << "TANGO_GL_TRUSTED_ENCODED_REVISION_REJECTED=1\n"
+              << "TANGO_GL_CONCURRENT_INPLACE_VERSION_GUARD=1\n"
               << "TANGO_GL_ACTUAL_GL_DELETE_AUDIT=1\n";
 }
 
