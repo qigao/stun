@@ -22,6 +22,7 @@
 #include <array>
 #include <chrono>
 #include <cstdint>
+#include <cstdio>
 #include <cstdlib>
 #include <exception>
 #include <fstream>
@@ -880,7 +881,8 @@ void actual_context_framebuffer_size(void* user, int* width, int* height) {
 // client wait completes the GPU and then green pixels must reach the same
 // real GL texture via glTexSubImage2D. Context teardown audits GL deletes.
 void exercise_actual_gl_mutation_barrier(
-    GLFWwindow* window, const std::string& font_file) {
+    GLFWwindow* window, const std::string& font_file,
+    int generation, const std::string& evidence_prefix) {
     require(window && glfwGetCurrentContext() == window,
             "Native GPU mutation test requires exact current GLFW context");
     NativeMutationWitness audit{window};
@@ -1126,6 +1128,129 @@ void exercise_actual_gl_mutation_barrier(
                         gcanvas::NativeGpuResourceKind::ImageTexture;
                 }) == 2,
             "Accepted native GL creation did not add exactly one real image texture");
+
+    // QUALIFY FILE SNAPSHOTS ON THE ORIGINAL GL CONTEXT. This creates two
+    // actual PNG sources from already qualified gCanvas Image bytes, then
+    // exercises bounded single-read STB metadata+decode against the same
+    // immutable encoded byte buffer, never a second read of the path.
+    const std::string frozen_path = evidence_prefix + ".frozen." +
+        std::to_string(generation) + ".png";
+    const std::string replacement_path = evidence_prefix + ".replacement." +
+        std::to_string(generation) + ".png";
+    second_image.write_to_file(frozen_path); // First source: red RGBA.
+    std::ifstream captured_file(frozen_path, std::ios::binary | std::ios::ate);
+    require(static_cast<bool>(captured_file) && captured_file.tellg() > 1,
+            "Real encoded PNG was not written to the native snapshot path");
+    const auto encoded_bytes =
+        static_cast<std::size_t>(static_cast<std::streamoff>(captured_file.tellg()));
+    captured_file.close();
+    const auto original_source_limit = context->image_encoded_source_limit();
+    require(original_source_limit >= encoded_bytes,
+            "Real gCanvas encoded source exceeds the default bounded file cap");
+    const int initial_file_uploads = audit.uploads;
+    const auto snapshot_before = creation_inventory;
+
+    context->set_image_encoded_source_limit(encoded_bytes - 1u);
+    bool file_snapshot_budget_denied = false;
+    try { (void)context->create_image(frozen_path); }
+    catch (const std::length_error&) { file_snapshot_budget_denied = true; }
+    require(file_snapshot_budget_denied &&
+            audit.uploads == initial_file_uploads,
+            "Encoded PNG source-size limit failed before staging a real file");
+
+    context->set_image_encoded_source_limit(encoded_bytes);
+    auto& frozen_red = context->create_image(frozen_path);
+    require(frozen_red.pixels().size() == red.size() &&
+            std::equal(frozen_red.pixels().begin(),
+                       frozen_red.pixels().end(), red.begin()) &&
+            audit.uploads == initial_file_uploads + 1,
+            "One frozen PNG metadata/decode buffer did not produce red image bytes");
+    std::vector<gcanvas::NativeGpuResourceId> snapshot_after;
+    require(context->native_gpu_resource_ids(snapshot_after),
+            "The frozen source image did not publish native GL resource identities");
+    const auto newly_uploaded_image = [](const auto& previous,
+                                         const auto& current) -> GLuint {
+        for (const auto& id : current) {
+            if (id.kind != gcanvas::NativeGpuResourceKind::ImageTexture)
+                continue;
+            const auto seen = std::any_of(
+                previous.begin(), previous.end(), [&](const auto& prior) {
+                    return prior.kind == id.kind &&
+                           prior.native_name == id.native_name;
+                });
+            if (!seen) return static_cast<GLuint>(id.native_name);
+        }
+        return 0u;
+    };
+    const GLuint frozen_red_id = newly_uploaded_image(
+        snapshot_before, snapshot_after);
+    require(frozen_red_id != 0u,
+            "The frozen PNG was not uploaded to a new actual GL texture");
+    glBindTexture(GL_TEXTURE_2D, frozen_red_id);
+    glGetTexImage(GL_TEXTURE_2D, 0, GL_RGBA,
+                  GL_UNSIGNED_BYTE, actual.data());
+    require(actual == red && glGetError() == GL_NO_ERROR,
+            "Immutable PNG red image had incorrect actual GPU texels");
+    // A second pathname may encode the same dimensions with a DIFFERENT
+    // compressed byte size. Only the first frozen source is qualified by
+    // the exact-size limit, so restore the default before the rename.
+    context->set_image_encoded_source_limit(original_source_limit);
+
+    // Replace the file pathname after the first Image has been captured.
+    // The existing red Image must never borrow a filename or bytes from a
+    // later path replacement. Creating a second Image reads the NEW green
+    // PNG and uses its own fresh encoded byte snapshot.
+    image.write_to_file(replacement_path); // Already committed green image.
+    require(std::rename(replacement_path.c_str(), frozen_path.c_str()) == 0,
+            "Unable to replace the real PNG source pathname atomically");
+    auto& frozen_green = context->create_image(frozen_path);
+    require(frozen_green.pixels().size() == green.size() &&
+            std::equal(frozen_green.pixels().begin(),
+                       frozen_green.pixels().end(), green.begin()) &&
+            frozen_red.pixels().size() == red.size() &&
+            std::equal(frozen_red.pixels().begin(),
+                       frozen_red.pixels().end(), red.begin()) &&
+            audit.uploads == initial_file_uploads + 2,
+            "Replacing a pathname mutated an already decoded immutable Image");
+    std::vector<gcanvas::NativeGpuResourceId> green_inventory;
+    require(context->native_gpu_resource_ids(green_inventory),
+            "New image decoded from replacement source lacks native GPU identity");
+    const GLuint frozen_green_id = newly_uploaded_image(
+        snapshot_after, green_inventory);
+    require(frozen_green_id != 0u &&
+            frozen_green_id != frozen_red_id,
+            "Two different PNG snapshots unexpectedly shared one native texture");
+    glBindTexture(GL_TEXTURE_2D, frozen_green_id);
+    glGetTexImage(GL_TEXTURE_2D, 0, GL_RGBA,
+                  GL_UNSIGNED_BYTE, actual.data());
+    require(actual == green && glGetError() == GL_NO_ERROR,
+            "Replaced-path PNG did not upload the new green GPU texels");
+
+    // Malformed encoded bytes must fail before creating another GPU Image;
+    // they cannot silently reuse a stale metadata result or a fallback
+    // parser. Earlier red and green Image snapshots remain valid.
+    {
+        std::ofstream invalid(frozen_path, std::ios::binary | std::ios::trunc);
+        invalid << "not-a-valid-PNG";
+        require(static_cast<bool>(invalid),
+                "Could not stage the invalid-source frozen PNG regression");
+    }
+    bool invalid_frozen_source_denied = false;
+    try { (void)context->create_image(frozen_path); }
+    catch (const std::runtime_error&) { invalid_frozen_source_denied = true; }
+    require(invalid_frozen_source_denied &&
+            audit.uploads == initial_file_uploads + 2 &&
+            frozen_red.pixels().size() == red.size() &&
+            std::equal(frozen_red.pixels().begin(),
+                       frozen_red.pixels().end(), red.begin()) &&
+            frozen_green.pixels().size() == green.size() &&
+            std::equal(frozen_green.pixels().begin(),
+                       frozen_green.pixels().end(), green.begin()),
+            "Invalid frozen source corrupted previous Images or uploaded GL data");
+    require(std::remove(frozen_path.c_str()) == 0,
+            "Native frozen PNG regression did not clean its temporary source");
+    context->set_image_encoded_source_limit(original_source_limit);
+
     // Failed validation (including a malformed input span) must not
     // overwrite old CPU bytes or issue a native driver update.
     bool invalid_span_refused = false;
@@ -1164,6 +1289,9 @@ void exercise_actual_gl_mutation_barrier(
               << "TANGO_GL_FONT_FILE_PREALLOC_BUDGET_DENIED=1\n"
               << "TANGO_GL_FONT_ATLAS_PREALLOC_BUDGET_DENIED=1\n"
               << "TANGO_GL_IMAGE_CREATION_AFTER_BUDGET_RESTORED=1\n"
+              << "TANGO_GL_FROZEN_ENCODED_PNG_LIMIT_REFUSED=1\n"
+              << "TANGO_GL_FROZEN_PNG_SOURCE_REPLACEMENT=1\n"
+              << "TANGO_GL_FROZEN_PNG_INVALID_REJECTED=1\n"
               << "TANGO_GL_ACTUAL_GL_DELETE_AUDIT=1\n";
 }
 
@@ -1419,7 +1547,8 @@ void exercise_orderly_context_recreation(
             // Independent actual gCanvas Context drives the real
             // glTexSubImage2D/glDeleteTextures/glDeleteProgram paths through
             // the same optional host mutation-admission API.
-            exercise_actual_gl_mutation_barrier(native.handle, regular_font);
+            exercise_actual_gl_mutation_barrier(
+                native.handle, regular_font, generation, screenshot);
         } // Destroy the actual GLFW GL context AFTER GPU resource cleanup.
         require(glfwGetCurrentContext() == nullptr,
                 "Destroyed native GL context remains bound to the UI owner");

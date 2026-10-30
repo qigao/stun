@@ -19,6 +19,22 @@ static inline int stbi_info(const char*, int*, int*, int*)
     return 0;
 }
 
+/* Compile-only fixture: neither the original file API nor the immutable
+ * source-memory API accepts an image. Real STB parsing/decoding is always
+ * exercised by the actual desktop GLES and Mesa package/runtime CI.
+ */
+static inline int stbi_info_from_memory(
+    const stbi_uc*, int, int*, int*, int*)
+{
+    return 0;
+}
+
+static inline stbi_uc* stbi_load_from_memory(
+    const stbi_uc*, int, int*, int*, int*, int)
+{
+    return 0;
+}
+
 static inline stbi_uc* stbi_load(const char*, int*, int*, int*, int)
 {
     return 0;

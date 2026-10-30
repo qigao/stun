@@ -685,6 +685,66 @@ The existing GPU serial Fence/Lease, CPU rollback and original
 Context ownership requirements are unchanged. No production
 TangoOpenGL factory registration or additional CI/consumer.
 
+## One-read bounded encoded Image source and STB decode consistency (Draft)
+
+The prior GL/GLES file-Image creation path used
+`stbi_info(path)` to inspect dimensions but then used
+`stbi_load(path)` to reopen the same **mutable path**. If a producer
+replaced that file between calls, the CPU/GPU creation budget and
+decoded contents could describe different sources even if they had
+the same dimensions. Comparing dimensions after the second load
+could not prove content identity.
+
+The existing gCanvas `ContextImplGl::create_image(path)` now opens
+the file **once**, validates its encoded byte length against a
+separate explicit file-source bound (**128 MiB default, 512 MiB
+maximum**) and the current creation peak budget BEFORE allocating
+the encoded source vector, then reads that many bytes completely
+into a single frozen owned buffer. The pathname is never reopened
+during this creation transaction. The existing STB decoder
+performs both `stbi_info_from_memory` and
+`stbi_load_from_memory` on that **same immutable buffer**.
+Actual decoded width/height must match the inspected dimensions.
+The existing creation budget then includes the encoded source
+vector, decoded RGBA staging, persistent CPU Image copy and
+future native GL/GLES base texture.
+
+There is **one original STB decoder**, no alternate file format
+parser, fallback image or shadow GL engine. A missing/empty,
+oversized, truncated or unsupported encoded file fails closed.
+The source pathname is used only for diagnostics and Image name
+after the file bytes have been captured. A later rename/replacement
+may affect a NEW independent call, but cannot change the earlier
+Image's retained CPU pixels or uploaded native texture.
+
+The original Mesa/Xvfb GPU test now writes actual red PNG pixels
+through the existing gCanvas Image writer, confirms a one-byte
+too-small encoded-source limit rejects file creation before staging,
+then creates and checks a real GL Image decoded from those bytes.
+It atomically replaces the pathname with a separately written
+green PNG, checks the original red Image/GL texels are unchanged,
+and verifies a new call loads new green pixels and a different
+native texture. Invalid encoded data on the same path must fail
+without another native GPU upload. The existing FreeType budget,
+GLsync, original XTest/focus/resize and CPU rollback tests remain.
+
+The existing Android lifecycle **compile-only** STB fixture is
+updated with the standard memory-metadata and memory-decode
+signatures returning unsupported, consistent with its existing
+non-decoding file API stub. That fixture is not a second decoder
+and cannot be used as image acceptance evidence.
+
+**Boundary:** copying source bytes once into private memory
+prevents **post-capture path TOCTOU** between inspection and
+decoding. It does NOT make the underlying initial multi-byte
+file read atomic against a writer concurrently modifying the
+same opened file, nor prove filesystem-level snapshot isolation.
+Immutable file descriptors/content-addressed store revisions,
+hostile concurrent file mutation detection, image-decode
+temporary allocator overhead, physical VRAM and abrupt device
+loss remain separate qualification gates. The current
+TangoOpenGL production factory remains disabled.
+
 ## Native TTY presenter
 
 Owns/borrows the terminal, validates the bounded buffer, produces VT diff

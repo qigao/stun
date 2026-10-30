@@ -10,6 +10,7 @@
 
 #include "font_impl_gl.hpp"
 #include <stb_image.h>
+#include <fstream>
 #include "../../path_tessellator.hpp"
 #include "../../resources.hpp"
 #include "../../utf8.hpp"
@@ -1365,19 +1366,52 @@ namespace GCANVAS_GL_PROFILE_NAMESPACE
     Image& ContextImplGl::create_image(const std::string& file_path, ImageConfig config)
     {
         if (_owned_images.size() >= _resource_limits.max_images)
-        {
             throw std::length_error("gCanvas image limit reached");
-        }
+
+        // Open the source path ONCE, validate encoded byte bounds BEFORE
+        // staging the input, then use these identical captured bytes for
+        // STB metadata and decoded pixels. Never re-open the path after
+        // the size/format check; a rename/replacement cannot switch the
+        // decoded source halfway through the creation transaction.
+        std::ifstream source(file_path, std::ios::binary | std::ios::ate);
+        if (!source)
+            throw std::runtime_error("Could not open image: " + file_path);
+        const std::streamoff encoded_length = source.tellg();
+        if (encoded_length <= 0)
+            throw std::runtime_error("Image file is empty or unreadable: " + file_path);
+        if (encoded_length >
+            static_cast<std::streamoff>(_resource_limits.max_image_encoded_source_bytes))
+            throw std::length_error(
+                "gCanvas encoded image file exceeds bounded source snapshot budget");
+        if (encoded_length > static_cast<std::streamoff>(
+                (std::numeric_limits<int>::max)()))
+            throw std::length_error("gCanvas STB image encoded input exceeds INT_MAX");
+
+        const auto encoded_size = static_cast<std::size_t>(encoded_length);
+        (void)image_creation_peak_usage(0u, encoded_size, 0u);
+        std::vector<stbi_uc> frozen(encoded_size);
+        source.seekg(0, std::ios::beg);
+        if (!source.read(reinterpret_cast<char*>(frozen.data()),
+                         static_cast<std::streamsize>(encoded_size)))
+            throw std::runtime_error("Could not capture complete image source: " + file_path);
+        source.close(); // Path identity is no longer read by this transaction.
+
         int width = 0, height = 0, source_components = 0;
-        if (!stbi_info(file_path.c_str(), &width, &height, &source_components))
-            throw std::runtime_error("Could not inspect image: " + file_path);
+        if (!stbi_info_from_memory(
+                frozen.data(), static_cast<int>(frozen.size()),
+                &width, &height, &source_components))
+            throw std::runtime_error("Could not inspect frozen image: " + file_path);
         (void)source_components;
         const auto base_bytes = checked_new_image_bytes(width, height, 4);
-        (void)image_creation_peak_usage(base_bytes, base_bytes, base_bytes);
-        auto owned = std::make_unique<ImageImplGl>(file_path, config);
-        if (owned->pixels().size() != base_bytes)
-            throw std::logic_error(
-                "gCanvas image source changed size between preflight and decode");
+        if (encoded_size > (std::numeric_limits<std::size_t>::max)() - base_bytes)
+            throw std::overflow_error("gCanvas file source/decode staging byte overflow");
+
+        // Encoded source, STB decoded RGBA staging, persistent CPU Image copy
+        // and new base GL/GLES texture are all counted concurrently.
+        (void)image_creation_peak_usage(base_bytes, encoded_size + base_bytes,
+                                        base_bytes);
+        auto owned = std::make_unique<ImageImplGl>(
+            file_path, frozen.data(), frozen.size(), width, height, config);
         Image& image = *owned;
         register_image(&image);
         return own_image(std::move(owned));

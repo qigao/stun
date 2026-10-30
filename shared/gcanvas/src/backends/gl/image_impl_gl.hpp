@@ -16,7 +16,12 @@ namespace GCANVAS_GL_PROFILE_NAMESPACE
     class ImageImplGl : public Image
     {
     public:
-        ImageImplGl(std::string file_path, ImageConfig imageConfig);
+        // Decode only the captured encoded bytes that were inspected by
+        // the same owning Context. The source path is diagnostic only.
+        ImageImplGl(std::string source_path,
+                    const unsigned char* frozen_encoded, std::size_t frozen_size,
+                    int inspected_width, int inspected_height,
+                    ImageConfig imageConfig);
         ImageImplGl(int width, int height, int components, const unsigned char* data,
                         std::size_t size, ImageConfig imageConfig);
         ~ImageImplGl();
