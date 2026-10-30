@@ -47,8 +47,8 @@ spec("FlexUI uses installed JinjaCMeta only as a staged XML author compiler") {
       </ui>
     )");
     check_true(static_cast<bool>(compiled));
-    if (!compiled) return;
-    check_equal(compiled.program->name(), "JinjaStudio");
+    if (compiled) {
+      check_equal(compiled.program->name(), "JinjaStudio");
     check_equal(compiled.program->definition().root.children.size(), 2u);
     check_equal(compiled.program->definition().root.children[0].id, "action-0");
     check_equal(compiled.program->definition().root.children[1].id, "action-1");
@@ -65,6 +65,7 @@ spec("FlexUI uses installed JinjaCMeta only as a staged XML author compiler") {
     check_not_null(box.get_by_id("action-1"));
     check_not_null(dynamic_cast<flexUI::ButtonWidget*>(
         box.get_by_id("action-0")->widget));
+    }
   }
 
   it("renders zero matching branches without an extra UI root") {
@@ -76,8 +77,9 @@ spec("FlexUI uses installed JinjaCMeta only as a staged XML author compiler") {
       </ui>
     )", StudioInputs{0});
     check_true(static_cast<bool>(compiled));
-    if (!compiled) return;
-    check_equal(compiled.program->definition().root.children.size(), 0u);
+    if (compiled) {
+      check_equal(compiled.program->definition().root.children.size(), 0u);
+    }
   }
 
   it("autoescapes interpolated XML markup instead of creating injected nodes") {
@@ -87,12 +89,13 @@ spec("FlexUI uses installed JinjaCMeta only as a staged XML author compiler") {
       </ui>
     )", StudioInputs{1});
     check_true(static_cast<bool>(compiled));
-    if (!compiled) return;
-    const auto& root = compiled.program->definition().root;
+    if (compiled) {
+      const auto& root = compiled.program->definition().root;
     check_equal(root.tag, "label");
     check_equal(root.children.size(), 0u);
     check_equal(std::get<std::string>(root.properties.at("text")),
                 "<button id=\"injected\" />");
+    }
   }
 
   it("reports template syntax and strict-undefined failures separately") {
@@ -169,11 +172,12 @@ spec("FlexUI uses installed JinjaCMeta only as a staged XML author compiler") {
         "<ui name='Recovered'><button id='save'>Save</button></ui>",
         StudioInputs{1});
     check_true(static_cast<bool>(recovered));
-    if (!recovered) return;
-    const auto installed = flexUI::UiDocumentInstantiator::instantiate(
-        box, *recovered.program, flexUI::WidgetRegistry::builtins());
-    check_true(static_cast<bool>(installed));
-    check_not_null(box.get_by_id("save"));
+    if (recovered) {
+      const auto installed = flexUI::UiDocumentInstantiator::instantiate(
+          box, *recovered.program, flexUI::WidgetRegistry::builtins());
+      check_true(static_cast<bool>(installed));
+      check_not_null(box.get_by_id("save"));
+    }
   }
 
   it("disables implicit Jinja loader and rejects invalid context descriptors") {
