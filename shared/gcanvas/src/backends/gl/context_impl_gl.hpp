@@ -247,6 +247,7 @@ namespace GCANVAS_GL_PROFILE_NAMESPACE
         void update_image(Image* image) override;
         bool uploaded_native_texture_payload_bytes(
             std::size_t& out) const override;
+        std::size_t retained_internal_cpu_pixel_payload_bytes() const override;
         void prepare() override;
         void draw_tessellated_path(const Path& path, const Paint& paint, float line_width,
                                    const Transform& transform) override;

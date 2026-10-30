@@ -156,6 +156,10 @@ namespace gcanvas
         {
             throw std::runtime_error("Font file is empty: " + file_path);
         }
+        // The backing source-file bytes are newly allocated and continue
+        // to coexist with the atlas staging/copy until loading completes.
+        font_file_staging_bytes_ = file_size;
+        admit_atlas_creation(0u); // Fail BEFORE allocating the file buffer.
         std::vector<unsigned char> file_buffer(file_size);
         file.seekg(0);
         if (!file.read(reinterpret_cast<char*>(file_buffer.data()),
@@ -212,8 +216,13 @@ namespace gcanvas
             tex_width <<= 1;
 
         unsigned int tex_height = tex_width;
-        unsigned int buffer_size = tex_width * tex_height * 4;
-
+        const std::size_t buffer_size =
+            static_cast<std::size_t>(tex_width) *
+            static_cast<std::size_t>(tex_height) * 4u;
+        // CPU atlas staging + persistent CPU Image copy + native GPU base
+        // storage can coexist with retained Font/Images and the source file.
+        // This must execute BEFORE the giant temporary pixel allocation.
+        admit_atlas_creation(buffer_size);
         std::vector<unsigned char> pixels(buffer_size, 0);
         unsigned int pen_x = padding, pen_y = padding;
 

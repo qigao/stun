@@ -3,6 +3,7 @@
 
 #include <map>
 #include <memory>
+#include <cstddef>
 
 #include "gcanvas/gcanvas.hpp"
 #include "gcanvas/image.hpp"
@@ -51,6 +52,14 @@ namespace gcanvas
         std::map<char32_t, character> _characters;
 
         Font() = default;
+        // During the original file loading, the borrowed font-file buffer
+        // remains alive while FreeType generates the CPU atlas staging.
+        std::size_t font_file_staging_bytes_ = 0u;
+        // Backends may admit large atlas creation before allocating the
+        // temporary glyph buffer, its persistent CPU copy or a GPU texture.
+        virtual void admit_atlas_creation(std::size_t atlas_bytes) const {
+            (void)atlas_bytes;
+        }
 
         void load_from_file(std::string file_path);
         void load_from_memory(const unsigned char* data, size_t size);

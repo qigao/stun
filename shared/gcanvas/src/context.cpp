@@ -105,6 +105,9 @@ namespace gcanvas
             _resource_limits.path_paint_texture_size > 4096 ||
             _resource_limits.max_image_update_modeled_peak_bytes == 0 ||
             _resource_limits.max_image_update_modeled_peak_bytes >
+                (std::uint64_t{4} * 1024u * 1024u * 1024u) ||
+            _resource_limits.max_image_creation_modeled_peak_bytes == 0 ||
+            _resource_limits.max_image_creation_modeled_peak_bytes >
                 (std::uint64_t{4} * 1024u * 1024u * 1024u))
         {
             throw std::invalid_argument("gCanvas resource limits are invalid");
@@ -1027,6 +1030,55 @@ namespace gcanvas
         _resource_limits.max_image_update_modeled_peak_bytes = limit_bytes;
     }
 
+    void Context::set_image_creation_modeled_peak_limit(std::size_t limit_bytes)
+    {
+        if (limit_bytes == 0 ||
+            limit_bytes > (std::uint64_t{4} * 1024u * 1024u * 1024u))
+            throw std::invalid_argument(
+                "gCanvas modeled image creation peak limit must be within 1 byte and 4 GiB");
+        _resource_limits.max_image_creation_modeled_peak_bytes = limit_bytes;
+    }
+
+    ImageCreationPeakUsage Context::image_creation_peak_usage(
+        std::size_t new_persistent_cpu_bytes, std::size_t transient_cpu_bytes,
+        std::size_t new_native_base_bytes) const
+    {
+        const auto add = [](std::size_t lhs, std::size_t rhs) {
+            if (rhs > (std::numeric_limits<std::size_t>::max)() - lhs)
+                throw std::overflow_error(
+                    "gCanvas modeled image creation peak byte count overflow");
+            return lhs + rhs;
+        };
+        ImageCreationPeakUsage usage{};
+        usage.limit_bytes = _resource_limits.max_image_creation_modeled_peak_bytes;
+        usage.transient_cpu_bytes = transient_cpu_bytes;
+        usage.new_persistent_cpu_bytes = new_persistent_cpu_bytes;
+        usage.new_native_base_bytes = new_native_base_bytes;
+        usage.retained_cpu_bytes = retained_internal_cpu_pixel_payload_bytes();
+
+        for (const auto& owned : _owned_images)
+            usage.retained_cpu_bytes =
+                add(usage.retained_cpu_bytes, owned->pixels().size());
+        for (const auto& font : _owned_fonts)
+            usage.retained_cpu_bytes =
+                add(usage.retained_cpu_bytes, font->get_image().pixels().size());
+
+        usage.native_payload_known =
+            uploaded_native_texture_payload_bytes(usage.native_uploaded_base_bytes);
+        // Existing GL resources remain live while new persistent CPU bytes,
+        // the complete transient CPU decoder/atlas staging and newly uploaded
+        // native base texture pixels may coexist. Count each *allocation*
+        // only once, including when an earlier GPU fence still references it.
+        usage.modeled_peak_bytes = add(
+            add(add(usage.retained_cpu_bytes, usage.transient_cpu_bytes),
+                usage.new_persistent_cpu_bytes),
+            add(usage.native_uploaded_base_bytes, usage.new_native_base_bytes));
+        if (usage.modeled_peak_bytes > usage.limit_bytes)
+            throw std::length_error(
+                "gCanvas image/font creation exceeds modeled CPU/GPU peak budget");
+        return usage;
+    }
+
     ImageUpdatePeakUsage Context::image_update_peak_usage(
         const Image& image, std::size_t candidate_bytes) const
     {
@@ -1044,6 +1096,7 @@ namespace gcanvas
         ImageUpdatePeakUsage usage{};
         usage.limit_bytes = _resource_limits.max_image_update_modeled_peak_bytes;
         usage.candidate_cpu_bytes = candidate_bytes;
+        usage.retained_cpu_bytes = retained_internal_cpu_pixel_payload_bytes();
 
         for (const auto& owned : _owned_images)
             usage.retained_cpu_bytes =
