@@ -38,6 +38,19 @@ struct CellHostInput final {
     bool continuation = false;
 };
 
+// Refit one immutable C11 cell grid onto the host's REAL current logical
+// window and framebuffer (positive resize). This profile deliberately keeps
+// the existing grid count/grapheme/span, glyph font and renderer: no second
+// layout or Unicode parser. Uniform device pixel ratio is mandatory; a
+// transient nonuniform/mismatched host generation fails before drawing.
+// Font/baseline are scaled by the cell-height change; exact GPU glyph preflight
+// still rejects unrepresentable or overflowing text. Do not claim physical
+// monitor HiDPI evidence from synthetic CPU metrics.
+CellPixelMetrics fit_cell_metrics_to_window(
+    const tui_grid_snapshot_t* snapshot,
+    const CellWindowExtents& observed,
+    const CellPixelMetrics& base);
+
 // GLFW and other window hosts pass observed same-generation dimensions;
 // no GLFW header or second event queue is needed in this module. A missing
 // frame or out-of-bounds pointer produces no event. Wrong owner, unsupported

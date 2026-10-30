@@ -241,6 +241,41 @@ outside window, accessibility, X11/Windows/macOS physical GUI acceptance,
 GPU fence completion and GL context loss/recreation. No production factory
 can be registered solely from these tests.
 
+## Live positive Resize -> real GL frame -> new cell hit (Draft)
+
+The experimental fixed-count C11 `tui_grid_snapshot_t` remains the **sole**
+source of glyph/grapheme/span/attributes. `fit_cell_metrics_to_window()`
+derives a new cell/pixel projection from GLFW's **current observed** logical
+window dimensions and device framebuffer extents, and scales font size /
+baseline coherently with cell height. The X/Y device ratios must agree.
+The resulting float draw geometry must round exactly onto the observed
+framebuffer; incoherent DPI generations, stale source revision, empty window,
+oversized spans and unsupported glyph metrics fail before publication.
+This is one GL renderer and one source grid, not a new layout or TTY-cell
+pixel assumption.
+
+The existing GLFW demo now enables native resize, retires input during
+minimize/zero framebuffer, reprojects its unchanged Tango C11 source grid,
+redraws through the existing gCanvas presenter, swaps, and admits mouse/key
+events only for the new submission.
+
+The existing **real X11/XTest + Mesa llvmpipe** pixel test requires an actual
+two-axis `XResizeWindow` event from 256×96 to 304×120, verifies stale
+keyboard/text are refused before repaint, renders real GPU yellow and green
+cells at their NEW positions, reads the native resized framebuffer back to
+the added `.resized.ppm` audit artifact, then sends an actual XTest mouse
+click into the new green cell (5,1), demanding source revision 102.
+This qualifies **real software OpenGL resize at observed 1× DPI**, not a
+physical high-DPI monitor. Native C11/CPU tests additionally exercise 1×,
+1.5× and 2× device pixel ratio projections with exact hit-test bounds, but
+those synthetic device dimensions are **not** proof of real HiDPI rendering.
+
+Still open: actual multiple-monitor live DPI changes/2× framebuffer on
+supported devices, generic XML/Tailwind reflow when grid rows/columns change,
+IME preedit, pointer capture/drag, physical GPU acceptance, platform-native
+Windows/macOS event injection and GL context retirement. No production
+TangoOpenGL registration is justified yet.
+
 ## Native TTY presenter
 
 Owns/borrows the terminal, validates the bounded buffer, produces VT diff

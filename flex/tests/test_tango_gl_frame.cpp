@@ -458,6 +458,69 @@ suite("Tango OpenGL cell-to-pixel staging on native Tango grid") {
         check(!tp::cell_input_character(presenter, 'A'));
     }
 
+
+    it("refits the same canonical C11 grid onto actual positive host resize and 2x/1.5x DPI metrics") {
+        Snapshot src;
+        const auto original = metrics();
+        const tp::CellWindowExtents one{40, 20, 40, 20};
+        const auto fitted = tp::fit_cell_metrics_to_window(src.frame, one, original);
+        check_equal(fitted.cell_width, 10.0f);
+        check_equal(fitted.cell_height, 20.0f);
+        check_equal(fitted.pixel_ratio, 1.0f);
+        check_equal(fitted.font_size, original.font_size * 1.25f);
+        check_equal(fitted.baseline, original.baseline * 1.25f);
+        const auto plan = tp::prepare_cell_pixel_plan(src.frame, fitted);
+        check_equal(plan.columns(), 4);
+        check_equal(plan.rows(), 1);
+        check_equal(plan.grid_revision(), 5u);
+        const auto hit = tp::hit_test_window_pointer(plan, 23.0, 4.0, 40, 20, 40, 20);
+        check(hit.has_value());
+        if (hit) {
+            check_equal(hit->column, 2);
+            check_equal(hit->leading_column, 1);
+            check(hit->continuation);
+        }
+        check(!plan.hit_test_logical(40.0, 0.0));
+        const auto last = plan.hit_test_logical(39.9, 19.9);
+        check(last.has_value());
+        if (last) check_equal(last->column, 3);
+
+        const tp::CellWindowExtents retina{40, 20, 80, 40};
+        const auto doubled = tp::fit_cell_metrics_to_window(src.frame, retina, original);
+        check_equal(doubled.pixel_ratio, 2.0f);
+        const auto retina_plan = tp::prepare_cell_pixel_plan(src.frame, doubled);
+        const auto hi_hit = tp::hit_test_window_pointer(
+            retina_plan, 23.0, 4.0, 40, 20, 80, 40);
+        check(hi_hit.has_value());
+        if (hi_hit) {
+            check_equal(hi_hit->column, 2);
+            check_equal(hi_hit->leading_column, 1);
+        }
+        const tp::CellWindowExtents fractional{40, 20, 60, 30};
+        const auto one_and_half = tp::fit_cell_metrics_to_window(
+            src.frame, fractional, original);
+        check_equal(one_and_half.pixel_ratio, 1.5f);
+        const auto fractional_plan = tp::prepare_cell_pixel_plan(src.frame, one_and_half);
+        check(tp::hit_test_window_pointer(
+            fractional_plan, 23.0, 4.0, 40, 20, 60, 30).has_value());
+
+        auto bad = retina;
+        bad.framebuffer_width = 81;
+        check_throws_as(tp::fit_cell_metrics_to_window(
+            src.frame, bad, original), std::logic_error);
+        bad = retina; bad.window_width = 0;
+        check_throws_as(tp::fit_cell_metrics_to_window(
+            src.frame, bad, original), std::invalid_argument);
+        auto stale = original;
+        ++stale.expected_grid_revision;
+        check_throws_as(tp::fit_cell_metrics_to_window(
+            src.frame, retina, stale), std::logic_error);
+        auto invalid_font = original;
+        invalid_font.font_size = (std::numeric_limits<float>::infinity)();
+        check_throws_as(tp::fit_cell_metrics_to_window(
+            src.frame, retina, invalid_font), std::invalid_argument);
+    }
+
     it("retires stale host input on focus, metrics and independent native draw generations") {
         Snapshot src;
         PixelRecorder backend;

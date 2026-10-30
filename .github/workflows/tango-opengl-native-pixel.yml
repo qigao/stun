@@ -225,6 +225,9 @@ jobs:
               -R '^tango_gl_real_pixel$' --timeout 120
           test -s build/tango-gl-native/tango-gl-frame.ppm
           test -s build/tango-gl-native/tango-gl-frame.ppm.input.ppm
+          test -s build/tango-gl-native/tango-gl-frame.ppm.input.ppm.resized.ppm
+          head -n 2 build/tango-gl-native/tango-gl-frame.ppm.input.ppm.resized.ppm |
+            grep -Fx '304 120'
           head -c 2 build/tango-gl-native/tango-gl-frame.ppm | grep -q P6
           echo "ExactHEAD=${{ needs.changes.outputs.source_sha }} TangoGLNativePixel=SUCCESS"
 
@@ -236,6 +239,7 @@ jobs:
           path: |
             build/tango-gl-native/tango-gl-frame.ppm
             build/tango-gl-native/tango-gl-frame.ppm.input.ppm
+            build/tango-gl-native/tango-gl-frame.ppm.input.ppm.resized.ppm
           if-no-files-found: ignore
           retention-days: 7
 
