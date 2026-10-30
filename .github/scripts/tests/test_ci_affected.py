@@ -91,7 +91,7 @@ def verify_labeled_workflow_isolation():
         else:
             assert group.endswith(suffix), (path.name, group)
         assert "  cancel-in-progress: true" in source, path.name
-    assert len(guarded) == 9, guarded
+    assert len(guarded) == 10, guarded
     assert master_push_and_dispatch.issubset(set(guarded)), guarded
 
 def main():

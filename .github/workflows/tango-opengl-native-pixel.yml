@@ -31,11 +31,59 @@ permissions:
   contents: read
 
 concurrency:
-  group: tango-gl-native-pixels-${github.event.pull_request.number || github.ref}
+  group: tango-gl-native-pixels-${{ github.event.pull_request.number || github.ref }}-${{ github.event.action == 'labeled' && github.event.label.name != 'ci/full' && github.run_id || 'qualification' }}
   cancel-in-progress: true
 
 jobs:
+  changes:
+    if: github.event.action != 'labeled' || github.event.label.name == 'ci/full'
+    name: Tango OpenGL pixel scope
+    runs-on: ubuntu-24.04
+    outputs:
+      source_sha: ${{ steps.run_head.outputs.sha }}
+      affected: ${{ steps.scope.outputs.affected }}
+    steps:
+      - name: Resolve immutable Actions run head
+        id: run_head
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          sha="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" --jq '.head_sha')"
+          [[ "$sha" =~ ^[0-9a-fA-F]{40}$ && ! "$sha" =~ ^0+$ ]]
+          printf 'sha=%s\n' "$sha" >> "$GITHUB_OUTPUT"
+          echo "TangoGLSourceHEAD=$sha"
+      - name: Checkout immutable PR source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.run_head.outputs.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+      - name: Verify exact source identity
+        shell: bash
+        env:
+          EXPECTED_STUN_SHA: ${{ steps.run_head.outputs.sha }}
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_STUN_SHA"
+      - name: Detect Tango/desktop-GL delta without skipping an invalid source
+        id: scope
+        shell: bash
+        run: |
+          bash .github/scripts/ci-affected.sh \
+            'tango/*' 'flex/backends/tango_opengl/*' \
+            'flex/render/engines/gcanvas/*' 'flex/modules/render/*' \
+            'shared/gcanvas/src/backends/gl/*' \
+            'shared/gcanvas/src/backends/opengl/*' \
+            'shared/gcanvas/src/font.cpp' 'shared/gcanvas/src/context.cpp' \
+            'shared/gcanvas/src/color.cpp' 'shared/gcanvas/src/image.cpp' \
+            'shared/gcanvas/src/path.cpp' 'shared/gcanvas/include/gcanvas/*' \
+            'shared/gcanvas/CMakeLists.txt' \
+            '.github/workflows/tango-opengl-native-pixel.yml' \
+            '.github/actions/setup-ccache/*'
+
   mesa-real-pixels:
+    needs: changes
+    if: needs.changes.outputs.affected == 'true'
     name: Native TangoGL / Mesa llvmpipe real framebuffer
     runs-on: ubuntu-24.04
     timeout-minutes: 35
@@ -44,34 +92,25 @@ jobs:
       GALLIUM_DRIVER: llvmpipe
       VCPKG_TARGET_TRIPLET: x64-linux
       VCPKG_DISABLE_METRICS: '1'
+      GH_TOKEN: ${{ github.token }}
     steps:
-      - name: Resolve immutable Actions run head
-        id: source
-        shell: bash
-        env:
-          GH_TOKEN: ${github.token}
-        run: |
-          set -euo pipefail
-          sha="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" --jq '.head_sha')"
-          [[ "$sha" =~ ^[0-9a-f]{40}$ && ! "$sha" =~ ^0+$ ]]
-          printf 'sha=%s\n' "$sha" >> "$GITHUB_OUTPUT"
-          echo "TangoGLSourceHEAD=$sha"
-
       - name: Checkout exact Tango source
         uses: actions/checkout@v4
         with:
-          ref: ${steps.source.outputs.sha}
+          ref: ${{ needs.changes.outputs.source_sha }}
           persist-credentials: false
 
       - name: Verify exact source identity
         shell: bash
-        run: test "$(git rev-parse HEAD)" = "${steps.source.outputs.sha}"
+        env:
+          EXPECTED_STUN_SHA: ${{ needs.changes.outputs.source_sha }}
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_STUN_SHA"
 
       - name: Restore isolated verified compiler cache
         uses: ./.github/actions/setup-ccache
         with:
           profile: tango-gl-native-pixels-linux
-          source_sha: ${steps.source.outputs.sha}
+          source_sha: ${{ needs.changes.outputs.source_sha }}
 
       - name: Install real Mesa GLX/GLFW and mono font prerequisites
         shell: bash
@@ -91,7 +130,7 @@ jobs:
       - name: Download and verify exact released Salts Unicode/Platform SDK
         shell: bash
         env:
-          GH_TOKEN: ${github.token}
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           version='v2.3.0-rc.17'
@@ -131,7 +170,7 @@ jobs:
         id: vcpkg_cache
         uses: actions/cache/restore@v4
         with:
-          path: ${runner.temp}/tango-gl-vcpkg-cache
+          path: ${{ runner.temp }}/tango-gl-vcpkg-cache
           key: tango-gl-vcpkg-v1-linux-x64-b1b19307-plutosvg-glad-stb
           restore-keys: |
             tango-gl-vcpkg-v1-linux-x64-b1b19307-
@@ -151,8 +190,8 @@ jobs:
         if: steps.vcpkg_cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
         with:
-          path: ${runner.temp}/tango-gl-vcpkg-cache
-          key: ${steps.vcpkg_cache.outputs.cache-primary-key}
+          path: ${{ runner.temp }}/tango-gl-vcpkg-cache
+          key: ${{ steps.vcpkg_cache.outputs.cache-primary-key }}
 
       - name: Configure only actual Tango C11 / Flex::Render / gCanvas GL sources
         shell: bash
@@ -186,13 +225,13 @@ jobs:
               -R '^tango_gl_real_pixel$' --timeout 120
           test -s build/tango-gl-native/tango-gl-frame.ppm
           head -c 2 build/tango-gl-native/tango-gl-frame.ppm | grep -q P6
-          echo "ExactHEAD=${steps.source.outputs.sha} TangoGLNativePixel=SUCCESS"
+          echo "ExactHEAD=${{ needs.changes.outputs.source_sha }} TangoGLNativePixel=SUCCESS"
 
       - name: Upload actual GPU-readback frame for visual audit
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: tango-gl-mesa-pixels-${steps.source.outputs.sha}
+          name: tango-gl-mesa-pixels-${{ needs.changes.outputs.source_sha }}
           path: build/tango-gl-native/tango-gl-frame.ppm
           if-no-files-found: ignore
           retention-days: 7
