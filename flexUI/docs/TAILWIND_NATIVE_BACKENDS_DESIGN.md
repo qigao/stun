@@ -79,6 +79,37 @@ explicit backend admission and owned render plan
 
 当前 master 中旧的 CSS/JIT 与早期 XML/Designer 格式仍存在，原生 Tailwind 路径及全部组件契约正在分阶段迁移。**设计决策与已运行的生产功能必须分开记录**。跟踪：[#1](https://github.com/qigao/stun/issues/1)、[#16](https://github.com/qigao/stun/issues/16)、[#17](https://github.com/qigao/stun/issues/17)、[#275](https://github.com/qigao/stun/issues/275)、[PR #302](https://github.com/qigao/stun/pull/302)。
 
+### 0.5 P0 产品门禁：XML 是否能完整描述一个应用
+
+**正式完成标准：一套真正可操作的应用，其整个 UI 结构、布局、控件组合、数据/资源绑定、事件入口和状态映射由 XML 声明；Tailwind 原生编译布局与样式；TurboScript 实现应用行为与服务编排。应用作者不得为了拼装 UI 而额外编写 C++。**
+
+这里的“完整描述一个应用”是**完整的应用界面和交互连接关系**，而非将文件系统、数据库、网络、GPU、算法实现硬塞进 XML。通用宿主可负责窗口/TTY 生命周期、后端选择、资源权限与原生 Service 注册，但不应知道具体应用的按钮、Tab、Table、Tree、Popup 或脚本 handler。
+
+#### P0 真实验收应用：Studio
+
+作者只提交 `app.xml`、`components/*.ui.xml`、`app.tbs`、原生 Theme/Preset 和资源文件（无 CSS/JavaScript），通用 Host 加载、编译、安装和运行。需由 XML/WidgetRegistry 严格声明和验证：
+
+1. 根界面、通用 `div` 实现的 Flex/Grid 容器、工具栏、文件树、Tabs/页面、编辑区、数据表、弹出搜索面板、Modal、状态栏；Scroll/Clip/Resize/Z-order 与焦点均可表达。
+2. Tabs Page、TreeNode、Table Column/Row、Accordion Section 等有明确 XML 内容模型和类型化装配。若必须在应用 C++ 中调用 `add_tab/add_node/add_row/add_section` 才能完成声明，该验收**失败**。
+3. `bind:text`、真正的双向 `bind:value`、状态 class、可观察 Items/ItemTemplate、稳定 Key，以及数据编辑、插入、删除、排序与选择都能连接同一 UI owner 和 Binding/Controller；现有 C++ UiKeyedRepeater 不自动等于 XML 模板支持。
+4. `on:*` 调用已注册 TurboScript handler，通过正式 native Service/Command 运行打开、保存、搜索、提示等业务操作；不写应用专用 C++ 控件回调。
+5. 组件/slot/ID、静态和动态实例、真实资源、主题与装配失败回滚统一属于一份 compiled UI program 和一棵 Box/Element 树；按 #298/#302 的观察者/worker/资源门禁安全退休。
+6. 后端显式选定并验证相应 Native Tailwind profile。D2D/gCanvas 用真实窗口与像素/事件验收；TangoTTY 用真实 PTY/ConPTY 和独立可见 cell 还原；TangoOpenGL 另行受 #342 的独立 GPU 验收约束。缺少能力要明确 Unsupported，不得回退到 CSS、JS、假 UI 或其它 renderer。
+
+#### 可执行验收门禁（全部未完成）
+
+- [ ] **A Compile**：直接编译作者文件成不可变 candidate，经同一个 registry-aware XML/类型/子节点/绑定/事件/服务/资源预检；未知属性、错误子节点、非法绑定、缺资源、重复 ID 必须在 Box 变更前报源位置。
+- [ ] **B Mount**：使用一个通用 Host 装配完整 Studio；独立检查不存在应用专有的 C++ Element/Widget/Tab/Tree/Table/Overlay 手工构造。
+- [ ] **C Interact**：真实键鼠/焦点/输入法驱动编辑、保存、搜索、Tab 切换、Tree 展开、Table 选择和 Modal 开合；TurboScript、数据绑定和可见效果与语义一致。
+- [ ] **D Dynamic**：数据集合增删改排、Tab/组件生命周期、load/reload/失败原子性、旧 generation 结果、cancel/close overlap、in-flight observer/worker/borrow 安全。
+- [ ] **E Present**：实际 D2D/gCanvas 可见 GUI 截图和输入命中；TTY 真实 PTY/ConPTY 字节流及独立终端画面 oracle。精确 HEAD、后端能力、正常和错误路径证据。
+- [ ] **F Designer**：Designer 产物经过 Save → `compile_ui_xml` → Registry → Mount → Reload → Export → Compile，结构与绑定不丢失。当前 `<ui><widget type=...><position/><size/>` 的旧导出与正式格式不相容，不能声称已通过。
+- [ ] **G Installed SDK**：安装版 SDK 使用同样通用 app loader 运行作者文件；不依赖源码树路径、Mock renderer、硬编码应用 ID 或二次 UI runtime；复用现有 CI 缓存/FIFO 取消与 native/sanitizer gates。
+
+**DoD：对这个 Studio 的容器、Widget、界面结构、Tab/Tree/Table 内容、绑定、事件及 Theme 的一般改动，开发者只修改 XML + Tailwind + TurboScript 作者文件，不需改应用专有的 C++ 视图代码。** 新增真正的通用原生 Widget/Service 能力可以改 SDK，但必须同时增加版本化 XML/脚本契约和独立测试，不能给单一 Demo 开后门。
+
+本节只是 P0 产品门禁设计，**不是功能完成声明**。当前 master 中的完整控件属性 Schema、复合组件 XML、`bind:value`、ItemTemplate、物理 `unmount(scope)`、Designer 格式仍有缺口。#1、#16、#17、#275/#298、#31/#330、#342 保持其独立验收范围，PR #333 保持 Draft。
+
 ## 1. 决策与范围
 
 应用的唯一作者模型是 **XML + Tailwind + TurboScript**：XML 描述结构，标准 `class` 承载 Tailwind，TurboScript 通过有界命令修改状态。主题和控件默认样式分别使用原生类型化 Theme 与 Tailwind Preset。
