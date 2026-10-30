@@ -543,6 +543,39 @@ accepted strict serial-in-flight frame gate remains mandatory. Do
 not register the production TangoOpenGL factory or treat this as a
 physical-GPU driver recovery proof.
 
+## Transactional CPU image update on native GPU rejection (Draft)
+
+The earlier mutation guard prevented an unsafe `glTexSubImage2D` call but
+`Image::update_data()` had already overwritten its retained CPU pixels
+before the GPU backend was consulted. A rejected GPU update therefore
+left CPU and GPU images disagreeing, even though the GPU frame had not
+changed.
+
+The same original gCanvas `Image::update_data()` now stages a bounded
+complete candidate byte vector first. It publishes that candidate only
+for the existing owning Context's synchronous upload, then **rolls back
+both retained CPU pixels and its data pointer** if the Context rejects
+the update or throws. Both swaps are non-throwing; malformed input never
+touches the original image. Data passed from the current retained image
+buffer is handled without invalidating its source during staging.
+
+The existing Mesa native texture test is expanded to inspect **both**
+the actual GPU `glGetTexImage` texels and the retained
+`Image::pixels()` bytes after a denied in-flight update, verify normal
+CPU+GPU green commit after the real native GLsync retires, then reject
+a malformed source span while preserving the last committed green CPU
+bytes. It also exercises source-data aliasing with
+`Image::pixels().data()`, not another renderer or fake texture.
+
+**Narrow guarantee:** this proves strong CPU rollback on a backend
+exception and the particular **pre-driver-write** native Fence rejection.
+It is **not** GPU transactional rollback after a driver error or partial
+`glTexSubImage2D` operation, and is not a replacement for unexpected
+Context Loss quarantine or physical GPU in-flight retirement. The
+existing native Context/GLsync gate, serialized Atlas mutations and
+bounded upload-budget rules remain unchanged. The production TangoGL
+factory stays unregistered.
+
 ## Native TTY presenter
 
 Owns/borrows the terminal, validates the bounded buffer, produces VT diff

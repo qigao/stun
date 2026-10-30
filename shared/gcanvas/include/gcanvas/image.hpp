@@ -36,6 +36,10 @@ namespace gcanvas
         const std::vector<std::uint8_t>& pixels() const noexcept { return _pixels; }
         void set_name(std::string name);
 
+        // Validate/stage a full candidate image. On a rejected backend
+        // update the old CPU pixels and data pointer are restored before
+        // propagating the exception. Native driver writes already in flight
+        // are NOT rolled back; device failure must be quarantined separately.
         void update_data(const unsigned char* data, std::size_t size);
         // Writes the retained CPU-side pixels; GPU-side updates must first be synchronized by the
         // owning backend.
