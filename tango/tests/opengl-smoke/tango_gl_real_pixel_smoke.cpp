@@ -625,6 +625,145 @@ void exercise_real_x11_input(
               << "TANGO_GL_XTEST_REAL_PIXEL_PASS=1\n";
 }
 
+
+// Controlled native context replacement: release the actual gCanvas GPU
+// presenter while the OLD GLFW context is still current; destroy that real
+// window/context, then create a DIFFERENT GLFW context and renderer for the
+// SAME C11 grid revision. A retired gate is safe even after its GPU presenter
+// no longer exists. This is NOT unexpected context loss or fence retirement.
+void exercise_orderly_context_recreation(
+    const std::string& regular_font, const std::string& bold_font,
+    const std::string& screenshot) {
+    GlfwSession glfw;
+    std::unique_ptr<flex::tango_opengl::CellHostFrameGate> old_gate;
+    Window first_x11_window = None;
+    constexpr std::uint64_t kSameRevision = 303u;
+
+    for (int generation = 1; generation <= 2; ++generation) {
+        {
+            GlfwWindow native;
+            require(native.handle != nullptr &&
+                    glfwGetCurrentContext() == native.handle,
+                    "New TangoGL native context was not created and made current");
+            const Window x11_window = glfwGetX11Window(native.handle);
+            require(x11_window != None, "New GL window lacks its own real X11 handle");
+            if (generation == 1)
+                first_x11_window = x11_window;
+            else
+                require(first_x11_window != x11_window,
+                        "Recreated TangoGL is reusing the old live native X11 identity");
+
+            auto source = std::unique_ptr<tui_buffer_t,
+                decltype(&tui_buffer_destroy)>(
+                    tui_buffer_create(kColumns, kRows), &tui_buffer_destroy);
+            require(source != nullptr,
+                    "Controlled context qualification failed to allocate Tango C11 grid");
+            tui_buffer_clear_color(source.get(), TUI_COLOR(14, 23, 52));
+            const tui_color_t red_or_yellow = generation == 1 ?
+                TUI_COLOR(220, 25, 28) : TUI_COLOR(245, 215, 38);
+            tui_buffer_set(source.get(), 1, 1,
+                           tui_cell('A', TUI_BLACK, red_or_yellow));
+            tui_buffer_set(source.get(), 5, 1,
+                           tui_cell('B', TUI_WHITE, TUI_COLOR(22, 190, 35)));
+            tui_grid_snapshot_t* captured = nullptr;
+            require(tui_grid_snapshot_capture(
+                        source.get(), kSameRevision,
+                        kColumns * kRows, 8192, &captured) ==
+                    TUI_GRID_SNAPSHOT_OK,
+                    "Fresh native GL context did not use a valid C11 snapshot");
+            auto grid = std::unique_ptr<tui_grid_snapshot_t,
+                decltype(&tui_grid_snapshot_destroy)>(
+                    captured, &tui_grid_snapshot_destroy);
+            source.reset(); // The real frozen source snapshot owns all its bytes.
+
+            flex::tango_opengl::ExternalGLCellCreateInfo gl;
+            gl.get_proc_address = &gl_proc;
+            gl.font_family = "tango-pixel-test-mono";
+            gl.font_path = regular_font;
+            gl.bold_font_path = bold_font;
+            auto presenter = flex::tango_opengl::create_external_gl_presenter(gl);
+            require(presenter && presenter->on_owner_thread(),
+                    "New native GL presenter was not created on the GL owner");
+
+            auto gate = std::make_unique<flex::tango_opengl::CellHostFrameGate>(
+                *presenter);
+            gate->set_focus(true); // Separate XTest test qualifies real OS focus.
+            const flex::tango_opengl::CellWindowExtents observed{
+                kWidth, kHeight, kWidth, kHeight};
+            require(!gate->key(TUI_KEY_LEFT, TUI_MOD_NONE, observed),
+                    "Fresh GL context admitted stale/unpainted native keyboard input");
+            if (old_gate)
+                require(!old_gate->key(TUI_KEY_LEFT, TUI_MOD_NONE, observed),
+                        "Old retired input gate was resurrected by a new GL context");
+
+            flex::tango_opengl::CellPixelMetrics layout;
+            layout.expected_grid_revision = kSameRevision;
+            layout.font_family = gl.font_family;
+            layout.font_size = 18.0f;
+            layout.cell_width = static_cast<float>(kCellWidth);
+            layout.cell_height = static_cast<float>(kCellHeight);
+            layout.baseline = 18.0f;
+            layout.pixel_ratio = 1.0f;
+            layout.max_cells = kColumns * kRows;
+            layout.max_draw_ops = 128;
+            layout.max_text_bytes = 1024;
+            presenter->present(grid.get(), layout);
+
+            // Prove native GPU bytes come from a NEW gCanvas renderer/context,
+            // not an old framebuffer or a synthesized CPU test image.
+            const auto rgba = read_back_rgba();
+            const Pixel painted = at(rgba, kCellWidth + 2, kCellHeight + 2);
+            const Pixel green = at(rgba, 5 * kCellWidth + 2, kCellHeight + 2);
+            if (generation == 1) {
+                require_rgb_dominance(painted, 0,
+                    "Old real OpenGL context failed to draw its own red pixel");
+            } else {
+                require(painted[0] > 175 && painted[1] > 160 &&
+                        painted[2] < 85 && painted[3] >= 240,
+                        "New real GL context retained a stale red frame instead of yellow");
+                save_ppm(rgba, screenshot); // Actual second-context pixels.
+            }
+            require_rgb_dominance(green, 1,
+                "New actual GL context failed to create and rasterize green cell");
+            glfwSwapBuffers(native.handle);
+            gate->accept_presented_frame(observed);
+            const auto new_hit = gate->pointer(
+                5.0 * kCellWidth + 2.0, 1.0 * kCellHeight + 2.0,
+                observed, flex::tango_opengl::CellMouseAction::Press,
+                flex::tango_opengl::CellMouseButton::Left, TUI_MOD_NONE);
+            require(new_hit && new_hit->event.x == 5 &&
+                    new_hit->event.y == 1 &&
+                    new_hit->grid_revision == kSameRevision,
+                    "Replacement GL context cannot publish its own valid C11 cell hit");
+
+            // glReadPixels above blocks until this submitted frame completes.
+            // Do not release GPU resources after destroying the host context.
+            require(glfwGetCurrentContext() == native.handle,
+                    "GPU resources would retire without their owning GL context");
+            gate->retire_device();
+            presenter.reset(); // Actual gCanvas GL cleanup while context alive.
+            require(!gate->key(TUI_KEY_LEFT, TUI_MOD_NONE, observed) &&
+                    !gate->character('a', observed),
+                    "Destroyed GL presenter left input admitted on a stale gate");
+            bool rejected_reactivation = false;
+            gate->set_focus(true);
+            try { gate->accept_presented_frame(observed); }
+            catch (const std::logic_error&) { rejected_reactivation = true; }
+            require(rejected_reactivation,
+                    "Retired host gate was illegally reattached to another GL device");
+            if (generation == 1) old_gate = std::move(gate);
+        } // Destroy the actual GLFW GL context AFTER GPU resource cleanup.
+        require(glfwGetCurrentContext() == nullptr,
+                "Destroyed native GL context remains bound to the UI owner");
+    }
+    require(old_gate && !old_gate->character('x', {kWidth, kHeight,
+                                                 kWidth, kHeight}),
+            "Old context gate accessed GPU resources after the new context shutdown");
+    std::cout << "TANGO_GL_CONTEXT_RECREATED=2\n"
+              << "TANGO_GL_CONTEXT_OLD_GATE_RETIRED=1\n"
+              << "TANGO_GL_CONTEXT_NEW_PIXEL_PASS=1\n";
+}
+
 void exercise_gpu(const std::string& font_path,
                   const std::string& bold_font_path,
                   const std::string& ppm) {
@@ -798,6 +937,8 @@ int main(int argc, char** argv) {
     }
     try {
         exercise_gpu(argv[1], argv[2], argv[3]);
+        exercise_orderly_context_recreation(
+            argv[1], argv[2], std::string(argv[3]) + ".recreated.ppm");
         return 0;
     } catch (const std::exception& error) {
         std::cerr << "TANGO_GL_PIXEL_FAIL=" << error.what() << '\n';

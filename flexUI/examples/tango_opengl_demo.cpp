@@ -175,6 +175,9 @@ struct GlfwTangoInput final {
         glfwSetFramebufferSizeCallback(window, &on_framebuffer_size);
     }
     ~GlfwTangoInput() {
+        // All GLFW callbacks are detached while their presenter/context are
+        // alive. Then permanently retire the old input gate before the
+        // host releases GL resources. A later window must create a NEW gate.
         glfwSetMouseButtonCallback(window, nullptr);
         glfwSetCursorPosCallback(window, nullptr);
         glfwSetScrollCallback(window, nullptr);
@@ -184,6 +187,7 @@ struct GlfwTangoInput final {
         glfwSetWindowSizeCallback(window, nullptr);
         glfwSetFramebufferSizeCallback(window, nullptr);
         glfwSetWindowUserPointer(window, nullptr);
+        gate.retire_device();
     }
     GlfwTangoInput(const GlfwTangoInput&) = delete;
     GlfwTangoInput& operator=(const GlfwTangoInput&) = delete;
