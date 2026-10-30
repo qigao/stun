@@ -5,6 +5,7 @@
  */
 #pragma once
 #include <backends/tango_opengl/cell_presenter.h>
+#include <backends/tango_opengl/cell_input.h>
 #include <backends/opengl/init.h>
 
 #include <memory>
@@ -85,6 +86,53 @@ public:
 private:
     struct Impl;
     std::unique_ptr<Impl> impl_;
+};
+
+
+/*
+ * Single native GL resource lifetime owner, layered on the existing
+ * gCanvas pixel presenter + exact native GPU fences. No other renderer.
+ *
+ * Neither the mutable presenter nor NativeGLFrameFences can escape; a caller
+ * can only submit through present_and_fence(). The exposed presenter view
+ * is const, for inspecting submitted geometry. The input gate is retained
+ * by shared_ptr solely so callbacks can be detached safely and old gates
+ * can refuse use after the native presenter has been destroyed.
+ *
+ * close() must succeed with the ORIGINAL GL context current after all fences
+ * have signaled. It is the ONLY method allowed to delete gCanvas GPU assets.
+ * Destruction with outstanding GPU work or lost context terminates rather
+ * than freeing unsafe GL objects. This is not surprise device-loss recovery.
+ */
+class NativeGLPresentationOwner final {
+public:
+    NativeGLPresentationOwner(
+        const ExternalGLCellCreateInfo& renderer,
+        const NativeGLFenceConfig& fences);
+    ~NativeGLPresentationOwner() noexcept;
+    NativeGLPresentationOwner(const NativeGLPresentationOwner&) = delete;
+    NativeGLPresentationOwner& operator=(const NativeGLPresentationOwner&) = delete;
+
+    void present_and_fence(
+        const tui_grid_snapshot_t* snapshot, const CellPixelMetrics& metrics);
+    NativeGLFencePoll retire_completed(std::uint64_t timeout_nanoseconds);
+    void require_capacity() const;
+    std::size_t in_flight() const;
+    std::uint64_t last_retired_submission() const;
+    std::uint64_t device_generation() const noexcept;
+    const CellPixelPresenter& submitted_presenter() const;
+    std::shared_ptr<CellHostFrameGate> input_gate() const noexcept;
+    void close();
+    bool closed() const noexcept;
+
+private:
+    NativeGLFrameFences fences_;
+    std::unique_ptr<CellPixelPresenter> presenter_;
+    std::shared_ptr<CellHostFrameGate> gate_;
+    bool closed_ = false;
+    // If paint or GLsync publication fails after native GL work may have
+    // begun, no successful fence proves those commands completed.
+    bool unfenced_failure_ = false;
 };
 
 } // namespace flex::tango_opengl

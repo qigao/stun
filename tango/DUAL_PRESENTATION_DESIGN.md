@@ -354,6 +354,50 @@ therefore production TangoOpenGL registration remains prohibited.
 Unexpected context loss, device-generation quarantine and GPU resource
 retirement during asynchronous shutdown still require independent gates.
 
+
+## Combined native gCanvas GPU resource owner (Draft)
+
+`NativeGLPresentationOwner` wraps **one actual gCanvas**
+`CellPixelPresenter`, **one native `NativeGLFrameFences` queue
+and the canonical `CellHostFrameGate`. It is compiled only
+by the explicit TangoOpenGL backend. Headless/C11 modules remain free of any
+GLAD/OpenGL SDK headers or libraries.
+
+The owner exposes a **const-only** presenter view and retained (shared)
+input-gate reference. The host cannot obtain a mutable presenter or GLsync
+owner from this object and must call `present_and_fence()` to draw;
+this checks bounded capacity against the ORIGINAL current GL context and
+creates a real native GPU fence after the existing gCanvas renderer has
+submitted its glyph/shader commands. A successful grid revision alone does
+not qualify frame completion. On a possibly unfenced native drawing error
+the owner enters a terminal unsafe state; no renderer deletion or fallback
+is allowed. A definite pre-submit refusal with an intact prior submission
+does not mark the device as broken.
+
+`close()` is the only path that actually deletes
+gCanvas's pixel renderer, shader and glyph resources. It first requires
+every real GPU fence to be signaled/retired, then permanently retires the
+input gate and deletes the presenter **while the original context remains
+current and on its owner thread**. It refuses premature close, foreign
+context, or a potentially unfenced device error. Retained input gates must
+remain safe after the owner is closed, and may never revive on an unrelated
+new context. Destruction with unsafe outstanding work fails fast; it does
+not pretend to recover an abruptly lost GPU.
+
+Existing Mesa/Xvfb dual-native-context tests use this COMBINED owner,
+not independently managed native presenter and fences. The test requires
+real GLsync capacity/owner/context refusal, rejection of early deletion
+of gCanvas resources, bounded actual GPU completion and only then a
+successful native close. The second new context again paints distinct
+GPU colors at the same C11 revision while old input gates remain retired.
+
+**Not yet qualified:** the standalone GLFW demo is still on the earlier
+manual presenter API, so production registration remains forbidden.
+gCanvas-internal *per-upload* atlas page lifetimes, fence timeouts under
+real hardware overload, abrupt context loss and device-generation
+quarantine/recovery remain separate strict gates. Do not infer them from
+the software-Mesa two-context experiment.
+
 ## Native TTY presenter
 
 Owns/borrows the terminal, validates the bounded buffer, produces VT diff
