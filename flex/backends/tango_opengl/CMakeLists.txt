@@ -18,7 +18,7 @@ if(FLEX_BUILD_BACKEND_TANGO_OPENGL)
   endif()
   add_library(flex_backend_tango_opengl STATIC gl_presenter.cpp gl_fence.cpp gl_owner.cpp)
   target_link_libraries(flex_backend_tango_opengl
-    PUBLIC flex_tango_gl_frame flex_backend_opengl
+    PUBLIC flex_tango_gl_frame flex_backend_opengl gCanvas::Core
     PRIVATE flex_render_engine_gcanvas glad::glad)
   target_include_directories(flex_backend_tango_opengl
     PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
