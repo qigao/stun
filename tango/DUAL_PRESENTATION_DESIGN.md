@@ -168,6 +168,27 @@ pointer/IME conformance, context recreation, device-generation invalidation
 and GPU in-flight completion/retirement. Do not register production
 `RendererBackend::TangoOpenGL` yet.
 
+## GLFW native callbacks -> canonical Tango C11 input (Draft)
+
+The OpenGL host can now convert real GLFW mouse-button/cursor/scroll,
+navigation-key and committed Unicode character callbacks directly into
+`tui_event_t`. `cell_input_pointer()` uses ONLY the last successfully
+submitted `CellPixelPresenter` geometry; the returned sidecar carries the
+frame revision and wide-grapheme leading column while native `event.x/y`
+retain physical cell coordinates. The adapter is a synchronous UI/GL-owner
+operation, **not** a new queue, parser, terminal model, or input thread.
+
+Special-key callbacks and committed-character callbacks are disjoint (no
+double delivery of printable text). Unsupported modifier/action combinations,
+stale host framebuffer metrics, and wrong-thread calls fail explicitly.
+Unicode input is accepted only as a valid committed scalar. GLFW does not
+provide cross-platform IME preedit through `glfwSetCharCallback`; composition,
+accessibility, key-up, keyboard layout/control chords, out-of-window capture,
+mouse drag, live resize, injected OS event/focus acceptance and GPU context
+recreation remain **open**. Real Mesa acceptance checks the event adapter
+against actual framebuffer pixels; that is **not** an OS-injection test.
+No production TangoOpenGL factory registration is authorized.
+
 ## Native TTY presenter
 
 Owns/borrows the terminal, validates the bounded buffer, produces VT diff

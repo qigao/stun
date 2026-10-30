@@ -1,4 +1,5 @@
 #include <backends/tango_opengl/cell_presenter.h>
+#include <backends/tango_opengl/cell_input.h>
 #include <tinytest.hpp>
 
 #include <limits>
@@ -344,6 +345,117 @@ suite("Tango OpenGL cell-to-pixel staging on native Tango grid") {
         });
         foreign_input.join();
         check(foreign_input_rejected);
+    }
+
+
+    it("routes GLFW-sized pointer callbacks into canonical C11 Tango mouse events") {
+        Snapshot src;
+        PixelRecorder backend;
+        tp::CellPixelPresenter presenter(backend);
+        const tp::CellWindowExtents window{32, 16, 64, 32};
+        check(!tp::cell_input_pointer(
+            presenter, 20.0, 4.0, window, tp::CellMouseAction::Press,
+            tp::CellMouseButton::Left, TUI_MOD_NONE));
+        presenter.present(src.frame, metrics());
+        // A submitted 1x plan must reject a 2x physical framebuffer.
+        check_throws_as(tp::cell_input_pointer(
+            presenter, 20.0, 4.0, window, tp::CellMouseAction::Press,
+            tp::CellMouseButton::Left, TUI_MOD_NONE), std::logic_error);
+
+        auto doubled = metrics();
+        doubled.pixel_ratio = 2.0f;
+        presenter.present(src.frame, doubled);
+        const auto press = tp::cell_input_pointer(
+            presenter, 20.0, 4.0, window, tp::CellMouseAction::Press,
+            tp::CellMouseButton::Left, TUI_MOD_SHIFT);
+        check(press.has_value());
+        if (press) {
+            check_equal(press->event.type, TUI_EVENT_MOUSE_PRESS);
+            check_equal(press->event.key, TUI_KEY_MOUSE_LEFT);
+            check_equal(press->event.x, 2);
+            check_equal(press->event.y, 0);
+            check_equal(press->event.mod, static_cast<std::uint8_t>(TUI_MOD_SHIFT));
+            check_equal(press->leading_column, 1);
+            check(press->continuation);
+            check_equal(press->grid_revision, 5u);
+        }
+        const auto release = tp::cell_input_pointer(
+            presenter, 20.0, 4.0, window, tp::CellMouseAction::Release,
+            tp::CellMouseButton::Left, TUI_MOD_NONE);
+        check(release.has_value());
+        if (release) check_equal(release->event.type, TUI_EVENT_MOUSE_RELEASE);
+        const auto wheel = tp::cell_input_pointer(
+            presenter, 20.0, 4.0, window, tp::CellMouseAction::WheelDown,
+            tp::CellMouseButton::None, TUI_MOD_CTRL);
+        check(wheel.has_value());
+        if (wheel) check_equal(wheel->event.key, TUI_KEY_MOUSE_WHEEL_DOWN);
+        const auto move = tp::cell_input_pointer(
+            presenter, 20.0, 4.0, window, tp::CellMouseAction::Move,
+            tp::CellMouseButton::None, TUI_MOD_NONE);
+        check(move.has_value());
+        if (move) check_equal(move->event.type, TUI_EVENT_MOUSE_MOVE);
+        check(!tp::cell_input_pointer(
+            presenter, 32.0, 4.0, window, tp::CellMouseAction::Press,
+            tp::CellMouseButton::Left, TUI_MOD_NONE));
+        check_throws_as(tp::cell_input_pointer(
+            presenter, 20.0, 4.0, window, tp::CellMouseAction::Press,
+            tp::CellMouseButton::None, TUI_MOD_NONE), std::invalid_argument);
+        check_throws_as(tp::cell_input_pointer(
+            presenter, 20.0, 4.0, window, tp::CellMouseAction::Press,
+            tp::CellMouseButton::Left, 0x80u), std::invalid_argument);
+    }
+
+    it("delivers special keys and committed Unicode once, on the displayed frame owner") {
+        Snapshot src;
+        PixelRecorder backend;
+        tp::CellPixelPresenter presenter(backend);
+        check(!tp::cell_input_key(presenter, TUI_KEY_ESCAPE, TUI_MOD_NONE));
+        check(!tp::cell_input_character(presenter, 'A'));
+        presenter.present(src.frame, metrics());
+
+        const auto escape = tp::cell_input_key(
+            presenter, TUI_KEY_ESCAPE, TUI_MOD_NONE);
+        check(escape.has_value());
+        if (escape) {
+            check_equal(escape->event.key, TUI_KEY_ESCAPE);
+            check_equal(escape->event.ch, 27u);
+            check_equal(escape->grid_revision, 5u);
+        }
+        check(!tp::cell_input_key(presenter, static_cast<tui_key_t>('A'), TUI_MOD_NONE));
+        const auto text = tp::cell_input_character(presenter, 'A');
+        check(text.has_value());
+        if (text) {
+            check_equal(text->event.type, TUI_EVENT_KEY);
+            check_equal(text->event.ch, static_cast<std::uint32_t>('A'));
+            check_equal(text->event.key, static_cast<tui_key_t>('A'));
+        }
+        const auto cjk = tp::cell_input_character(presenter, 0x4e2du);
+        check(cjk.has_value());
+        if (cjk) {
+            check_equal(cjk->event.ch, 0x4e2du);
+            check_equal(cjk->event.key, TUI_KEY_NONE);
+        }
+        const auto emoji = tp::cell_input_character(presenter, 0x1f642u);
+        check(emoji.has_value());
+        check(!tp::cell_input_character(presenter, 0xd800u));
+        check(!tp::cell_input_character(presenter, 0x110000u));
+        check(!tp::cell_input_character(presenter, 0x81u));
+        check(!tp::cell_input_character(presenter, 0u));
+        check_throws_as(tp::cell_input_key(
+            presenter, TUI_KEY_LEFT, 0x80u), std::invalid_argument);
+
+        bool rejected = false;
+        std::thread foreign([&] {
+            try {
+                (void)tp::cell_input_character(presenter, 'Z');
+            } catch (const std::logic_error&) { rejected = true; }
+        });
+        foreign.join();
+        check(rejected);
+        backend.fail_draw = true;
+        check_throws_as(presenter.present(src.frame, metrics()), std::runtime_error);
+        check(!tp::cell_input_key(presenter, TUI_KEY_ESCAPE, TUI_MOD_NONE));
+        check(!tp::cell_input_character(presenter, 'A'));
     }
 
     it("keeps the grid independent of source resize and enforces owner-thread presentation") {

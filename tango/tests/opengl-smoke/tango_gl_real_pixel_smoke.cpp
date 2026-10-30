@@ -6,6 +6,7 @@
  * no TTY fallback, and no CPU-generated replacement image.
  */
 #include <backends/tango_opengl/gl_presenter.h>
+#include <backends/tango_opengl/cell_input.h>
 #include <tui_grid_snapshot.h>
 #include <GLFW/glfw3.h>
 
@@ -258,6 +259,35 @@ void exercise_gpu(const std::string& font_path,
     }
     require(extent_rejected,
             "Mismatched live framebuffer extents were silently interpreted as cells");
+
+    // The same native GLFW-observed geometry now yields a *C11 tui_event_t*
+    // rather than an independent GLFW cell model. These calls qualify the
+    // adapter against real Mesa pixels; OS-injected events remain a later gate.
+    const flex::tango_opengl::CellWindowExtents host_extents{
+        window_width, window_height, framebuffer_width, framebuffer_height};
+    const auto mouse = flex::tango_opengl::cell_input_pointer(
+        *presenter,
+        static_cast<double>(kCellWidth + 2) * window_width / framebuffer_width,
+        static_cast<double>(kCellHeight + 2) * window_height / framebuffer_height,
+        host_extents, flex::tango_opengl::CellMouseAction::Press,
+        flex::tango_opengl::CellMouseButton::Left, TUI_MOD_NONE);
+    require(mouse && mouse->event.type == TUI_EVENT_MOUSE_PRESS &&
+            mouse->event.key == TUI_KEY_MOUSE_LEFT &&
+            mouse->event.x == red_hit->column &&
+            mouse->event.y == red_hit->row &&
+            mouse->grid_revision == red_hit->grid_revision,
+            "TangoGL C11 mouse event is not based on the real painted red cell");
+    const auto key = flex::tango_opengl::cell_input_key(
+        *presenter, TUI_KEY_ESCAPE, TUI_MOD_NONE);
+    require(key && key->event.type == TUI_EVENT_KEY &&
+            key->event.key == TUI_KEY_ESCAPE &&
+            key->grid_revision == submitted->grid_revision(),
+            "TangoGL native key event is not attached to the submitted revision");
+    const auto cjk_text = flex::tango_opengl::cell_input_character(
+        *presenter, 0x4e2du);
+    require(cjk_text && cjk_text->event.type == TUI_EVENT_KEY &&
+            cjk_text->event.ch == 0x4e2du && cjk_text->grid_revision == 101u,
+            "TangoGL native committed Unicode does not use the C11 key event");
 
     const auto first_frame = read_back_rgba();
     // Preserve the actual GPU pixels for audit EVEN when a subsequent color
