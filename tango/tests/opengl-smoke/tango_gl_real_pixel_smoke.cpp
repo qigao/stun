@@ -215,7 +215,7 @@ void exercise_gpu(const std::string& font_path,
     presenter->present(tango.frame, layout);
     const auto* submitted = presenter->last_submitted_plan();
     require(submitted != nullptr, "TangoGL did not retain its submitted pixel/hit plan");
-    require(submitted->grid_revision() == tango_grid_snapshot_revision(tango.frame),
+    require(submitted->grid_revision() == tui_grid_snapshot_revision(tango.frame),
             "TangoGL displayed frame and hit geometry have different revisions");
 
     int window_width = 0, window_height = 0;
