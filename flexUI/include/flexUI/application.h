@@ -6,6 +6,7 @@
 #include "flexUI/box.h"
 #include "flexUI/controller.h"
 #include "flexUI/widget_registry.h"
+#include "flexUI/ui_xml.h"
 
 #include <functional>
 #include <memory>
@@ -38,6 +39,10 @@ struct DesktopApplicationSources {
   std::string stylesheet;
   std::string script;
   std::string script_module_name = "flexui-application";
+  // The host supplies immutable owned module bytes with the UI revision.
+  // Reload replaces the complete catalog rather than silently inheriting
+  // stale imports from the preceding published generation.
+  std::vector<UiXmlModuleSource> xml_modules = {};
 };
 
 /// Registered before the UI is built. The component's XML is compiled
@@ -388,6 +393,22 @@ public:
   DesktopApplicationBuilder &operator=(DesktopApplicationBuilder &&) noexcept;
 
   DesktopApplicationBuilder &xml_entry(std::string source);
+
+  /// Add one trusted, immutable module source to the initial XML generation.
+  /// This is NOT a file-system loader. The application declares module
+  /// identity/path/version and SHA-256 in <imports>; the compiler requires
+  /// the exact byte content from this explicit catalog. Reload supplies its
+  /// own complete catalog through DesktopApplicationSources::xml_modules.
+  DesktopApplicationBuilder &xml_module_source(
+      std::string source_key, std::string xml);
+
+  /// Required only when XML imports are present. Called synchronously on
+  /// the UI owner thread during initial build/reload with borrowed source
+  /// bytes and output digest; the host must use its canonical crypto
+  /// provider, and userdata must remain valid through every candidate
+  /// compilation. No implicit hash implementation or fallback is installed.
+  DesktopApplicationBuilder &xml_module_sha256_provider(
+      UiXmlSha256Provider provider);
 
   /// Statically compose an XML fragment below a structural host element ID.
   /// Scopes must be unique; local element IDs are requalified before

@@ -12,6 +12,7 @@
 #include <new>
 #include <string>
 #include <string_view>
+#include <vector>
 
 #ifndef FLEXUI_DESKTOP_EDITOR_ASSET_DIRECTORY_NAME
   #error FLEXUI_DESKTOP_EDITOR_ASSET_DIRECTORY_NAME must name the editor asset directory
@@ -34,6 +35,7 @@ struct SourceBundle {
   std::string xml;
   std::string css;
   std::string script;
+  std::vector<flexUI::UiXmlModuleSource> modules;
 };
 
 int fail(std::string_view stage, std::string_view message) {
@@ -79,9 +81,57 @@ bool read_bounded_file(const std::filesystem::path &path, std::string &output, s
 }
 
 bool load_sources(const std::filesystem::path &root, SourceBundle &sources, std::string &error) {
-  return read_bounded_file(root / "editor.xml", sources.xml, error) &&
-         read_bounded_file(root / "editor.css", sources.css, error) &&
-         read_bounded_file(root / "editor.tbs", sources.script, error);
+  if (!read_bounded_file(root / "editor.xml", sources.xml, error) ||
+      !read_bounded_file(root / "editor.css", sources.css, error) ||
+      !read_bounded_file(root / "editor.tbs", sources.script, error))
+    return false;
+  // Ask the ONE XML adapter for the declared import keys. Never scan the
+  // directory, parse XML with another library, infer a default module source
+  // or silently load an unreferenced file.
+  const auto inspected = flexUI::inspect_ui_xml_imports(sources.xml);
+  if (!inspected) {
+    error = "editor XML import manifest rejected: " + inspected.error.message;
+    return false;
+  }
+  if (inspected.imports.empty()) return true;
+  std::error_code path_error;
+  const auto trusted_root = std::filesystem::canonical(root, path_error);
+  if (path_error) {
+    error = "could not resolve the editor asset root";
+    return false;
+  }
+  std::size_t remaining = flexUI::UiDocumentLimits{}.max_source_bytes;
+  if (sources.xml.size() > remaining) {
+    error = "editor source exceeds the combined XML source budget";
+    return false;
+  }
+  remaining -= sources.xml.size();
+  for (const auto &entry : inspected.imports) {
+    // The scanner already rejects unsafe relative keys, but the resolved
+    // on-disk path must ALSO remain beneath the trusted package root.
+    const auto file = std::filesystem::canonical(
+        trusted_root / std::filesystem::path(entry.source), path_error);
+    if (path_error) {
+      error = "declared XML module asset missing: " + entry.source;
+      return false;
+    }
+    auto relative = file.lexically_relative(trusted_root);
+    if (relative.empty() || relative.is_absolute() ||
+        *relative.begin() == "..") {
+      error = "declared XML module asset escapes the editor package: " + entry.source;
+      return false;
+    }
+    std::string module_bytes;
+    if (!read_bounded_file(file, module_bytes, error))
+      return false;
+    if (module_bytes.size() > remaining) {
+      error = "editor XML module source exceeds combined byte budget: " + entry.source;
+      return false;
+    }
+    remaining -= module_bytes.size();
+    sources.modules.push_back({entry.source, std::move(module_bytes)});
+  }
+  return true;
 }
 
 flexUI::GCanvasWindowHostConfig window_config(bool smoke) {
@@ -118,6 +168,12 @@ flexUI::DesktopApplicationBuilder application_builder(SourceBundle sources) {
       .stylesheet(std::move(sources.css))
       .script(std::move(sources.script),
               flexUI::make_turboscript_desktop_module_factory(script_options), "desktop-editor");
+  for (auto &module : sources.modules)
+    builder.xml_module_source(std::move(module.source), std::move(module.xml));
+  // No host SHA-256 engine is registered until a single canonical released
+  // Crypto Provider is qualified. Any declared import currently fails
+  // closed at the real DesktopApplication compile boundary, never silently
+  // accepts a fixed-digest test oracle or a second engine.
   return builder;
 }
 

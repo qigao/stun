@@ -1254,14 +1254,95 @@ UiDocumentCompileResult compile_scoped_ui_components(
           "ownership contract");
       return result;
     }
-    const auto added = count_nodes(instance.program->definition().root);
-    if (added > limits.max_nodes - used_nodes) {
+    // Count the exact candidate after replacing compile-only outlets,
+    // before copying any caller content. All quotas remain fail-closed.
+    const auto template_nodes = count_nodes(instance.program->definition().root);
+    if (template_nodes > limits.max_nodes - used_nodes) {
       result.error = make_error(
           UiDocumentErrorCode::NodeLimitExceeded,
           "combined scoped XML components exceed application node budget");
       return result;
     }
-    used_nodes += added;
+    std::unordered_map<std::string, const CompiledUiProgram *> named_fills;
+    const auto valid_slot_name = [&limits](const std::string &name) {
+      if (name.empty() || name.size() > limits.max_string_bytes) return false;
+      const auto initial = [](char c) {
+        return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '_';
+      };
+      if (!initial(name.front())) return false;
+      return std::all_of(name.begin() + 1, name.end(), [&](char c) {
+        return initial(c) || (c >= '0' && c <= '9') || c == '-';
+      });
+    };
+    std::unordered_set<std::string> declared_outlets;
+    std::vector<const UiNodeDefinition *> template_nodes_to_visit{
+        &instance.program->definition().root};
+    while (!template_nodes_to_visit.empty()) {
+      const auto *node = template_nodes_to_visit.back();
+      template_nodes_to_visit.pop_back();
+      if (node->tag == "slot") {
+        const auto at = node->properties.find("name");
+        const auto *name = at == node->properties.end()
+                               ? nullptr : std::get_if<std::string>(&at->second);
+        if (node == &instance.program->definition().root ||
+            !node->id.empty() || !node->children.empty() ||
+            !node->native_widget_key.empty() || node->properties.size() != 1 ||
+            !name || !valid_slot_name(*name)) {
+          result.error = make_error(UiDocumentErrorCode::InvalidNode,
+                                    "component slot outlet needs only a valid name",
+                                    node->source.line, node->source.column);
+          return result;
+        }
+        if (!declared_outlets.emplace(*name).second) {
+          result.error = make_error(UiDocumentErrorCode::DuplicateSlot,
+                                    "duplicate component slot outlet: " + *name,
+                                    node->source.line, node->source.column);
+          return result;
+        }
+      }
+      for (const auto &child : node->children)
+        template_nodes_to_visit.push_back(&child);
+    }
+    // Each declared outlet removes one compile-only node; its one caller
+    // root takes its place, keeping exact expanded node-budget accounting.
+    std::size_t staged_nodes = template_nodes - declared_outlets.size();
+    if (instance.slot_fills.size() > limits.max_nodes) {
+      result.error = make_error(UiDocumentErrorCode::NodeLimitExceeded,
+                                "too many scoped slot fills");
+      return result;
+    }
+    for (const auto &fill : instance.slot_fills) {
+      if (!valid_slot_name(fill.name) || !fill.program ||
+          !named_fills.emplace(fill.name, fill.program.get()).second) {
+        result.error = make_error(UiDocumentErrorCode::DuplicateSlot,
+                                  "slot fills need unique valid names and one compiled root");
+        return result;
+      }
+      if (!fill.program->resources().empty()) {
+        result.error = make_error(UiDocumentErrorCode::UnsupportedComponentResources,
+                                  "caller slot resources require an explicit resource owner");
+        return result;
+      }
+      const auto nodes = count_nodes(fill.program->definition().root);
+      if (nodes > limits.max_nodes - used_nodes - staged_nodes) {
+        result.error = make_error(UiDocumentErrorCode::NodeLimitExceeded,
+                                  "scoped slot fills exceed combined XML node budget");
+        return result;
+      }
+      staged_nodes += nodes;
+    }
+    if (declared_outlets.size() != named_fills.size()) {
+      result.error = make_error(UiDocumentErrorCode::MissingSlot,
+                                "caller fills must match the declared slot set");
+      return result;
+    }
+    for (const auto &name : declared_outlets) {
+      if (named_fills.find(name) == named_fills.end()) {
+        result.error = make_error(UiDocumentErrorCode::MissingSlot,
+                                  "component slot is missing its caller fill: " + name);
+        return result;
+      }
+    }
     // Host lookup occurs on the new private candidate for each insertion.
     // Only base_hosts are allowed so a child component cannot attach to a
     // prior component or depend on insertion order.
@@ -1450,6 +1531,78 @@ UiDocumentCompileResult compile_scoped_ui_components(
       }
       for (auto &child : node->children) nodes.push_back(&child);
     }
+    // Replace compile-only <slot name="..."/> outlets in the PRIVATE
+    // candidate AFTER the template's ID/IDREF and input aliases are scoped.
+    // Caller-filled XML therefore preserves its own binding and handler
+    // expressions: a child authored by the caller never borrows the
+    // component's lexical data scope. Each slot currently accepts exactly
+    // one immutable caller root; wider cardinality belongs to the next gate.
+    std::unordered_set<std::string> placed_fills;
+    std::vector<UiNodeDefinition *> outlets{&subtree};
+    while (!outlets.empty()) {
+      UiNodeDefinition *node = outlets.back();
+      outlets.pop_back();
+      if (node->tag == "slot") {
+        const auto name = node->properties.find("name");
+        const auto *slot_name = name != node->properties.end()
+                                    ? std::get_if<std::string>(&name->second)
+                                    : nullptr;
+        if (node == &subtree || !node->id.empty() || !node->children.empty() ||
+            !node->native_widget_key.empty() || node->properties.size() != 1 ||
+            !slot_name || !valid_slot_name(*slot_name)) {
+          result.error = make_error(
+              UiDocumentErrorCode::InvalidNode,
+              "component slot must be a nametag-only, childless non-root outlet",
+              node->source.line, node->source.column);
+          return result;
+        }
+        if (!placed_fills.emplace(*slot_name).second) {
+          result.error = make_error(UiDocumentErrorCode::DuplicateSlot,
+                                    "duplicate component slot outlet: " + *slot_name,
+                                    node->source.line, node->source.column);
+          return result;
+        }
+        const auto fill = named_fills.find(*slot_name);
+        if (fill == named_fills.end()) {
+          result.error = make_error(UiDocumentErrorCode::MissingSlot,
+                                    "missing caller fill for component slot: " + *slot_name,
+                                    node->source.line, node->source.column);
+          return result;
+        }
+        *node = fill->second->definition().root;
+        // No nested compile-only outlet or private native factory key may
+        // escape through caller content: final Registry preflight sees only
+        // genuine Elements and Widgets.
+        std::vector<const UiNodeDefinition *> filled{node};
+        while (!filled.empty()) {
+          const UiNodeDefinition *child = filled.back();
+          filled.pop_back();
+          if (child->tag == "slot" || !child->native_widget_key.empty()) {
+            result.error = make_error(
+                UiDocumentErrorCode::InvalidComponentScope,
+                "caller slot content cannot contain another slot or native factory key",
+                child->source.line, child->source.column);
+            return result;
+          }
+          for (const auto &nested : child->children) filled.push_back(&nested);
+        }
+        continue;
+      }
+      for (auto &child : node->children) outlets.push_back(&child);
+    }
+    if (placed_fills.size() != named_fills.size()) {
+      result.error = make_error(UiDocumentErrorCode::MissingSlot,
+                                "caller slot fill does not match a declared component outlet");
+      return result;
+    }
+    const auto added = count_nodes(subtree);
+    if (added > limits.max_nodes - used_nodes) {
+      result.error = make_error(UiDocumentErrorCode::NodeLimitExceeded,
+                                "expanded scoped XML exceeds the combined node budget");
+      return result;
+    }
+    used_nodes += added;
+
     // Capture exact structural owner provenance BEFORE transferring the
     // component root to the merged document. Root ordinals resolve even an
     // anonymous component root. Parent indices resolve every other anonymous
