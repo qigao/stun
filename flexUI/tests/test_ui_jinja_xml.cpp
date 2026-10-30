@@ -31,7 +31,8 @@ cmeta_reflect_data(StudioTextInputs, "stun.test.StudioTextInputs",
     // cmeta_data_desc_valid() rejects the complete root metadata at render.
     cmeta_data_field_id(vstr, title, "stun.test.StudioTextInputs.title",
                         jinja_cmeta_vstr_data(),
-                        jinja_cmeta_vstr_data()->storage_type));
+                        static_cast<const cmeta_type_desc *>(
+                            jinja_cmeta_vstr_data()->storage_type)));
 
 flexUI::UiJinjaXmlCompileResult compile(
     std::string_view source, const StudioInputs& inputs,
