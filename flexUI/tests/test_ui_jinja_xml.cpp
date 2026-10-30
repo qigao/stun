@@ -45,7 +45,7 @@ spec("FlexUI uses installed JinjaCMeta only as a staged XML author compiler") {
           {% endif %}
         </main>
       </ui>
-    )");
+    )", input);
     check_true(static_cast<bool>(compiled));
     if (compiled) {
       check_equal(compiled.program->name(), "JinjaStudio");
