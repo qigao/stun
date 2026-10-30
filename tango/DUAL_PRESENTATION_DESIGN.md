@@ -100,6 +100,34 @@ unregistered and unsupported until #342's native GPU acceptance.
 A driver rejection after frame begin is not an atomic GPU rollback.
 This new source does not change native Tango TTY behavior.
 
+## Mesa / Xvfb actual GPU pixel qualification
+
+`tango/tests/opengl-smoke/` configures the **real** `tango` C11,
+`Flex::Render`, gCanvas OpenGL shader/glyph renderer, and the
+separate `flex_backend_tango_opengl` from their exact production sources.
+It deliberately does not import the old XML/CSS UI app, Flex DSL parser,
+NanoVG or a fake GPU renderer.
+
+`tango_gl_real_pixel_smoke` creates a real GLFW OpenGL 4.1 core
+context under Mesa/Xvfb, selects two explicit regular/bold monospaced font
+files (both required, no implicit default family fallback), captures a
+Tango-owned grid and renders it through the actual gCanvas GL graphics
+pipeline. It reads back GL framebuffer pixels and validates independently
+colored backgrounds plus the presence of a rasterized glyph; failure
+before frame submission must leave the preceding GPU image intact.
+It writes the actual `glReadPixels` frame to a PPM artifact. CI logs the
+driver GL vendor/renderer/profile and immutable source HEAD.
+
+The independent `Tango OpenGL native pixels` workflow uses pinned
+SHA256-verified Salts SDK, pinned vcpkg baseline, separate dependency
+cache, verified ccache and an explicit llvmpipe driver. It is not a CPU
+mock and is not a physical GPU test. The exact-HEAD pixel evidence,
+if/when passing, qualifies only this fixed 8×4 ASCII/colored-cell GL
+scenario. It does **not** prove Unicode font coverage, cell→pixel hit
+testing, window IME, device-loss/retirement or a bounded atlas-wide
+pipeline. Keep the public `RendererBackend::TangoOpenGL` factory
+unregistered, and #342 open, until those separate production gates pass.
+
 ## Native TTY presenter
 
 Owns/borrows the terminal, validates the bounded buffer, produces VT diff

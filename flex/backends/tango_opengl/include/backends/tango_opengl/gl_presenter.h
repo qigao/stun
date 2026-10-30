@@ -18,10 +18,12 @@ struct ExternalGLCellCreateInfo {
     // presenter. The host owns window buffer swapping.
     opengl_backend::OpenGLProcLoader get_proc_address = nullptr;
     void* proc_user_data = nullptr;
-    // Explicitly register the exact tested terminal font; if supplied but
-    // registration fails the presenter creation is rejected, not downgraded.
+    // Both regular and bold font files are mandatory. Empty/missing paths
+    // must fail before a frame instead of silently falling back to gCanvas's
+    // default font or pretending that regular glyphs are bold glyphs.
     std::string font_family = "tango-monospace";
     std::string font_path;
+    std::string bold_font_path;
 };
 
 // Owns gCanvas's real GL renderer and shader/glyph resources. It draws
