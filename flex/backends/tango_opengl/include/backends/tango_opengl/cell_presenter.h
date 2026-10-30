@@ -144,6 +144,11 @@ public:
     // no submitted plan is available. This distinguishes two presents that
     // happen to share the same C11 source revision.
     std::uint64_t submission_id() const;
+    // Exact renderer-owned GPU object identities, not estimated glyph
+    // handles. Available only on the GL/UI owner for a submitted frame;
+    // requires the native renderer's current context and a qualified
+    // resource-inventory implementation.
+    std::vector<NativeRendererResourceId> native_gpu_resource_ids() const;
     // Hit testing is available only for the last frame whose synchronous
     // end_frame() succeeded, and only on the GL owner. An invalid input
     // rejected before rendering preserves the prior submitted plan.

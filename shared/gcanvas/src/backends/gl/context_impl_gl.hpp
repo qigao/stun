@@ -164,6 +164,8 @@ namespace GCANVAS_GL_PROFILE_NAMESPACE
         ~ContextImplGl() override;
 
         Backend backend() const noexcept override { return _backend; }
+        bool native_gpu_resource_ids(
+            std::vector<NativeGpuResourceId>& out) const override;
         void stroke_rect(float x, float y, float width, float height) override;
         void stroke_rounded_rect(float x, float y, float width, float height,
                                  float border_radius) override;

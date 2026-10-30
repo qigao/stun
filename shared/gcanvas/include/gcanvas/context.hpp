@@ -37,6 +37,19 @@ namespace gcanvas
         float dpi_scale = 1.0f;
     };
 
+
+    // Backend-owned native GPU object identities. A GL name is valid ONLY
+    // within its creating context/device generation; callers must attach
+    // their own generation and native completion scope. This is a bounded
+    // inventory, not permission to mutate or destroy GPU resources.
+    enum class NativeGpuResourceKind : std::uint8_t {
+        ShaderProgram, GlyphAtlas, ImageTexture, InternalTexture
+    };
+    struct NativeGpuResourceId {
+        NativeGpuResourceKind kind{};
+        std::uint64_t native_name = 0;
+    };
+
     struct ResourceLimits
     {
         std::size_t max_images = 256;
@@ -64,6 +77,16 @@ namespace gcanvas
         Context& operator=(const Context&) = delete;
 
         virtual Backend backend() const noexcept = 0;
+
+        // Optional actual native GPU object inventory. Returns false for
+        // backends without a qualified implementation. Native GL callers
+        // must own and activate the correct original GL context.
+        // The output contains no borrowed pointers or GPU handles to delete.
+        virtual bool native_gpu_resource_ids(
+            std::vector<NativeGpuResourceId>& out) const {
+            (void)out;
+            return false;
+        }
 
         virtual void stroke_rect(float x, float y, float width, float height) = 0;
         virtual void stroke_rounded_rect(float x, float y, float width, float height,

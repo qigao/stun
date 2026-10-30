@@ -12,6 +12,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <string>
+#include <vector>
 
 namespace flex::tango_opengl {
 
@@ -104,6 +105,17 @@ private:
  * Destruction with outstanding GPU work or lost context terminates rather
  * than freeing unsafe GL objects. This is not surprise device-loss recovery.
  */
+struct NativeGLResourceLease final {
+    NativeRendererResourceKind kind{};
+    std::uint64_t native_name = 0;
+    std::uint64_t device_generation = 0;
+    std::uint64_t source_revision = 0;
+    std::uint64_t submission_id = 0;
+    bool gpu_completed = false;
+};
+
+// Bind actual gCanvas GPU texture/atlas/shader names (not a guessed draw
+// recipe) to the exact native GLsync's submission and device generation.
 class NativeGLPresentationOwner final {
 public:
     NativeGLPresentationOwner(
@@ -126,6 +138,9 @@ public:
     std::uint64_t last_retired_submission() const;
     std::uint64_t device_generation() const noexcept;
     const CellPixelPresenter& submitted_presenter() const;
+    // Snapshot is copied; no caller can delete or mutate a GPU resource.
+    // Native names are meaningful ONLY with their recorded generation.
+    std::vector<NativeGLResourceLease> gpu_resource_leases() const;
     std::shared_ptr<CellHostFrameGate> input_gate() const noexcept;
     void close();
     bool closed() const noexcept;
@@ -135,6 +150,7 @@ private:
     std::unique_ptr<CellPixelPresenter> presenter_;
     std::shared_ptr<CellHostFrameGate> gate_;
     bool closed_ = false;
+    std::vector<NativeGLResourceLease> resource_leases_;
     // If paint or GLsync publication fails after native GL work may have
     // begun, no successful fence proves those commands completed.
     bool unfenced_failure_ = false;

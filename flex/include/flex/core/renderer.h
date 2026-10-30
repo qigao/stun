@@ -8,6 +8,7 @@
 #pragma once
 
 #include "flex/core/types.h"
+#include <cstdint>
 #include <string>
 #include <vector>
 

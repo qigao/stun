@@ -6,6 +6,8 @@
 #include <backends/tango_opengl/gl_presenter.h>
 
 #include <exception>
+#include <cstdint>
+#include <vector>
 #include <stdexcept>
 #include <utility>
 
@@ -67,9 +69,45 @@ void NativeGLPresentationOwner::present_and_fence(
     }
 
     try {
-        // All gCanvas shader/glyph draw commands have now been submitted.
-        // A missing GLsync is an unsafe lifetime state, never a green frame.
+        // Read actual GL-backed texture names and shader program from the
+        // existing gCanvas Context, validated using glIsTexture/glIsProgram.
+        // It requires the exact owning native context and a completed draw.
+        const auto native_ids = presenter_->native_gpu_resource_ids();
+        if (native_ids.empty() || native_ids.size() > 64u)
+            throw std::length_error(
+                "TangoGL native GPU resource lease inventory exceeds budget");
+        const auto submission = presenter_->submission_id();
+        const auto* plan = presenter_->last_submitted_plan();
+        if (!submission || !plan || !plan->grid_revision())
+            throw std::logic_error(
+                "TangoGL resource leasing requires an actual completed C11 frame");
+
+        bool shader = false;
+        bool font_atlas = false;
+        std::vector<NativeGLResourceLease> staged;
+        staged.reserve(native_ids.size());
+        for (const auto& id : native_ids) {
+            if (!id.native_name)
+                throw std::logic_error("TangoGL native resource lease has zero GPU ID");
+            if (id.kind == NativeRendererResourceKind::ShaderProgram) {
+                if (shader) throw std::logic_error("TangoGL has duplicate native shader");
+                shader = true;
+            } else if (id.kind == NativeRendererResourceKind::GlyphAtlas) {
+                font_atlas = true;
+            }
+            staged.push_back({id.kind, id.native_name,
+                              fences_.device_generation(), plan->grid_revision(),
+                              submission, false});
+        }
+        if (!shader || !font_atlas)
+            throw std::logic_error(
+                "TangoGL actual GPU inventory is missing shader or glyph atlas");
+
+        // A GLsync after draw follows all resource uses in this native
+        // context. Assign leases only after the real fence was published;
+        // vector::swap is noexcept and cannot leave partial resource IDs.
         fences_.record_submitted_frame(*presenter_);
+        resource_leases_.swap(staged);
     } catch (...) {
         unfenced_failure_ = true;
         gate_->invalidate_geometry();
@@ -81,7 +119,18 @@ NativeGLFencePoll NativeGLPresentationOwner::retire_completed(
     std::uint64_t timeout_nanoseconds) {
     if (closed_)
         throw std::logic_error("TangoGL owner cannot poll after retirement");
-    return fences_.retire_completed(timeout_nanoseconds);
+    const auto outcome = fences_.retire_completed(timeout_nanoseconds);
+    if (outcome == NativeGLFencePoll::Drained) {
+        const auto completed = fences_.last_retired_submission();
+        for (auto& lease : resource_leases_) {
+            if (lease.device_generation != fences_.device_generation() ||
+                !lease.submission_id || lease.submission_id > completed)
+                throw std::logic_error(
+                    "TangoGL GPU object retired outside its native device/fence generation");
+            lease.gpu_completed = true;
+        }
+    }
+    return outcome;
 }
 
 void NativeGLPresentationOwner::require_capacity() const {
@@ -98,6 +147,11 @@ void NativeGLPresentationOwner::require_capacity() const {
     if (fences_.in_flight() != 0)
         throw std::logic_error(
             "TangoGL cannot mutate shared atlas/texture/shader while a prior GPU frame is in flight");
+    for (const auto& lease : resource_leases_) {
+        if (!lease.gpu_completed)
+            throw std::logic_error(
+                "TangoGL cannot mutate a native GPU object whose resource lease is not retired");
+    }
 }
 
 std::size_t NativeGLPresentationOwner::in_flight() const {
@@ -119,6 +173,12 @@ const CellPixelPresenter& NativeGLPresentationOwner::submitted_presenter() const
     return *presenter_;
 }
 
+std::vector<NativeGLResourceLease>
+NativeGLPresentationOwner::gpu_resource_leases() const {
+    (void)fences_.in_flight(); // Owner-thread-only access.
+    return resource_leases_;
+}
+
 std::shared_ptr<CellHostFrameGate>
 NativeGLPresentationOwner::input_gate() const noexcept {
     return gate_;
@@ -130,6 +190,12 @@ void NativeGLPresentationOwner::close() {
         throw std::logic_error(
             "TangoGL cannot destroy gCanvas assets after unfenced native failure");
     // Requires the ORIGINAL native context + owner and zero in-flight GLsync.
+    // Also reject deleting any actual gCanvas shader/atlas/image resource
+    // whose last GPU usage has not been proven completed by its native fence.
+    for (const auto& lease : resource_leases_)
+        if (!lease.gpu_completed)
+            throw std::logic_error(
+                "TangoGL cannot destroy a shader/atlas/image before its GPU lease retires");
     // On failure the renderer stays owned and alive, never half-retired.
     fences_.close();
     gate_->retire_device(); // Retire callbacks before deleting GPU assets.

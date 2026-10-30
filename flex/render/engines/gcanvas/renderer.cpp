@@ -246,6 +246,44 @@ public:
     frame_active_ = false;
   }
 
+  bool native_gpu_resource_ids(
+      std::vector<NativeRendererResourceId>& out) const override {
+#if defined(FLEX_GCANVAS_HAS_OPENGL)
+    if (!owned_context_ || !external_state_) return false;
+    std::vector<::gcanvas::NativeGpuResourceId> actual;
+    if (!context_.native_gpu_resource_ids(actual)) return false;
+    std::vector<NativeRendererResourceId> staged;
+    staged.reserve(actual.size());
+    for (const auto& id : actual) {
+      if (!id.native_name)
+        throw std::logic_error("gCanvas native GPU inventory has a zero ID");
+      NativeRendererResourceKind kind{};
+      switch (id.kind) {
+      case ::gcanvas::NativeGpuResourceKind::ShaderProgram:
+        kind = NativeRendererResourceKind::ShaderProgram;
+        break;
+      case ::gcanvas::NativeGpuResourceKind::GlyphAtlas:
+        kind = NativeRendererResourceKind::GlyphAtlas;
+        break;
+      case ::gcanvas::NativeGpuResourceKind::ImageTexture:
+        kind = NativeRendererResourceKind::ImageTexture;
+        break;
+      case ::gcanvas::NativeGpuResourceKind::InternalTexture:
+        kind = NativeRendererResourceKind::InternalTexture;
+        break;
+      default:
+        throw std::logic_error("gCanvas native GPU resource has unknown kind");
+      }
+      staged.push_back({kind, id.native_name});
+    }
+    out = std::move(staged);
+    return true;
+#else
+    (void)out;
+    return false;
+#endif
+  }
+
   void set_retained_mode(bool enabled) override {
     if (enabled) {
       unsupported("retained mode");
