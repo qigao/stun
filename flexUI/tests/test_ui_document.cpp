@@ -2001,3 +2001,327 @@ spec("Scoped XML components preserve local label and accessibility references") 
                 std::size_t{1});
   }
 }
+
+
+spec("FlexUI named XML slots remain compile-only inside scoped components") {
+  it("fills the single declared outlet while keeping caller bindings and event scope") {
+    const auto app = flexUI::compile_ui_xml(
+        "<ui name=\"App\"><main id=\"root\"><section id=\"host\"/></main></ui>");
+    const auto panel = flexUI::compile_ui_xml(R"xml(
+      <ui name="Panel" xmlns:bind="urn:flexui:binding">
+        <div id="panel">
+          <label id="caption" bind:text="$local"/>
+          <slot name="actions"/>
+        </div>
+      </ui>
+    )xml");
+    const auto caller = flexUI::compile_ui_xml(R"xml(
+      <ui name="Actions" xmlns:on="urn:flexui:event"
+          xmlns:bind="urn:flexui:binding">
+        <button id="save" on:click="save_handler" bind:text="$caption"/>
+      </ui>
+    )xml");
+    check(static_cast<bool>(app));
+    check(static_cast<bool>(panel));
+    check(static_cast<bool>(caller));
+    if (!app || !panel || !caller) return;
+
+    const auto registry = flexUI::WidgetRegistry::builtins();
+    const auto result = flexUI::compile_scoped_ui_components(
+        *app.program,
+        {{"sales", "host", panel.program,
+          {{"local", "sales_local"}}, {{"actions", caller.program}}}},
+        registry);
+    check(static_cast<bool>(result));
+    if (!result) return;
+    check_equal(result.program->bindings().size(), std::size_t{2});
+    bool component_binding = false;
+    bool caller_binding = false;
+    for (const auto &binding : result.program->bindings()) {
+      if (binding.element_id == "sales::caption") {
+        component_binding = true;
+        check_equal(binding.expression, "sales_local");
+      }
+      if (binding.element_id == "save") {
+        caller_binding = true;
+        check_equal(binding.expression, "caption");
+      }
+    }
+    check(component_binding);
+    check(caller_binding);
+    check_equal(result.program->event_bindings().size(), std::size_t{1});
+    check_equal(result.program->event_bindings().front().element_id, "save");
+    check_equal(result.program->event_bindings().front().handler, "save_handler");
+    check_equal(result.scoped_ownership.size(), std::size_t{1});
+    check_equal(result.scoped_ownership.front().nodes.size(), std::size_t{3});
+
+    flexUI::Box box(nullptr);
+    box.bindings().inputs().set_string("sales_local", "Component title");
+    box.bindings().inputs().set_string("caption", "Caller action");
+    const auto mounted = flexUI::UiDocumentInstantiator::instantiate(
+        box, *result.program, registry);
+    check(static_cast<bool>(mounted));
+    if (!mounted) return;
+    check_not_null(box.get_by_id("sales::panel"));
+    check_not_null(box.get_by_id("sales::caption"));
+    check_not_null(box.get_by_id("save"));
+    check_null(box.get_by_id("slot"));
+    box.update();
+    check_equal(box.get_by_id("sales::caption")->text(), "Component title");
+  }
+
+  it("rejects missing, unknown, duplicated or malformed named outlets before publication") {
+    const auto app = flexUI::compile_ui_xml(
+        "<ui name=\"App\"><main id=\"root\"><section id=\"host\"/></main></ui>");
+    const auto one = flexUI::compile_ui_xml(
+        "<ui name=\"Panel\"><div id=\"panel\"><slot name=\"actions\"/></div></ui>");
+    const auto twice = flexUI::compile_ui_xml(
+        "<ui name=\"Panel\"><div id=\"panel\"><slot name=\"actions\"/><slot name=\"actions\"/></div></ui>");
+    const auto invalid = flexUI::compile_ui_xml(
+        "<ui name=\"Panel\"><div id=\"panel\"><slot name=\"actions\" text=\"bad\"/></div></ui>");
+    const auto root_slot = flexUI::compile_ui_xml(
+        "<ui name=\"Panel\"><slot name=\"actions\"/></ui>");
+    const auto action = flexUI::compile_ui_xml(
+        "<ui name=\"Caller\"><button id=\"save\" text=\"Save\"/></ui>");
+    const auto nested_slot = flexUI::compile_ui_xml(
+        "<ui name=\"Caller\"><div><slot name=\"nested\"/></div></ui>");
+    check(static_cast<bool>(app));
+    check(static_cast<bool>(one));
+    check(static_cast<bool>(twice));
+    check(static_cast<bool>(invalid));
+    check(static_cast<bool>(root_slot));
+    check(static_cast<bool>(action));
+    check(static_cast<bool>(nested_slot));
+    if (!app || !one || !twice || !invalid || !root_slot ||
+        !action || !nested_slot) return;
+
+    const auto registry = flexUI::WidgetRegistry::builtins();
+    const auto rejected = [&](const std::shared_ptr<const flexUI::CompiledUiProgram> &panel,
+                              std::vector<flexUI::UiScopedSlotFill> fills,
+                              flexUI::UiDocumentErrorCode expected) {
+      auto assembled = flexUI::compile_scoped_ui_components(
+          *app.program, {{"test", "host", panel, {}, std::move(fills)}}, registry);
+      check_false(static_cast<bool>(assembled));
+      check_null(assembled.program.get());
+      check(assembled.scoped_ownership.empty());
+      check(assembled.error.code == expected);
+    };
+    rejected(one.program, {}, flexUI::UiDocumentErrorCode::MissingSlot);
+    rejected(one.program, {{"other", action.program}}, flexUI::UiDocumentErrorCode::MissingSlot);
+    rejected(one.program, {{"actions", action.program}, {"actions", action.program}},
+             flexUI::UiDocumentErrorCode::DuplicateSlot);
+    rejected(twice.program, {{"actions", action.program}},
+             flexUI::UiDocumentErrorCode::DuplicateSlot);
+    rejected(invalid.program, {{"actions", action.program}},
+             flexUI::UiDocumentErrorCode::InvalidNode);
+    rejected(root_slot.program, {{"actions", action.program}},
+             flexUI::UiDocumentErrorCode::InvalidNode);
+    rejected(one.program, {{"actions", nested_slot.program}},
+             flexUI::UiDocumentErrorCode::InvalidComponentScope);
+  }
+
+  it("charges exact expanded nodes and never publishes colliding caller IDs") {
+    const auto app = flexUI::compile_ui_xml(
+        "<ui name=\"App\"><main id=\"root\"><section id=\"left\"/><section id=\"right\"/></main></ui>");
+    const auto panel = flexUI::compile_ui_xml(
+        "<ui name=\"Panel\"><div id=\"panel\"><slot name=\"actions\"/></div></ui>");
+    const auto action = flexUI::compile_ui_xml(
+        "<ui name=\"Caller\"><button id=\"save\" text=\"Save\"/></ui>");
+    check(static_cast<bool>(app));
+    check(static_cast<bool>(panel));
+    check(static_cast<bool>(action));
+    if (!app || !panel || !action) return;
+    const auto registry = flexUI::WidgetRegistry::builtins();
+    flexUI::UiDocumentLimits limits;
+    limits.max_nodes = 5;
+    const auto valid = flexUI::compile_scoped_ui_components(
+        *app.program, {{"first", "left", panel.program, {}, {{"actions", action.program}}}},
+        registry, limits);
+    check(static_cast<bool>(valid));
+    limits.max_nodes = 4;
+    const auto too_many = flexUI::compile_scoped_ui_components(
+        *app.program, {{"first", "left", panel.program, {}, {{"actions", action.program}}}},
+        registry, limits);
+    check_false(static_cast<bool>(too_many));
+    check(too_many.error.code == flexUI::UiDocumentErrorCode::NodeLimitExceeded);
+    check(too_many.scoped_ownership.empty());
+
+    const auto duplicate = flexUI::compile_scoped_ui_components(
+        *app.program,
+        {{"first", "left", panel.program, {}, {{"actions", action.program}}},
+         {"second", "right", panel.program, {}, {{"actions", action.program}}}},
+        registry);
+    check_false(static_cast<bool>(duplicate));
+    check(duplicate.error.code == flexUI::UiDocumentErrorCode::DuplicateElementId);
+    check_null(duplicate.program.get());
+    check(duplicate.scoped_ownership.empty());
+  }
+}
+
+
+spec("FlexUI XML component declarations lower through the one scoped compiler") {
+  it("compiles local typed Props and named caller fills into a single Box-owned UI") {
+    const auto registry = flexUI::WidgetRegistry::builtins();
+    const auto compiled = flexUI::compile_ui_xml(R"xml(
+      <ui name="Studio" xmlns:on="urn:flexui:event" xmlns:bind="urn:flexui:binding">
+        <components>
+          <component name="EditorPanel">
+            <interface>
+              <prop name="title" type="string" required="true"/>
+              <slot name="actions"/>
+            </interface>
+            <template>
+              <section id="panel">
+                <label id="heading" text="$props.title"/>
+                <slot name="actions"/>
+              </section>
+            </template>
+          </component>
+        </components>
+        <main id="root">
+          <EditorPanel id="editor" title="007">
+            <fill name="actions">
+              <button id="save" on:click="save_document" bind:text="$caption"/>
+            </fill>
+          </EditorPanel>
+        </main>
+      </ui>
+    )xml", registry, flexUI::UiDocumentLimits{});
+    check(static_cast<bool>(compiled));
+    if (!compiled) return;
+    check_equal(compiled.scoped_ownership.size(), std::size_t{1});
+    check_equal(compiled.scoped_ownership.front().scope, "editor");
+    check_equal(compiled.scoped_ownership.front().nodes.size(), std::size_t{3});
+    check_equal(compiled.program->bindings().size(), std::size_t{1});
+    check_equal(compiled.program->bindings().front().element_id, "save");
+    check_equal(compiled.program->bindings().front().expression, "caption");
+    check_equal(compiled.program->event_bindings().size(), std::size_t{1});
+    check_equal(compiled.program->event_bindings().front().element_id, "save");
+    check_equal(compiled.program->event_bindings().front().handler, "save_document");
+
+    flexUI::Box box(nullptr);
+    box.bindings().inputs().set_string("caption", "Save");
+    const auto mounted = flexUI::UiDocumentInstantiator::instantiate(
+        box, *compiled.program, registry);
+    check(static_cast<bool>(mounted));
+    if (!mounted) return;
+    check_not_null(box.get_by_id("editor"));
+    check_not_null(box.get_by_id("editor::panel"));
+    check_not_null(box.get_by_id("editor::heading"));
+    check_not_null(box.get_by_id("save"));
+    check_null(box.get_by_id("heading"));
+    box.update();
+    check_equal(box.get_by_id("editor::heading")->text(), "007");
+  }
+
+  it("supports multiple private component instances and literal XML-looking Props") {
+    const auto registry = flexUI::WidgetRegistry::builtins();
+    const auto compiled = flexUI::compile_ui_xml(R"xml(
+      <ui name="Cards">
+        <components>
+          <component name="CardPanel">
+            <interface>
+              <prop name="title" type="string" required="true"/>
+              <prop name="rating" type="number" required="true"/>
+              <prop name="enabled" type="boolean" required="true"/>
+              <slot name="content"/>
+            </interface>
+            <template>
+              <section id="card">
+                <label id="name" text="$props.title"/>
+                <progress id="progress" value="$props.rating"/>
+                <checkbox id="active" checked="$props.enabled"/>
+                <slot name="content"/>
+              </section>
+            </template>
+          </component>
+        </components>
+        <main id="root">
+          <CardPanel id="left" title="&lt;literal/&gt;" rating="25.5" enabled="true">
+            <fill name="content"><label id="left_content" text="Left"/></fill>
+          </CardPanel>
+          <CardPanel id="right" title="Right" rating="75" enabled="false">
+            <fill name="content"><label id="right_content" text="Right"/></fill>
+          </CardPanel>
+        </main>
+      </ui>
+    )xml", registry, flexUI::UiDocumentLimits{});
+    check(static_cast<bool>(compiled));
+    if (!compiled) return;
+    check_equal(compiled.scoped_ownership.size(), std::size_t{2});
+    flexUI::Box box(nullptr);
+    const auto mounted = flexUI::UiDocumentInstantiator::instantiate(
+        box, *compiled.program, registry);
+    check(static_cast<bool>(mounted));
+    if (!mounted) return;
+    check_not_null(box.get_by_id("left::name"));
+    check_not_null(box.get_by_id("right::name"));
+    check_not_null(box.get_by_id("left_content"));
+    check_not_null(box.get_by_id("right_content"));
+    check_equal(box.get_by_id("left::name")->text(), "<literal/>");
+    check_equal(box.get_by_id("right::name")->text(), "Right");
+    check_null(box.get_by_id("literal"));
+  }
+
+  it("rejects invalid component Props, slots, declarations and caller collisions") {
+    const auto registry = flexUI::WidgetRegistry::builtins();
+    const std::string prefix = R"xml(
+      <ui name="Reject">
+        <components>
+          <component name="Panel">
+            <interface>
+              <prop name="title" type="string" required="true"/>
+              <slot name="actions"/>
+            </interface>
+            <template><div id="panel"><label id="heading" text="$props.title"/>
+              <slot name="actions"/></div></template>
+          </component>
+        </components>
+        <main id="root">
+    )xml";
+    const std::string suffix = "</main></ui>";
+    for (const auto *call : {
+         "<Panel id=\"panelA\"><fill name=\"actions\"><label id=\"action\"/></fill></Panel>",
+         "<Panel id=\"panelA\" title=\"ok\" unexpected=\"x\"><fill name=\"actions\"><label/></fill></Panel>",
+         "<Panel id=\"panelA\" title=\"ok\"/>",
+         "<Panel id=\"panelA\" title=\"ok\"><fill name=\"other\"><label/></fill></Panel>",
+         "<Panel id=\"panelA\" title=\"ok\"><fill name=\"actions\"><label/></fill>"
+           "<fill name=\"actions\"><label/></fill></Panel>",
+         "<Panel id=\"panelA\" title=\"ok\"><fill name=\"actions\"><label/><button/></fill></Panel>",
+         "<Panel title=\"ok\"><fill name=\"actions\"><label/></fill></Panel>",
+         "<Panel id=\"panelA\" title=\"ok\"><fill name=\"actions\"><Panel id=\"nested\" title=\"x\"/></fill></Panel>",
+    }) {
+      const auto failure = flexUI::compile_ui_xml(
+          prefix + call + suffix, registry, flexUI::UiDocumentLimits{});
+      check_false(static_cast<bool>(failure));
+      check_null(failure.program.get());
+      check(failure.scoped_ownership.empty());
+    }
+
+    const auto unknown_outlet = flexUI::compile_ui_xml(R"xml(
+      <ui name="Unknown">
+        <components><component name="Panel">
+          <interface><slot name="actions"/></interface>
+          <template><div><slot name="missing"/></div></template>
+        </component></components>
+        <Panel id="host"><fill name="actions"><button/></fill></Panel>
+      </ui>
+    )xml", registry, flexUI::UiDocumentLimits{});
+    check_false(static_cast<bool>(unknown_outlet));
+    check_null(unknown_outlet.program.get());
+
+    const auto duplicate_caller_ids = flexUI::compile_ui_xml(
+        prefix +
+        "<Panel id=\"left\" title=\"L\"><fill name=\"actions\"><button id=\"same\"/></fill></Panel>"
+        "<Panel id=\"right\" title=\"R\"><fill name=\"actions\"><button id=\"same\"/></fill></Panel>" +
+        suffix, registry, flexUI::UiDocumentLimits{});
+    check_false(static_cast<bool>(duplicate_caller_ids));
+    check_null(duplicate_caller_ids.program.get());
+
+    // The original XML frontend does not silently gain Component grammar.
+    const auto legacy = flexUI::compile_ui_xml(
+        prefix + "<Panel id=\"panelA\" title=\"X\"><fill name=\"actions\"><label/></fill></Panel>" + suffix);
+    check_false(static_cast<bool>(legacy));
+    check_null(legacy.program.get());
+  }
+}
