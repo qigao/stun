@@ -1397,6 +1397,8 @@ namespace GCANVAS_GL_PROFILE_NAMESPACE
     {
         ContextImplGl* impl = getImpl(this);
         ImageImplGl* img = (ImageImplGl*)image;
+        img->set_mutation_guard(
+            _host.resource_mutation_guard, _host.resource_mutation_user_data);
         if (!img->_uploaded)
         {
             if (impl->images.size() >= static_cast<std::size_t>(impl->texture_array_size))
@@ -1421,6 +1423,9 @@ namespace GCANVAS_GL_PROFILE_NAMESPACE
     {
         ContextImplGl* impl = getImpl(this);
         FontImplGl* fiv = (FontImplGl*)font;
+        auto* atlas = static_cast<ImageImplGl*>(&font->get_image());
+        atlas->set_mutation_guard(
+            _host.resource_mutation_guard, _host.resource_mutation_user_data);
         if (!fiv->_uploaded)
         {
             auto* img = static_cast<ImageImplGl*>(&font->get_image());
@@ -1941,6 +1946,8 @@ namespace GCANVAS_GL_PROFILE_NAMESPACE
         const std::uint8_t buffer[4] = {0, 0, 0, 0};
         dummy =
             std::make_unique<ImageImplGl>(1, 1, 4, buffer, sizeof(buffer), ImageConfig{});
+        dummy->set_mutation_guard(
+            _host.resource_mutation_guard, _host.resource_mutation_user_data);
         dummy->upload();
     }
 
@@ -2088,7 +2095,17 @@ namespace GCANVAS_GL_PROFILE_NAMESPACE
         if (storageBuffer != 0)
             glDeleteBuffers(1, &storageBuffer);
         if (shaderProgram != 0)
+        {
+            // This GL deletion is restricted by the same original GLsync
+            // and context owner as the actual uploaded font/image textures.
+            if (_host.resource_mutation_guard &&
+                !_host.resource_mutation_guard(
+                    _host.resource_mutation_user_data,
+                    NativeGpuMutation::ProgramDelete,
+                    static_cast<std::uint64_t>(shaderProgram), 0u))
+                std::terminate();
             glDeleteProgram(shaderProgram);
+        }
         shared_retained_ = false;
         _runtime->release();
     }
@@ -2149,6 +2166,14 @@ namespace GCANVAS_GL_PROFILE_NAMESPACE
             throw std::runtime_error(std::string("OpenGL fragment shader compilation failed: ") +
                                      infoLog);
         }
+        // Admit creation before touching the real GL program namespace;
+        // the intermediate compiler shader objects remain local here.
+        if (_host.resource_mutation_guard &&
+            !_host.resource_mutation_guard(
+                _host.resource_mutation_user_data,
+                NativeGpuMutation::ProgramCreate, 0u, 0u))
+            throw std::logic_error(
+                "gCanvas shader creation denied by native GPU resource owner");
         // link shaders
         shaderProgram = glCreateProgram();
         glAttachShader(shaderProgram, vertexShader);

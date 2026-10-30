@@ -2,6 +2,7 @@
 #define GCANVAS_IMAGE_IMPL_GL_HPP
 
 #include "gcanvas/image.hpp"
+#include "gcanvas/context.hpp"
 
 #include <map>
 #include <string>
@@ -29,11 +30,24 @@ namespace GCANVAS_GL_PROFILE_NAMESPACE
 
         bool _uploaded = false;
 
+        // Configured by the owning GL Context before the first native
+        // texture upload. The borrowed observer must outlive this Image.
+        void set_mutation_guard(
+            NativeGpuMutationGuard guard, void* user_data) noexcept {
+            mutation_guard_ = guard;
+            mutation_user_data_ = user_data;
+        }
+
         void upload();
         void upload_update();
         void bind(GLuint texture_unit);
 
     private:
+        NativeGpuMutationGuard mutation_guard_ = nullptr;
+        void* mutation_user_data_ = nullptr;
+        std::size_t uploaded_bytes_ = 0;
+        void admit_mutation(
+            NativeGpuMutation operation, GLuint name, std::size_t bytes) const;
         void init_format();
     };
 
