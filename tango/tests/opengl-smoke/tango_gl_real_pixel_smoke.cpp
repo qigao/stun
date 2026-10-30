@@ -635,6 +635,148 @@ void exercise_real_x11_input(
 // window/context, then create a DIFFERENT GLFW context and renderer for the
 // SAME C11 grid revision. A retired gate is safe even after its GPU presenter
 // no longer exists. This is NOT unexpected context loss or fence retirement.
+
+/*
+ * Real Mesa GPU shared-atlas mutation barrier.
+ *
+ * A configured two-fence queue has spare capacity after the first frame,
+ * yet a second draw MUST be denied until the first native GLsync retires:
+ * the same gCanvas font atlas/texture/shader objects may be modified by
+ * subsequent glyph work. After explicit GPU completion a different C11
+ * glyph and background must render in the SAME real context. No fake
+ * renderer, synthetic frame, direct callback or glFinish-as-fence.
+ */
+void exercise_native_serial_atlas_frames(
+    const flex::tango_opengl::ExternalGLCellCreateInfo& gl,
+    flex::tango_opengl::NativeGLFenceConfig config,
+    int generation, const std::string& updated_frame_path) {
+    require(generation > 0 && glfwGetCurrentContext() == config.host_user_data,
+            "Atlas serial acceptance needs the owning live GLFW GL context");
+    config.device_generation += 100u;
+    config.max_in_flight = 2u; // Spare capacity must NOT admit shared-atlas writes.
+    flex::tango_opengl::NativeGLPresentationOwner gpu(gl, config);
+    require(gpu.device_generation() == config.device_generation &&
+            gpu.in_flight() == 0u,
+            "Serial atlas owner did not capture a fresh GL context generation");
+
+    using Frozen = std::unique_ptr<tui_grid_snapshot_t,
+                                   decltype(&tui_grid_snapshot_destroy)>;
+    const auto capture = [](std::uint64_t revision,
+                            std::uint32_t glyph, tui_color_t background) -> Frozen {
+        std::unique_ptr<tui_buffer_t, decltype(&tui_buffer_destroy)> source(
+            tui_buffer_create(kColumns, kRows), &tui_buffer_destroy);
+        require(source != nullptr, "Serial atlas C11 source allocation failed");
+        tui_buffer_clear_color(source.get(), TUI_COLOR(14, 23, 52));
+        tui_buffer_set(source.get(), 1, 1,
+                       tui_cell(glyph, TUI_WHITE, background));
+        tui_buffer_set(source.get(), 5, 1,
+                       tui_cell('B', TUI_WHITE, TUI_COLOR(22, 190, 35)));
+        tui_grid_snapshot_t* result = nullptr;
+        require(tui_grid_snapshot_capture(
+                    source.get(), revision, kColumns * kRows, 8192, &result) ==
+                TUI_GRID_SNAPSHOT_OK,
+                "Serial atlas frame was not captured by canonical C11 Tango");
+        return Frozen(result, &tui_grid_snapshot_destroy);
+    };
+
+    constexpr std::uint64_t first_revision = 403u;
+    constexpr std::uint64_t second_revision = 404u;
+    auto first = capture(first_revision, 'A', TUI_COLOR(220, 25, 28));
+    auto second = capture(second_revision, 'Q', TUI_COLOR(183, 45, 147));
+    flex::tango_opengl::CellPixelMetrics metrics;
+    metrics.expected_grid_revision = first_revision;
+    metrics.font_family = gl.font_family;
+    metrics.font_size = 18.0f;
+    metrics.cell_width = static_cast<float>(kCellWidth);
+    metrics.cell_height = static_cast<float>(kCellHeight);
+    metrics.baseline = 18.0f;
+    metrics.pixel_ratio = 1.0f;
+    metrics.max_cells = kColumns * kRows;
+    metrics.max_draw_ops = 128;
+    metrics.max_text_bytes = 1024;
+
+    gpu.present_and_fence(first.get(), metrics);
+    require(gpu.in_flight() == 1u && config.max_in_flight == 2u,
+            "Serial atlas admission did not retain a real GPU fence below capacity");
+    const auto old_submission = gpu.submitted_presenter().submission_id();
+    metrics.expected_grid_revision = second_revision;
+
+    bool spare_capacity_denied = false;
+    try { gpu.require_capacity(); }
+    catch (const std::logic_error&) { spare_capacity_denied = true; }
+    require(spare_capacity_denied,
+            "Shared gCanvas atlas mutation admitted with GPU fence still pending");
+
+    bool second_draw_denied = false;
+    try { gpu.present_and_fence(second.get(), metrics); }
+    catch (const std::logic_error&) { second_draw_denied = true; }
+    require(second_draw_denied && gpu.in_flight() == 1u &&
+            gpu.submitted_presenter().submission_id() == old_submission &&
+            gpu.submitted_presenter().last_submitted_plan() &&
+            gpu.submitted_presenter().last_submitted_plan()->grid_revision() ==
+                first_revision,
+            "Rejected overlapping atlas update changed actual submitted GPU geometry");
+
+    // A bounded real client GLsync wait, not an implicit glFinish substitute.
+    bool first_drained = false;
+    for (int attempt = 0; attempt < 20; ++attempt) {
+        const auto polled = gpu.retire_completed(100000000ULL);
+        if (polled == flex::tango_opengl::NativeGLFencePoll::Drained) {
+            first_drained = true;
+            break;
+        }
+        require(polled == flex::tango_opengl::NativeGLFencePoll::Busy &&
+                gpu.in_flight() == 1u,
+                "Unsignaled atlas GPU fence was retired or overwritten");
+    }
+    require(first_drained && gpu.in_flight() == 0u &&
+            gpu.last_retired_submission() == old_submission,
+            "First shared-atlas GPU fence never signaled safely");
+    gpu.require_capacity();
+    gpu.present_and_fence(second.get(), metrics);
+    require(gpu.in_flight() == 1u &&
+            gpu.submitted_presenter().submission_id() == old_submission + 1u &&
+            gpu.submitted_presenter().last_submitted_plan() &&
+            gpu.submitted_presenter().last_submitted_plan()->grid_revision() ==
+                second_revision,
+            "Completed prior native fence did not admit the next canonical C11 frame");
+
+    // Check actual gCanvas GPU framebuffer content AFTER the new ASCII glyph
+    // and cell background are drawn. The new Q did not exist in frame one.
+    const auto pixels = read_back_rgba();
+    const Pixel new_background = at(pixels, kCellWidth + 2, kCellHeight + 2);
+    require(new_background[0] > 130 && new_background[0] < 220 &&
+            new_background[1] < 105 && new_background[2] > 95 &&
+            new_background[3] >= 240,
+            "Serial gCanvas atlas frame did not replace real red GPU pixels");
+    require_rgb_dominance(
+        at(pixels, 5 * kCellWidth + 2, kCellHeight + 2), 1,
+        "Serial atlas repaint lost the existing real green GPU cell");
+    require(has_white_glyph(
+                pixels, kCellWidth, kCellHeight,
+                2 * kCellWidth, 2 * kCellHeight),
+            "Serial atlas update did not rasterize its new native Q glyph");
+    if (generation == 2)
+        save_ppm(pixels, updated_frame_path);
+
+    bool second_drained = false;
+    for (int attempt = 0; attempt < 20; ++attempt) {
+        const auto polled = gpu.retire_completed(100000000ULL);
+        if (polled == flex::tango_opengl::NativeGLFencePoll::Drained) {
+            second_drained = true;
+            break;
+        }
+        require(polled == flex::tango_opengl::NativeGLFencePoll::Busy &&
+                gpu.in_flight() == 1u,
+                "Second atlas GPU fence was dropped without a real signal");
+    }
+    require(second_drained && gpu.in_flight() == 0u,
+            "Final shared-atlas GPU commands were not completed");
+    gpu.close(); // Only after real GPU completion, original context current.
+    require(gpu.closed(),
+            "Native gCanvas atlas owner failed to retire after both fences");
+}
+
 void exercise_orderly_context_recreation(
     const std::string& regular_font, const std::string& bold_font,
     const std::string& screenshot) {
@@ -848,6 +990,11 @@ void exercise_orderly_context_recreation(
             require(rejected_reactivation,
                     "Retired host gate was illegally reattached to another GL device");
             if (generation == 1) old_gate = gate;
+            // A second native renderer on the SAME live context proves
+            // strict atlas mutation gating even with spare fence capacity.
+            // It is created only AFTER the previous owner closed.
+            exercise_native_serial_atlas_frames(
+                gl, fence_config, generation, screenshot + ".serial.ppm");
         } // Destroy the actual GLFW GL context AFTER GPU resource cleanup.
         require(glfwGetCurrentContext() == nullptr,
                 "Destroyed native GL context remains bound to the UI owner");
@@ -864,7 +1011,9 @@ void exercise_orderly_context_recreation(
               << "TANGO_GL_FENCE_WRONG_THREAD_REFUSED=1\n"
               << "TANGO_GL_FENCED_RESOURCE_OWNER_CLOSE=2\n"
               << "TANGO_GL_FENCED_RESOURCE_OWNER_EARLY_CLOSE_REFUSED=2\n"
-              << "TANGO_GL_FENCED_RESOURCE_OWNER_WRONG_CONTEXT_CLOSE_REFUSED=2\n";
+              << "TANGO_GL_FENCED_RESOURCE_OWNER_WRONG_CONTEXT_CLOSE_REFUSED=2\n"
+              << "TANGO_GL_ATLAS_SERIAL_PENDING_REFUSED=2\n"
+              << "TANGO_GL_ATLAS_SERIAL_AFTER_FENCE_REPAINT=2\n";
 }
 
 void exercise_gpu(const std::string& font_path,

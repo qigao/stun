@@ -398,6 +398,48 @@ real hardware overload, abrupt context loss and device-generation
 quarantine/recovery remain separate strict gates. Do not infer them from
 the software-Mesa two-context experiment.
 
+## Strict serial glyph/atlas/image mutation barrier (Draft)
+
+The existing gCanvas `NativeGLPresentationOwner` now enforces a **strict
+single outstanding GPU submission per native renderer** while the backend
+lacks independently proven font-atlas/image/shader subresource leases.
+`require_capacity()` first checks the exact active native GL context,
+owner thread and bounded GLsync queue. If even one previous submission's
+native GLsync remains owned, it **rejects** any new `present_and_fence()`
+before gCanvas measures glyphs, uploads atlas textures, draws geometry or
+changes its shader/texture state. This is intentionally stricter than the
+fence queue's configured `max_in_flight`. A capacity of two or
+more does NOT authorize overlapping mutable resource use.
+
+Only real native `glClientWaitSync` completion and
+`glDeleteSync` retirement of the previous submission unlocks
+the next draw. Neither an unobserved GPU signal, a window swap, a new C11
+revision nor a presumed synchronized font cache counts as GPU resource
+retirement. A time-out leaves the old frame owned and the next mutation
+blocked. Current shared resource updates remain restricted to the same
+owner/context as the presenter; no second mutable pixel renderer is exposed.
+
+The existing Mesa/Xvfb dual-context test additionally creates a fresh native
+gCanvas renderer per context with configured **2-slot GLsync capacity**.
+It draws and fences a real red 'A' cell, attempts a second C11 frame
+carrying a new ASCII 'Q' glyph and magenta background while one fence is
+still owned, and requires a rejection with the original submitted geometry
+and GPU submission counter unchanged **despite spare fence capacity**.
+After observing real native fence completion, it submits the Q frame,
+reads the actual magenta/green framebuffer and real white glyph, captures
+`tango-gl-frame.ppm.recreated.ppm.serial.ppm`, and drains
+the second real fence before closing the GPU owner. Both old and new
+separate contexts must pass; original XTest/focus/resize/ownership evidence
+continues in the same existing Mesa CI job.
+
+**Important limit:** this contract proves conservative non-overlap for one
+presenter, not that `glTexSubImage2D` actually ran for every new
+glyph, nor that independently owned gCanvas images/shader pipelines have
+per-resource completion scopes. It sacrifices overlapping in-flight frames
+until actual atlas/image/shader leases, budget and resource retirement are
+proven. Physical GPUs, unexpected device loss and cross-platform native
+window/IME gates remain open. Keep the public TangoOpenGL factory disabled.
+
 ## Native TTY presenter
 
 Owns/borrows the terminal, validates the bounded buffer, produces VT diff

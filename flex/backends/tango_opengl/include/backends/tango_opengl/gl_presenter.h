@@ -113,9 +113,14 @@ public:
     NativeGLPresentationOwner(const NativeGLPresentationOwner&) = delete;
     NativeGLPresentationOwner& operator=(const NativeGLPresentationOwner&) = delete;
 
+    // Strict serial shared-resource mutation policy: no second gCanvas
+    // draw while a prior native GLsync is owned, even with spare capacity.
+    // Only explicit real fence retirement permits glyph/atlas/texture edits.
+    // Per-resource overlapping frame leases remain a future separate gate.
     void present_and_fence(
         const tui_grid_snapshot_t* snapshot, const CellPixelMetrics& metrics);
     NativeGLFencePoll retire_completed(std::uint64_t timeout_nanoseconds);
+    // Checks native fence budget plus the stricter shared-atlas serial gate.
     void require_capacity() const;
     std::size_t in_flight() const;
     std::uint64_t last_retired_submission() const;

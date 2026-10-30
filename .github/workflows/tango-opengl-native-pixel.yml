@@ -227,6 +227,9 @@ jobs:
           test -s build/tango-gl-native/tango-gl-frame.ppm.input.ppm
           test -s build/tango-gl-native/tango-gl-frame.ppm.input.ppm.resized.ppm
           test -s build/tango-gl-native/tango-gl-frame.ppm.recreated.ppm
+          test -s build/tango-gl-native/tango-gl-frame.ppm.recreated.ppm.serial.ppm
+          head -n 2 build/tango-gl-native/tango-gl-frame.ppm.recreated.ppm.serial.ppm |
+            grep -Fx '256 96'
           head -n 2 build/tango-gl-native/tango-gl-frame.ppm.recreated.ppm |
             grep -Fx '256 96'
           head -n 2 build/tango-gl-native/tango-gl-frame.ppm.input.ppm.resized.ppm |
@@ -244,6 +247,7 @@ jobs:
             build/tango-gl-native/tango-gl-frame.ppm.input.ppm
             build/tango-gl-native/tango-gl-frame.ppm.input.ppm.resized.ppm
             build/tango-gl-native/tango-gl-frame.ppm.recreated.ppm
+            build/tango-gl-native/tango-gl-frame.ppm.recreated.ppm.serial.ppm
           if-no-files-found: ignore
           retention-days: 7
 
