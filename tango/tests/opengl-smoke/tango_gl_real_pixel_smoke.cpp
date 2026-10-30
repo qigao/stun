@@ -16,6 +16,7 @@
 #include <X11/extensions/XTest.h>
 #include <X11/keysym.h>
 
+#include <algorithm>
 #include <array>
 #include <chrono>
 #include <cstdint>
@@ -696,6 +697,25 @@ void exercise_native_serial_atlas_frames(
     metrics.max_text_bytes = 1024;
 
     gpu.present_and_fence(first.get(), metrics);
+    const auto first_gpu_ids = gpu.gpu_resource_leases();
+    require(first_gpu_ids.size() >= 3u && first_gpu_ids.size() <= 64u,
+            "Real gCanvas frame returned no bounded native resource identities");
+    const auto has_kind = [](const auto& resources,
+                             flex::NativeRendererResourceKind kind) {
+        return std::any_of(resources.begin(), resources.end(),
+                           [&](const auto& resource) { return resource.kind == kind; });
+    };
+    require(has_kind(first_gpu_ids, flex::NativeRendererResourceKind::ShaderProgram) &&
+            has_kind(first_gpu_ids, flex::NativeRendererResourceKind::GlyphAtlas) &&
+            has_kind(first_gpu_ids, flex::NativeRendererResourceKind::InternalTexture),
+            "Actual GL shader/atlas/internal texture identities were not captured");
+    for (const auto& lease : first_gpu_ids)
+        require(lease.native_name != 0u &&
+                lease.device_generation == config.device_generation &&
+                lease.source_revision == first_revision &&
+                lease.submission_id == gpu.submitted_presenter().submission_id() &&
+                !lease.gpu_completed,
+                "Native GL resource ID does not refer to its exact pending GPU frame");
     require(gpu.in_flight() == 1u && config.max_in_flight == 2u,
             "Serial atlas admission did not retain a real GPU fence below capacity");
     const auto old_submission = gpu.submitted_presenter().submission_id();
@@ -732,8 +752,32 @@ void exercise_native_serial_atlas_frames(
     require(first_drained && gpu.in_flight() == 0u &&
             gpu.last_retired_submission() == old_submission,
             "First shared-atlas GPU fence never signaled safely");
+    const auto completed_gpu_ids = gpu.gpu_resource_leases();
+    require(completed_gpu_ids.size() == first_gpu_ids.size() &&
+            std::all_of(completed_gpu_ids.begin(), completed_gpu_ids.end(),
+                        [&](const auto& lease) {
+                            return lease.gpu_completed &&
+                                   lease.submission_id == old_submission;
+                        }),
+            "Real native shader/atlas/texture leases did not retire with GLsync");
     gpu.require_capacity();
     gpu.present_and_fence(second.get(), metrics);
+    const auto second_gpu_ids = gpu.gpu_resource_leases();
+    require(second_gpu_ids.size() == first_gpu_ids.size() &&
+            std::all_of(second_gpu_ids.begin(), second_gpu_ids.end(),
+                [&](const auto& lease) {
+                    return !lease.gpu_completed &&
+                           lease.submission_id == old_submission + 1u &&
+                           lease.source_revision == second_revision &&
+                           lease.device_generation == config.device_generation;
+                }),
+            "Native resource IDs were not re-leased on the second real GPU submission");
+    // A registered gCanvas font atlas/shader is the SAME actual native
+    // object across these two serial frames, not a simulated new resource.
+    for (std::size_t i = 0; i < first_gpu_ids.size(); ++i)
+        require(first_gpu_ids[i].kind == second_gpu_ids[i].kind &&
+                first_gpu_ids[i].native_name == second_gpu_ids[i].native_name,
+                "Actual gCanvas shader/atlas object identity changed across one renderer");
     require(gpu.in_flight() == 1u &&
             gpu.submitted_presenter().submission_id() == old_submission + 1u &&
             gpu.submitted_presenter().last_submitted_plan() &&
@@ -772,6 +816,10 @@ void exercise_native_serial_atlas_frames(
     }
     require(second_drained && gpu.in_flight() == 0u,
             "Final shared-atlas GPU commands were not completed");
+    const auto final_gpu_ids = gpu.gpu_resource_leases();
+    require(std::all_of(final_gpu_ids.begin(), final_gpu_ids.end(),
+                        [](const auto& lease) { return lease.gpu_completed; }),
+            "Last native resource lease was not retired with the second real GLsync");
     gpu.close(); // Only after real GPU completion, original context current.
     require(gpu.closed(),
             "Native gCanvas atlas owner failed to retire after both fences");
@@ -1013,7 +1061,9 @@ void exercise_orderly_context_recreation(
               << "TANGO_GL_FENCED_RESOURCE_OWNER_EARLY_CLOSE_REFUSED=2\n"
               << "TANGO_GL_FENCED_RESOURCE_OWNER_WRONG_CONTEXT_CLOSE_REFUSED=2\n"
               << "TANGO_GL_ATLAS_SERIAL_PENDING_REFUSED=2\n"
-              << "TANGO_GL_ATLAS_SERIAL_AFTER_FENCE_REPAINT=2\n";
+              << "TANGO_GL_ATLAS_SERIAL_AFTER_FENCE_REPAINT=2\n"
+              << "TANGO_GL_NATIVE_SHADER_ATLAS_TEXTURE_LEASES=2\n"
+              << "TANGO_GL_NATIVE_RESOURCE_LEASE_REUSED_AFTER_FENCE=2\n";
 }
 
 void exercise_gpu(const std::string& font_path,

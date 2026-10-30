@@ -440,6 +440,56 @@ until actual atlas/image/shader leases, budget and resource retirement are
 proven. Physical GPUs, unexpected device loss and cross-platform native
 window/IME gates remain open. Keep the public TangoOpenGL factory disabled.
 
+## Actual gCanvas native resource identities and fence lease ledger (Draft)
+
+The real gCanvas GL context now exposes a **bounded, GL-backed resource
+inventory** through a source-compatible optional `Context` API.
+The implementation inspects its **actual** created Shader Program, the
+internal Texture, uploaded Image Textures and Font/Glyph Atlas Textures.
+It calls the original GL driver's `glIsProgram` and
+`glIsTexture` on every included native name, rejects duplicate
+texture identities and refuses a stale/wrong-current context. Resources not
+uploaded to the GPU are not labeled live. The same GL implementation also
+continues to serve gCanvas GLES; backends that do not implement the optional
+inventory return unsupported instead of fabricated IDs.
+
+The existing Flex/gCanvas renderer maps the actual GL resource IDs into
+SDK-free `NativeRendererResourceId` values. The same TangoGL
+`CellPixelPresenter` requires a successfully submitted frame
+and UI-owner thread before returning the inventory. There is no second GL
+renderer, global resource registry, shadow atlas or guessed resource plan.
+
+`NativeGLPresentationOwner::present_and_fence()` captures
+these real shader/texture/atlas IDs *after* drawing and *before* inserting
+the real GPU GLsync. Its bounded `NativeGLResourceLease`
+records combine kind, native name, exact native device generation, canonical
+C11 source revision and presenter submission ID. Every uploaded resource
+is conservatively considered potentially used by that frame; this is an
+over-approximation, not a claim of per-glyph draw usage. An actual
+`glClientWaitSync` completion/retirement marks all attached
+leases complete. No next draw or whole-presenter destruction can proceed
+while any resource lease remains unretired. The already qualified strict
+serial barrier remains in force; **parallel frame admission is not enabled**.
+
+The existing Mesa native GPU test now verifies positive Shader/Atlas/Internal
+Texture resource identities under both independent GL contexts. It checks
+that the IDs are real nonzero GL names from the actual gCanvas context, carry
+the exact device/submission/source revision and remain pending before
+native GPU completion. After real fence retirement they become completed,
+then the second C11 glyph/color frame leases the **same native shader and
+atlas names** under a *new* submission ID. Both sets of resource leases
+must retire before any renderer/context is destroyed.
+
+**Important limits:** GL object IDs are unique only within a live context
+(and resource namespace) and must never be used without their generation.
+The lease snapshot is **conservative for the whole GL context**; it does
+not distinguish different atlas pages' actual draw dependencies, prove
+individual `glTexSubImage2D` calls, or permit overlapping
+updates. Resource bytes/peak budgets, async shader/texture eviction,
+unexpected driver loss and host callback retirement remain separately OPEN.
+The standalone GLFW demo is still not migrated onto the combined owner,
+so no production TangoOpenGL factory may be registered.
+
 ## Native TTY presenter
 
 Owns/borrows the terminal, validates the bounded buffer, produces VT diff

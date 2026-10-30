@@ -8,6 +8,7 @@
 #pragma once
 
 #include "flex/core/types.h"
+#include <cstdint>
 #include <string>
 #include <vector>
 
@@ -34,6 +35,17 @@ struct TextMetrics {
     float height = 0.0f;
 };
 
+// Actual backend-owned GPU object identities, with no GL SDK dependencies.
+// These native names are meaningful ONLY when combined with the original
+// native device generation and a completed GPU submission.
+enum class NativeRendererResourceKind : std::uint8_t {
+    ShaderProgram, GlyphAtlas, ImageTexture, InternalTexture
+};
+struct NativeRendererResourceId {
+    NativeRendererResourceKind kind{};
+    std::uint64_t native_name = 0;
+};
+
 // ============================================================================
 // Renderer Interface
 // ============================================================================
@@ -45,6 +57,13 @@ public:
     // Frame control
     virtual void begin_frame(float width, float height, float pixel_ratio) = 0;
     virtual void end_frame() = 0;
+    // Optional native inventory; false means unsupported, not fabricated.
+    // The output remains unchanged unless the backend explicitly succeeds.
+    virtual bool native_gpu_resource_ids(
+        std::vector<NativeRendererResourceId>& out) const {
+        (void)out;
+        return false;
+    }
     virtual bool requires_surface_recreation() const { return false; }
     virtual void acknowledge_surface_recreation() {}
 

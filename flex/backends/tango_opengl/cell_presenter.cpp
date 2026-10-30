@@ -307,6 +307,21 @@ std::uint64_t CellPixelPresenter::submission_id() const {
     return submitted_plan_ ? submission_id_ : 0;
 }
 
+std::vector<NativeRendererResourceId>
+CellPixelPresenter::native_gpu_resource_ids() const {
+    if (!on_owner_thread())
+        throw std::logic_error(
+            "TangoOpenGL native GPU resource inventory accessed outside GL owner");
+    if (!submitted_plan_)
+        throw std::logic_error(
+            "TangoOpenGL resource inventory requires a completed pixel frame");
+    std::vector<NativeRendererResourceId> actual;
+    if (!renderer_->native_gpu_resource_ids(actual))
+        throw std::logic_error(
+            "TangoOpenGL renderer has no qualified native GPU resource inventory");
+    return actual;
+}
+
 std::optional<CellPixelHit> CellPixelPresenter::hit_test_window_pointer(
     double window_x, double window_y,
     int window_width, int window_height,
