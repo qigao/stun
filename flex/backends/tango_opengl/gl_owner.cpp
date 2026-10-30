@@ -46,8 +46,10 @@ void NativeGLPresentationOwner::present_and_fence(
     if (closed_ || unfenced_failure_ || !presenter_)
         throw std::logic_error(
             "TangoGL retired/unfenced GPU resource owner refuses presentation");
-    // MUST check capacity and host-current identity before ANY GPU drawing.
-    fences_.require_capacity();
+    // Check the native context, fence limit AND resource-mutation barrier
+    // before gCanvas can edit any texture, glyph atlas or shader state.
+    // Without per-resource GPU leases this particular presenter is serial.
+    require_capacity();
 
     const auto before = presenter_->submission_id();
     try {
@@ -86,7 +88,16 @@ void NativeGLPresentationOwner::require_capacity() const {
     if (closed_ || unfenced_failure_)
         throw std::logic_error(
             "TangoGL resource owner is retired or has an unfenced failure");
+    // Preserve the NativeGLFrameFences exact-context/owner/capacity gate.
+    // Even if the configured queue has capacity for multiple GLsyncs, the
+    // shared gCanvas glyph atlas and texture state cannot be mutated while
+    // ANY prior GPU submission still references those resources. No
+    // fallback glFinish or guessed GPU completion; callers explicitly
+    // retire native fences before presenting another frame.
     fences_.require_capacity();
+    if (fences_.in_flight() != 0)
+        throw std::logic_error(
+            "TangoGL cannot mutate shared atlas/texture/shader while a prior GPU frame is in flight");
 }
 
 std::size_t NativeGLPresentationOwner::in_flight() const {
