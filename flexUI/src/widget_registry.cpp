@@ -150,11 +150,14 @@ void register_default_widget(WidgetRegistry &registry, const char *tag,
 } // namespace
 
 WidgetRegistryError WidgetRegistry::register_element(std::string tag, UiContentModel content) {
+  return register_element(std::move(tag), UiNodeDescriptor{UiNodeKind::Container, content});
+}
+
+WidgetRegistryError WidgetRegistry::register_element(std::string tag, UiNodeDescriptor schema) {
   if (tag.empty()) {
     return make_error(WidgetRegistryErrorCode::InvalidTag, "WidgetRegistry tag must not be empty");
   }
-  const UiNodeDescriptor schema{UiNodeKind::Container, content};
-  if (!schema.valid()) {
+  if (schema.kind != UiNodeKind::Container || !schema.valid()) {
     return make_error(WidgetRegistryErrorCode::InvalidDescriptor, "invalid container content model");
   }
   if (!entries_.emplace(std::move(tag), Entry{schema, {}}).second) {
@@ -166,6 +169,12 @@ WidgetRegistryError WidgetRegistry::register_element(std::string tag, UiContentM
 
 WidgetRegistryError WidgetRegistry::register_widget(std::string tag, Factory factory,
                                                       UiContentModel content) {
+  return register_widget(std::move(tag), std::move(factory),
+                         UiNodeDescriptor{UiNodeKind::Widget, content});
+}
+
+WidgetRegistryError WidgetRegistry::register_widget(std::string tag, Factory factory,
+                                                      UiNodeDescriptor schema) {
   if (tag.empty()) {
     return make_error(WidgetRegistryErrorCode::InvalidTag, "WidgetRegistry tag must not be empty");
   }
@@ -173,8 +182,7 @@ WidgetRegistryError WidgetRegistry::register_widget(std::string tag, Factory fac
     return make_error(WidgetRegistryErrorCode::InvalidFactory,
                       "WidgetRegistry factory must not be empty");
   }
-  const UiNodeDescriptor schema{UiNodeKind::Widget, content};
-  if (!schema.valid()) {
+  if (schema.kind != UiNodeKind::Widget || !schema.valid()) {
     return make_error(WidgetRegistryErrorCode::InvalidDescriptor, "invalid widget content model");
   }
   if (!entries_.emplace(std::move(tag), Entry{schema, std::move(factory)}).second) {
@@ -211,7 +219,8 @@ UiDocumentError WidgetRegistry::validate(const UiDocumentDefinition &definition,
       return {UiDocumentErrorCode::UnknownElementTag, "unknown registered UI tag: " + node.tag,
               node.source.line, node.source.column};
     }
-    return schema->validate_content(node);
+    if (auto error = schema->validate_content(node)) return error;
+    return schema->validate_properties(node);
   };
   if (auto error = check_node(definition.root, 1)) {
     return error;
@@ -246,6 +255,9 @@ WidgetCreationResult WidgetRegistry::create(const UiNodeDefinition &definition) 
                        "unknown registered UI tag: " + definition.tag)};
   }
   if (const auto error = found->second.descriptor.validate_content(definition)) {
+    return {{}, make_error(WidgetRegistryErrorCode::InvalidContent, error.message)};
+  }
+  if (const auto error = found->second.descriptor.validate_properties(definition)) {
     return {{}, make_error(WidgetRegistryErrorCode::InvalidContent, error.message)};
   }
   if (!found->second.factory) {
