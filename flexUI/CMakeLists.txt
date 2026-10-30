@@ -211,9 +211,12 @@ set(FLEXUI_HEADERS
 # 创建库
 add_library(flexUI STATIC ${FLEXUI_SOURCES} ${FLEXUI_HEADERS})
 add_library(FlexUI::Core ALIAS flexUI)
+set_target_properties(flexUI PROPERTIES EXPORT_NAME Core)
 
 get_filename_component(_flexui_lexbor_library_name "${LEXBOR_LIBRARY}" NAME_WE)
+set(_flexui_lexbor_install_target lexbor::lexbor)
 if(_flexui_lexbor_library_name MATCHES "^(lib)?lexbor_static$")
+  set(_flexui_lexbor_install_target lexbor::lexbor_static)
   target_compile_definitions(flexUI PRIVATE LEXBOR_STATIC)
 endif()
 
@@ -224,7 +227,9 @@ endif()
 
 # 链接依赖
 target_link_libraries(flexUI 
-    PUBLIC ${LEXBOR_LIBRARY} Flex::Runtime Flex::Render Flex::Animation FlexUI::TailwindCSS Salts::Core Salts::CMeta nlohmann_json::nlohmann_json
+    PUBLIC $<BUILD_INTERFACE:${LEXBOR_LIBRARY}>
+           $<INSTALL_INTERFACE:${_flexui_lexbor_install_target}>
+           Flex::Runtime Flex::Render Flex::Animation FlexUI::TailwindCSS Salts::Core Salts::CMeta nlohmann_json::nlohmann_json
     PRIVATE Flex::Compiler Salts::Unicode unofficial::tree-sitter::tree-sitter pugixml::pugixml
 )
 # Opt-in author-source Jinja XML compiler. Ordinary FlexUI builds do not
@@ -244,8 +249,13 @@ if(FLEXUI_ENABLE_JINJA_XML)
   target_include_directories(flexUI_jinja_xml
       PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
              $<INSTALL_INTERFACE:include>)
-  set_target_properties(flexUI_jinja_xml PROPERTIES FOLDER "flexUI/jinja")
-  install(TARGETS flexUI_jinja_xml DESTINATION lib)
+  set_target_properties(flexUI_jinja_xml PROPERTIES
+      FOLDER "flexUI/jinja" EXPORT_NAME JinjaXml)
+  install(TARGETS flexUI_jinja_xml EXPORT FlexUIJinjaXmlTargets
+      ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
+      LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+      RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+      COMPONENT FlexUICore)
 endif()
 
 set_target_properties(flexUI PROPERTIES FOLDER flexUI/)
@@ -256,9 +266,9 @@ target_include_directories(
   PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
          $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}>
          $<BUILD_INTERFACE:${CMAKE_SOURCE_DIR}/tools/tree-sitter/plugins>
-         ${CMAKE_SOURCE_DIR}/vendor/tinyfsm/
-         $<INSTALL_INTERFACE:include>
-         ${Stb_INCLUDE_DIR})
+         $<BUILD_INTERFACE:${CMAKE_SOURCE_DIR}/vendor/tinyfsm/>
+         $<BUILD_INTERFACE:${Stb_INCLUDE_DIR}>
+         $<INSTALL_INTERFACE:include>)
 
 if(WIN32)
   add_custom_command(
@@ -276,6 +286,7 @@ add_subdirectory(modules/desktop)
 
 set(FLEXUI_PLUGIN_PACKAGE_VERSION "1.0.0")
 set(FLEXUI_CONFIG_HAS_PLUGIN_HOST "${FLEXUI_ENABLE_PLUGINS}")
+set(FLEXUI_CONFIG_HAS_JINJA_XML "${FLEXUI_ENABLE_JINJA_XML}")
 configure_package_config_file(
   cmake/FlexUIConfig.cmake.in
   "${CMAKE_CURRENT_BINARY_DIR}/FlexUIConfig.cmake"
@@ -306,10 +317,29 @@ if(FLEXUI_ENABLE_PLUGINS)
     COMPONENT FlexUIPlugin)
 endif()
 install(
+  EXPORT FlexUICoreTargets
+  FILE FlexUICoreTargets.cmake
+  NAMESPACE FlexUI::
+  DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/FlexUI"
+  COMPONENT FlexUICore)
+if(FLEXUI_ENABLE_JINJA_XML)
+  install(
+    EXPORT FlexUIJinjaXmlTargets
+    FILE FlexUIJinjaXmlTargets.cmake
+    NAMESPACE FlexUI::
+    DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/FlexUI"
+    COMPONENT FlexUICore)
+endif()
+install(
   FILES "${CMAKE_CURRENT_BINARY_DIR}/FlexUIConfig.cmake"
         "${CMAKE_CURRENT_BINARY_DIR}/FlexUIConfigVersion.cmake"
   DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/FlexUI"
   COMPONENT FlexUIPlugin)
+install(
+  FILES "${CMAKE_CURRENT_BINARY_DIR}/FlexUIConfig.cmake"
+        "${CMAKE_CURRENT_BINARY_DIR}/FlexUIConfigVersion.cmake"
+  DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/FlexUI"
+  COMPONENT FlexUICore)
 install(
   FILES include/flexUI/application_command.h
         include/flexUI/application_completion.h
@@ -322,11 +352,18 @@ install(
 
 
 # 安装头文件
-install(DIRECTORY include/flexUI DESTINATION include)
-install(FILES include/flexUI.h DESTINATION include)
+install(DIRECTORY include/flexUI DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
+    COMPONENT FlexUICore)
+install(FILES include/flexUI.h DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
+    COMPONENT FlexUICore)
 
 # 安装库
-install(TARGETS flexUI flexUI_tailwindcss DESTINATION lib)
+set_target_properties(flexUI_tailwindcss PROPERTIES EXPORT_NAME TailwindCSS)
+install(TARGETS flexUI flexUI_tailwindcss EXPORT FlexUICoreTargets
+    ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
+    LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+    RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+    COMPONENT FlexUICore)
 
 if(NANOGUI_BUILD_EXAMPLES)
   add_subdirectory(examples)
