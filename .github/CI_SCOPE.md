@@ -103,6 +103,18 @@ workflows applicable to the cumulative PR diff; subsequent `synchronize`
 events with the label run those checks for each new HEAD. Removing an unrelated
 label never requests full requalification.
 
+**Order matters:** apply `ci/full` **before pushing the final candidate HEAD**,
+rather than adding it while existing native work is already starting. The
+trusted status compares every required job's `started_at` with the timestamp
+of the most recent real `ci/full` admission event. A job started even seconds
+before that label is **ineligible**, despite a successful native result; merely
+adding a label does not retroactively qualify already-running jobs. Keep the
+label on subsequent meaningful source/documentation fixes so `synchronize`
+requalifies one new exact HEAD after admission. Do not toggle/re-add the label
+to mask an early job, reinterpret a skipped/cancelled run as a pass, introduce
+dummy workflow jobs or create no-op commits solely to change status. This
+prevents needless double native matrices while retaining fail-closed evidence.
+
 Do not merge unless **the exact HEAD** has a completed, successful *executed*
 Stun runtime conformance job with chart JSON CTests, plus the relevant platform,
 installed-SDK and lifecycle jobs. An old-head success or a skipped job is not
@@ -118,7 +130,7 @@ missing, skipped, neutral, cancelled, stale-head or failing required jobs.
 
 ## Isolate unrelated PR labels from real CI execution
 
-The nine workflows listening for `labeled` events accept `ci/full` as an
+The eight active workflows listening for `labeled` events accept `ci/full` as an
 explicit same-HEAD requalification. Any other label must not cancel a
 queued/running check or claim a green test. For unrelated label events,
 workflow concurrency uses a unique `github.run_id` suffix, and `changes`
