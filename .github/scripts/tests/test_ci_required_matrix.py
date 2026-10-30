@@ -104,12 +104,9 @@ class RequirementTests(unittest.TestCase):
         self.assertIn(policy.RUNTIME, result)
         for workflow in (
             "gcanvas-android-egl.yml", "gcanvas-android-runtime.yml",
-            "gcanvas-gles-runtime.yml", "gcanvas-package-contract.yml",
-            "gcanvas-shader-tools-cache.yml",
+            "gcanvas-gles-runtime.yml",
         ):
             self.assertIn(".github/workflows/" + workflow, result)
-        self.assertIn("android-default-cmake",
-                      result[".github/workflows/gcanvas-package-contract.yml"])
 
     def test_markdown_selects_sdk_and_headless(self):
         result = matrix("shared/markdown/src/markdown.c")
@@ -138,14 +135,27 @@ class RequirementTests(unittest.TestCase):
         self.assertIn(policy.PUBLIC, result)
         self.assertIn(policy.RUNTIME, result)
 
-    def test_shared_ccache_action_selects_real_consumers(self):
+    def test_shared_ccache_action_selects_real_native_workflows(self):
         result = matrix(".github/actions/setup-ccache/action.yml")
         for filename in (
-            "gcanvas-gles-runtime.yml", "gcanvas-package-contract.yml",
+            "gcanvas-gles-runtime.yml",
             "graphlayout-native.yml", "ui-core-c11.yml", "tango-core.yml",
             "flexui-tango-headless.yml", "markdown-highlighter-loader.yml",
         ):
             self.assertIn(".github/workflows/" + filename, result)
+
+    def test_staged_policy_explicit_real_source_paths(self):
+        # Only existing product modules are admitted; unknown modules still fail.
+        for path in ("meta_editor/CMakeLists.txt",
+                     "meta_editor/src/core/editor.cpp",
+                     "shared/CMakeLists.txt"):
+            with self.subTest(path=path):
+                required = matrix(path)
+                self.assertIn(policy.PUBLIC, required)
+                self.assertIn(policy.RUNTIME, required)
+        self.assertFalse(policy.known_source("shared/new-provider/CMakeLists.txt"))
+        self.assertNotIn("gcanvas-package-contract.yml", policy.WORKFLOWS)
+        self.assertNotIn("gcanvas-shader-tools-cache.yml", policy.WORKFLOWS)
 
     def test_unknown_sources_fail_closed_even_with_docs(self):
         for paths in (

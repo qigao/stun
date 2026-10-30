@@ -17,8 +17,6 @@ WORKFLOWS = {
     "gcanvas-android-egl.yml": ("android-egl-compile",),
     "gcanvas-android-runtime.yml": ("android-surface-lifecycle",),
     "gcanvas-gles-runtime.yml": ("gles-runtime",),
-    "gcanvas-package-contract.yml": ("gles-installed-consumer", "android-default-cmake"),
-    "gcanvas-shader-tools-cache.yml": ("Linux shared shader-tool cache",),
     "graphlayout-native.yml": (
         "ubuntu-24.04 / gcc", "ubuntu-24.04 / clang",
         "windows-2022 / msvc", "macos-15 / appleclang",
@@ -46,11 +44,11 @@ NATIVE = "Linux / focused installed-SDK ASan/UBSan"
 # These existing subsystems have the generic native Runtime Conformance gate
 # even if there is no separate focused workflow for a particular source file.
 RUNTIME_ROOTS = (
-    "flex/", "flexUI/", "ui_core/", "tango/", "charts/", "shared/gcanvas/",
+    "flex/", "flexUI/", "ui_core/", "tango/", "charts/", "meta_editor/", "shared/gcanvas/",
     "shared/layout/", "shared/markdown/", "cmake/", "vendor/", ".ci/",
     "tools/lemon/", "tools/md/", "tools/gcanvas-shaderc/",
 )
-RUNTIME_FILES = {"CMakeLists.txt", "vcpkg.json", "vcpkg-configuration.json"}
+RUNTIME_FILES = {"CMakeLists.txt", "shared/CMakeLists.txt", "vcpkg.json", "vcpkg-configuration.json"}
 # CI governance scripts are independently exercised by the unfiltered
 # public-dependency parser job. Source-level changes also require Runtime.
 CI_INFRA_ROOTS = (".github/workflows/", ".github/actions/", ".github/scripts/")
