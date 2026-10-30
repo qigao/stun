@@ -90,9 +90,9 @@ NativeGLPresentationOwner::NativeGLPresentationOwner(
     // NativeGLFrameFences validates actual current-context identity and
     // exact GL proc availability before creating the GPU renderer.
     if (!host_config_.max_total_texture_upload_bytes ||
-        host_config_.max_total_texture_upload_bytes > (1024ull * 1024ull * 1024ull))
+        host_config_.max_total_texture_upload_bytes > (2ull * 1024ull * 1024ull * 1024ull))
         throw std::invalid_argument(
-            "TangoGL native texture upload payload limit must be bounded to at most 1 GiB");
+            "TangoGL native texture upload payload limit must be bounded to at most 2 GiB");
     if (!presenter_ || !presenter_->on_owner_thread())
         throw std::logic_error(
             "TangoGL native owner requires an actual same-thread pixel renderer");

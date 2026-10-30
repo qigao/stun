@@ -1052,10 +1052,15 @@ void exercise_orderly_context_recreation(
             }
             require(upload_budget_denied,
                     "Native gCanvas atlas upload bypassed the bounded texture payload gate");
+            std::cout << "TANGO_GL_TINY_TEXTURE_BUDGET_REFUSED=1\n"
+                      << std::flush;
             // One combined owner holds the actual gCanvas glyph/shader
             // assets, GPU fences and the original native input gate.
             flex::tango_opengl::NativeGLPresentationOwner gpu(gl, fence_config);
             const auto initial_mutations = gpu.native_mutation_audit();
+            std::cout << "TANGO_GL_FULL_TEXTURE_BUDGET_ADMITTED="
+                      << initial_mutations.uploaded_payload_bytes << '\n'
+                      << std::flush;
             require(initial_mutations.program_creates >= 1u &&
                     initial_mutations.texture_uploads >= 3u &&
                     initial_mutations.uploaded_payload_bytes > 0u &&

@@ -67,7 +67,7 @@ struct NativeGLFenceConfig final {
     // caps base image bytes consumed by this owner, NOT driver VRAM/mipmaps.
     // A strict finite default keeps this resource path bounded even when
     // hosts do not provide an explicit smaller profile.
-    std::size_t max_total_texture_upload_bytes = 512u * 1024u * 1024u;
+    std::size_t max_total_texture_upload_bytes = 1024ull * 1024ull * 1024ull;
 };
 
 enum class NativeGLFencePoll { Drained, Busy };

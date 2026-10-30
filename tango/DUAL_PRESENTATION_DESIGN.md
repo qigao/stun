@@ -513,8 +513,8 @@ a texture or program still referenced by the GPU (there is **no**
 context-less or CPU-only fallback).
 
 The combined native owner additionally has an explicit **cumulative CPU
-texture-payload upload byte budget** (default 512 MiB, configurable up
-to 1 GiB). It is checked before the native `glGenTextures/glTexImage2D`
+texture-payload upload byte budget** (default 1 GiB, configurable up
+to 2 GiB). It is checked before the native `glGenTextures/glTexImage2D`
 pair and is deliberately conservative: this is **not** GPU VRAM
 telemetry, driver allocation overhead, mipmap storage, resident image
 peak, uniform/shader memory or an overall device memory budget. A tighter
