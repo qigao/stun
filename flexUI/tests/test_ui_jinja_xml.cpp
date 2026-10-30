@@ -115,6 +115,13 @@ spec("FlexUI uses installed JinjaCMeta only as a staged XML author compiler") {
         "author.ui.xml.jinja",
         R"(<ui name="EscapedAttribute"><label id="safe" text="{{ title }}"/></ui>)",
         cmeta_reflected_data(StudioTextInputs), &data, registry);
+    if (!attr) {
+      info("Jinja attribute stage=%d template_status=%d ui_code=%d "
+           "template_offset=%zu message=%s",
+           static_cast<int>(attr.error.stage), attr.error.template_status,
+           static_cast<int>(attr.error.ui_error.code),
+           attr.error.template_offset, attr.error.message.c_str());
+    }
     check_true(static_cast<bool>(attr));
     if (attr) {
       const auto& root = attr.program->definition().root;

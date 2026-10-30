@@ -476,6 +476,13 @@ suite("FlexUI PluginHost") {
       check_false(active_sibling.queue_drained());
 
       auto second = dispatcher.dispatcher->pump();
+      if (second.submitted != std::size_t{1}) {
+        info("second native DSO pump: submitted=%zu failed=%zu "
+             "status=%d error=%s",
+             second.submitted, second.failed,
+             static_cast<int>(second.status),
+             second.error.message.c_str());
+      }
       check_true(static_cast<bool>(second));
       check_equal(second.submitted, std::size_t{1});
       std::size_t suppressed = 0;
