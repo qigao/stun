@@ -28,4 +28,5 @@ std::unique_ptr<CellPixelPresenter> create_external_gl_presenter(
     return std::make_unique<CellPixelPresenter>(std::move(pixel));
 }
 
+
 } // namespace flex::tango_opengl

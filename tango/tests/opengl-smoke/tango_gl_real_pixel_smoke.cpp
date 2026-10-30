@@ -127,6 +127,10 @@ flex::opengl_backend::OpenGLProcAddress gl_proc(void*, const char* name) {
         glfwGetProcAddress(name));
 }
 
+bool exact_gl_context_is_current(void* opaque_window) {
+    return glfwGetCurrentContext() == static_cast<GLFWwindow*>(opaque_window);
+}
+
 std::vector<std::uint8_t> read_back_rgba(
     int width = kWidth, int height = kHeight) {
     require(width > 0 && height > 0 &&
@@ -685,6 +689,20 @@ void exercise_orderly_context_recreation(
             require(presenter && presenter->on_owner_thread(),
                     "New native GL presenter was not created on the GL owner");
 
+            // Exact native context and independent device generation. Reuse
+            // the current host GL loader; no global/secondary GL backend.
+            flex::tango_opengl::NativeGLFenceConfig fence_config{};
+            fence_config.get_proc_address = &gl_proc;
+            fence_config.is_context_current = &exact_gl_context_is_current;
+            fence_config.host_user_data = native.handle;
+            fence_config.device_generation =
+                static_cast<std::uint64_t>(generation);
+            fence_config.max_in_flight = 1u;
+            flex::tango_opengl::NativeGLFrameFences fences(fence_config);
+            require(fences.device_generation() ==
+                    static_cast<std::uint64_t>(generation),
+                    "GPU fence owner has the wrong device generation");
+
             auto gate = std::make_unique<flex::tango_opengl::CellHostFrameGate>(
                 *presenter);
             gate->set_focus(true); // Separate XTest test qualifies real OS focus.
@@ -707,7 +725,72 @@ void exercise_orderly_context_recreation(
             layout.max_cells = kColumns * kRows;
             layout.max_draw_ops = 128;
             layout.max_text_bytes = 1024;
+            fences.require_capacity();
             presenter->present(grid.get(), layout);
+            // This GLsync is inserted AFTER the actual GPU draw commands,
+            // before any glFinish/glReadPixels. Frame resource retention must
+            // wait on this native GLsync, not a fabricated or CPU-only signal.
+            fences.record_submitted_frame(*presenter);
+            require(fences.in_flight() == 1u,
+                    "Actual GL fence was not retained for the submitted frame");
+
+            bool saturated = false;
+            try { fences.require_capacity(); }
+            catch (const std::length_error&) { saturated = true; }
+            require(saturated,
+                    "TangoGL allowed GPU frame submission beyond its fence budget");
+
+            bool early_close = false;
+            try { fences.close(); }
+            catch (const std::logic_error&) { early_close = true; }
+            require(early_close,
+                    "TangoGL retired GPU resources while a real fence was outstanding");
+
+            // Deliberately switch AWAY from the owner context. No OpenGL
+            // function may be called in this state, even on the same thread.
+            glfwMakeContextCurrent(nullptr);
+            bool wrong_context_denied = false;
+            try { (void)fences.retire_completed(0); }
+            catch (const std::logic_error&) { wrong_context_denied = true; }
+            glfwMakeContextCurrent(native.handle);
+            require(wrong_context_denied,
+                    "GLsync retirement incorrectly accepted a foreign/absent GL context");
+
+            bool wrong_thread_denied = false;
+            std::thread foreign([&] {
+                try { (void)fences.retire_completed(0); }
+                catch (const std::logic_error&) { wrong_thread_denied = true; }
+            });
+            foreign.join();
+            require(wrong_thread_denied,
+                    "GLsync was accessible outside its GL/UI owner thread");
+
+            // Each actual GL_CLIENT_WAIT is bounded to 100ms, with at most
+            // 20 attempts. Timeout retains the GLsync; only real native
+            // GL_ALREADY_SIGNALED/GL_CONDITION_SATISFIED may retire it.
+            bool completed = false;
+            for (int attempt = 0; attempt != 20; ++attempt) {
+                const auto outcome = fences.retire_completed(100000000ULL);
+                if (outcome == flex::tango_opengl::NativeGLFencePoll::Drained) {
+                    completed = true;
+                    break;
+                }
+                require(outcome == flex::tango_opengl::NativeGLFencePoll::Busy,
+                        "GPU fence poll returned an unknown completion result");
+                require(fences.in_flight() == 1u,
+                        "An unsignaled native GL fence was discarded prematurely");
+            }
+            require(completed && fences.in_flight() == 0u &&
+                    fences.last_retired_submission() ==
+                    presenter->submission_id(),
+                    "Native GPU fence did not signal and retire before resource teardown");
+            fences.close();
+
+            bool rejected_reuse = false;
+            try { fences.require_capacity(); }
+            catch (const std::logic_error&) { rejected_reuse = true; }
+            require(rejected_reuse,
+                    "Retired GPU fence owner could be reused across a context generation");
 
             // Prove native GPU bytes come from a NEW gCanvas renderer/context,
             // not an old framebuffer or a synthesized CPU test image.
@@ -761,7 +844,11 @@ void exercise_orderly_context_recreation(
             "Old context gate accessed GPU resources after the new context shutdown");
     std::cout << "TANGO_GL_CONTEXT_RECREATED=2\n"
               << "TANGO_GL_CONTEXT_OLD_GATE_RETIRED=1\n"
-              << "TANGO_GL_CONTEXT_NEW_PIXEL_PASS=1\n";
+              << "TANGO_GL_CONTEXT_NEW_PIXEL_PASS=1\n"
+              << "TANGO_GL_FENCE_NATIVE_GPU_COMPLETION=2\n"
+              << "TANGO_GL_FENCE_OVERLOAD_REFUSED=1\n"
+              << "TANGO_GL_FENCE_WRONG_CONTEXT_REFUSED=1\n"
+              << "TANGO_GL_FENCE_WRONG_THREAD_REFUSED=1\n";
 }
 
 void exercise_gpu(const std::string& font_path,
