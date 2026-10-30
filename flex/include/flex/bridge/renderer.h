@@ -17,8 +17,11 @@ enum class RendererBackend {
   Vulkan,
   TUI,
   Direct2D,
-  // Keep Custom last; the registry uses it as the fixed backend count.
-  Custom
+  Custom,
+  // Explicit Tango OpenGL cell-grid presenter; no production factory is
+  // installed until the native GL host and GPU glyph/pipeline path qualify.
+  // Appended after Custom so existing public enum ordinals are unchanged.
+  TangoOpenGL
 };
 
 struct RendererCreateInfo {

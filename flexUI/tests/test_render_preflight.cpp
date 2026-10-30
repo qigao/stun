@@ -1,4 +1,5 @@
 #include <flexUI/box.h>
+#include <flex/bridge/renderer.h>
 #include <flexUI/element.h>
 #include <flexUI/render_command.h>
 #include <flexUI/render_manager.h>
@@ -583,5 +584,22 @@ suite("Box style and layout request revisions") {
     box.update();
     check(!box.is_dirty());
     check_equal(backend.begins, frames_before + 1);
+  }
+}
+
+
+suite("Explicit Tango TTY versus OpenGL backend selection") {
+  it("does not promote an absent Tango OpenGL factory to TTY or generic GL") {
+    check_equal(flex::renderer_backend_name(flex::RendererBackend::TUI), "TUI");
+    check_equal(flex::renderer_backend_name(flex::RendererBackend::TangoOpenGL),
+                "TangoOpenGL");
+    // No production TangoGL factory has been registered by this source tree.
+    // Checking the exact type catches accidental reuse of generic OpenGL.
+    check(flex::renderer_backend_factory(flex::RendererBackend::TangoOpenGL) == nullptr);
+    check(!flex::is_renderer_backend_available(flex::RendererBackend::TangoOpenGL));
+    const auto previous_default = flex::default_renderer_factory();
+    check(!flex::set_default_renderer_backend(flex::RendererBackend::TangoOpenGL));
+    check(flex::default_renderer_factory() == previous_default);
+    check(flex::create_renderer(flex::RendererBackend::TangoOpenGL, nullptr) == nullptr);
   }
 }

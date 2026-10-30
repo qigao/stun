@@ -54,7 +54,7 @@ bool surface_equal(const SurfaceContract& a, const SurfaceContract& b) noexcept 
 bool backend_valid(BackendApi api) noexcept {
     return api == BackendApi::Direct2D || api == BackendApi::OpenGL ||
            api == BackendApi::OpenGLES || api == BackendApi::Vulkan ||
-           api == BackendApi::Tango;
+           api == BackendApi::Tango || api == BackendApi::TangoOpenGL;
 }
 
 bool unit_valid(Unit unit) noexcept {
@@ -141,10 +141,11 @@ bool stage_for_api(ArtifactKind kind, ShaderStage stage, BackendApi api) noexcep
     const bool shader_stage = stage == ShaderStage::Vertex ||
                               stage == ShaderStage::Fragment || stage == ShaderStage::Compute;
     if (!shader_stage) return false;
-    if (api == BackendApi::OpenGL) return kind == ArtifactKind::GlslSource;
+    if (api == BackendApi::OpenGL || api == BackendApi::TangoOpenGL)
+        return kind == ArtifactKind::GlslSource;
     if (api == BackendApi::OpenGLES) return kind == ArtifactKind::EsslSource;
     if (api == BackendApi::Vulkan) return kind == ArtifactKind::SpirV;
-    return false; // Tango never accepts a GPU artifact, regardless of device records.
+    return false; // Tango TTY never accepts GPU artifacts.
 }
 
 bool add_checked(std::uint64_t& total, std::uint64_t amount) noexcept {
@@ -388,8 +389,12 @@ EffectValidationResult validate_effect_contract(
             return fail(EffectError::UnsupportedTarget, "invalid target units or missing target contract digest");
         if (!target_equal(req.target, m.target) || !target_equal(req.target, caps.target))
             return fail(EffectError::UnsupportedTarget, "target contract differs; implicit unit or target conversion is unavailable");
+        // Tango TTY owns TerminalCell output. TangoOpenGL is the separate
+        // pixel presentation/effect stage AFTER a cell-grid-to-pixel
+        // projection, which is not performed by this metadata validator.
         if ((m.backend.api == BackendApi::Tango) != (req.target.kind == TargetKind::TerminalCell))
-            return fail(EffectError::UnsupportedTarget, "Tango requires TerminalCell; pixel backends require NativePixel");
+            return fail(EffectError::UnsupportedTarget,
+                        "Tango TTY requires TerminalCell; TangoOpenGL and other GPU backends require NativePixel");
         if (caps.scope.owner_id == 0 || caps.scope.domain_id == 0 ||
             caps.scope.device_generation == 0 || caps.capability_revision == 0)
             return fail(EffectError::InvalidValue, "capabilities require a nonzero resource scope and revision");
@@ -405,6 +410,13 @@ EffectValidationResult validate_effect_contract(
             return fail(EffectError::InvalidValue, "unknown effect input or compositing mode");
         if (req.input != m.input || req.compositing != m.compositing)
             return fail(EffectError::UnsupportedEffect, "input or compositing semantics differ from the selected implementation");
+        // A Tango cell grid is NOT an RGBA texture. The future TangoOpenGL
+        // presenter must first project a versioned cell snapshot into a
+        // NativePixel input; this validator must not claim that operation.
+        if (m.backend.api == BackendApi::TangoOpenGL &&
+            req.input == EffectInput::Cells)
+            return fail(EffectError::UnsupportedEffect,
+                        "TangoOpenGL pixel effects require an explicit cell-to-pixel projection");
         if (req.expanded_width == 0 || req.expanded_height == 0)
             return fail(EffectError::InvalidValue, "expanded reachable output extent must be nonzero");
         if (!surface_valid(req.input_surface, req.target.kind) ||
@@ -632,7 +644,9 @@ EffectValidationResult validate_effect_contract(
                 }
             }
             const bool gpu_api = caps.backend.api == BackendApi::OpenGL ||
-                                 caps.backend.api == BackendApi::OpenGLES || caps.backend.api == BackendApi::Vulkan;
+                                 caps.backend.api == BackendApi::OpenGLES ||
+                                 caps.backend.api == BackendApi::Vulkan ||
+                                 caps.backend.api == BackendApi::TangoOpenGL;
             switch (pass.kind) {
             case PassKind::NativeBuiltin:
                 if (pass.artifacts.size() != 1 || native != 1)

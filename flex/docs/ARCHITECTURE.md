@@ -329,7 +329,7 @@ bool InstanceNode::load() {
 // 统一接口
 class Renderer { virtual void draw_rect(...) = 0; };
 
-enum class RendererBackend { OpenGL, Vulkan, TUI, Direct2D, Custom };
+enum class RendererBackend { OpenGL, Vulkan, TUI, Direct2D, Custom, TangoOpenGL };
 
 // 平台模块注册工厂，业务层只依赖统一创建入口。
 auto renderer = create_renderer(RendererBackend::OpenGL, canvas);
@@ -441,7 +441,8 @@ FlexUI::Core
 flex_backend_opengl  → flex_render_engine_gcanvas → gCanvas::OpenGL
                     `→ flex_render_engine_nanovg（显式回滚/对比）
 flex_backend_vulkan → flex_render_engine_gcanvas → gCanvas::Vulkan
-flex_backend_tui    → tango
+flex_backend_tui    → TangoTTY / tango C11 cell buffer
+TangoOpenGL (future) → same Tango cell grid → GL glyph/pixel presenter
 flex_backend_d2d    → Direct2D/WIC/DirectWrite
 ```
 
@@ -499,7 +500,7 @@ auto instance = flex::Instance::create(def);
 - ✅ Compiler 可用于 DSL 工具链（代码生成器）
 
 ### 2. Flexibility (灵活性)
-- ✅ 平台选择固定为 OpenGL、Vulkan、TUI、Direct2D
+- ✅ 已有平台选择 OpenGL、Vulkan、TUI（TangoTTY）、Direct2D；TangoOpenGL 已预留独立选择槽位，生产实现及真实验收未完成
 - ✅ NanoVG/gCanvas 可作为内部实现独立演进
 - ✅ 切换后端只需改一行代码
 - ✅ 可选编译不同后端（CMake options）

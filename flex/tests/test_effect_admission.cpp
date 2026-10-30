@@ -306,7 +306,7 @@ fx::SharedResourceBudget effect_test_budget(const fx::ValidatedEffectContract& c
 spec("Effect metadata admission keeps backend profiles and semantic contracts distinct") {
     it("validates each GPU API's own vertex and fragment artifacts") {
         for (auto api : {fx::BackendApi::OpenGL, fx::BackendApi::OpenGLES,
-                         fx::BackendApi::Vulkan}) {
+                         fx::BackendApi::Vulkan, fx::BackendApi::TangoOpenGL}) {
             const auto fixture = effect_graphics_fixture(api);
             const auto result = effect_validate(fixture);
             check(result.contract != nullptr);
@@ -355,7 +355,55 @@ spec("Effect metadata admission keeps backend profiles and semantic contracts di
         }
     }
 
-    it("rejects shader-bearing Tango and generic D2D graphics passes") {
+    it("keeps TTY, Tango OpenGL and ordinary OpenGL profiles distinct") {
+        // A GPU cell-grid presenter is an explicitly selected *pixel* stage.
+        // The already-projected cell buffer is not implicitly converted by
+        // this admission code, and the test fixture is not a real GL loader.
+        auto gpu = effect_graphics_fixture(fx::BackendApi::TangoOpenGL);
+        // A Tango GL pixel effect consumes the explicitly rasterized texture,
+        // not raw terminal cells. This fixture does not implement rasterization.
+        gpu.requirement.input = fx::EffectInput::Texture;
+        gpu.manifest.input = fx::EffectInput::Texture;
+        gpu.capabilities.effects.front().input = fx::EffectInput::Texture;
+        check(bool(effect_validate(gpu)));
+
+        auto unprojected_cells = gpu;
+        unprojected_cells.requirement.input = fx::EffectInput::Cells;
+        unprojected_cells.manifest.input = fx::EffectInput::Cells;
+        unprojected_cells.capabilities.effects.front().input =
+            fx::EffectInput::Cells;
+        check(effect_validation_error(effect_validate(unprojected_cells),
+                                      fx::EffectError::UnsupportedEffect));
+
+        auto tty_target = gpu;
+        tty_target.requirement.target.kind = fx::TargetKind::TerminalCell;
+        tty_target.requirement.target.x_unit = fx::Unit::CellColumn;
+        tty_target.requirement.target.y_unit = fx::Unit::CellRow;
+        tty_target.manifest.target = tty_target.requirement.target;
+        tty_target.capabilities.target = tty_target.requirement.target;
+        check(effect_validation_error(effect_validate(tty_target),
+                                      fx::EffectError::UnsupportedTarget));
+
+        auto cross_api = gpu;
+        cross_api.capabilities.backend.api = fx::BackendApi::OpenGL;
+        check(effect_validation_error(effect_validate(cross_api),
+                                      fx::EffectError::UnsupportedBackend));
+
+        auto wrong_shader = gpu;
+        for (auto& artifact : wrong_shader.manifest.artifacts) {
+            artifact.kind = fx::ArtifactKind::EsslSource;
+        }
+        // Leave the adapter/device's qualified GLSL domain intact. Changing
+        // those records to ESSL would itself create an InvalidManifest before
+        // validating the selected artifact; this case specifically checks that
+        // TangoOpenGL refuses an ESSL shader against an otherwise valid GL
+        // capability and installed-program profile.
+        effect_test_install_observations(wrong_shader);
+        check(effect_validation_error(effect_validate(wrong_shader),
+                                      fx::EffectError::UnsupportedStage));
+    }
+
+    it("rejects shader-bearing Tango TTY and generic D2D graphics passes") {
         auto tango = effect_builtin_fixture(fx::BackendApi::Tango);
         tango.manifest.artifacts.front().kind = fx::ArtifactKind::SpirV;
         tango.manifest.artifacts.front().stage = fx::ShaderStage::Compute;

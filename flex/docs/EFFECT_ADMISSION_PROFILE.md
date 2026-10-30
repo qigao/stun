@@ -59,8 +59,16 @@ digest. NativePixel uses logical pixels on both axes or device pixels on both
 axes. TerminalCell uses columns and rows. No implicit DPI conversion, pixel-to-cell
 rounding, palette downgrade or target substitution is performed.
 
-The target for Tango must be TerminalCell; the other API families require
-NativePixel. Parameter ranges carry their own units and binding classification
+The existing `BackendApi::Tango` identifies **TangoTTY**, requiring
+TerminalCell with no GPU stages. The separate `BackendApi::TangoOpenGL`
+identifies a GPU pixel stage **after** the Tango cell grid has been explicitly
+projected into NativePixel; it accepts GLSL only when an independently
+qualified adapter/device/loader contract exists. The projection itself is
+outside this validator and is not implemented; a direct
+`EffectInput::Cells` is rejected for TangoOpenGL pixel effects until an
+explicit projection has produced NativePixel texture/content. General OpenGL
+cannot impersonate TangoOpenGL. The other API families also require NativePixel. Parameter
+ranges carry their own units and binding classification
 (uniform, specialization or structural). Cell units cannot enter a pixel target,
 and pixel units cannot enter a cell target. Other unit or binding differences
 are rejected rather than converted.
@@ -90,7 +98,8 @@ Tailwind/state/animation range extractor or prove the caller's range analysis.
 | gCanvas desktop OpenGL | Desktop GLSL source | Graphics with one vertex and one fragment artifact; compute only with an explicit adapter and device stage/profile tuple and execution limits |
 | gCanvas OpenGL ES | ESSL source | Same separation of graphics/compute, independently qualified ESSL profile |
 | gCanvas Vulkan | SPIR-V | Independently qualified graphics or compute modules and execution limits |
-| Tango | Registered native binding | NativeBuiltin only; no vertex, fragment or compute shader |
+| TangoTTY (`BackendApi::Tango`) | Registered native binding with TerminalCell | NativeBuiltin only; no vertex, fragment or compute shader |
+| TangoOpenGL (`BackendApi::TangoOpenGL`) | Separately qualified desktop GLSL with NativePixel after cell projection | Graphics vertex/fragment metadata only when explicitly qualified; compute requires an additional actual adapter dispatch/limits gate; no production factory/manifest is registered |
 
 A native binding may also be used by a pixel backend if that exact native
 operation is independently declared by both adapter and device records. Its
@@ -281,9 +290,10 @@ The generic bridge performs:
 conservative reservation. This is *not* a GPU memory query and does not
 prove actual driver allocation size. The owner must use an accurate
 conservative bound and ensure all capability-domain or artifact changes
-advance its revision. No new D2D, GL, GLES, Vulkan or Tango shader/manifest is
+advance its revision. No new D2D, GL, GLES, Vulkan, TangoTTY or TangoOpenGL shader/manifest is
 registered by this bridge, and no production adapter currently implements
-the new owner interface.
+the new owner interface. Tango dual presentation is tracked in
+[`tango/DUAL_PRESENTATION_DESIGN.md`](../../tango/DUAL_PRESENTATION_DESIGN.md).
 
 **Pre-submission only:** `PreparedNativeEffect` has no `submit()` method
 or implicit GPU fence, and must not be destroyed while resources could still

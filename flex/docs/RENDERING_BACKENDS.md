@@ -1,8 +1,10 @@
 # Flex 渲染后端
 
-Flex 只向应用暴露四种平台输出后端：OpenGL、Vulkan、TUI 和 Direct2D。
+当前已注册的生产平台输出后端包括 OpenGL、Vulkan、TUI（TangoTTY）与 Direct2D。
+**新增 `RendererBackend::TangoOpenGL` 独立槽位，但尚无生产 factory；显式请求必须失败，不能落回 TUI 或普通 OpenGL。**
 NanoVG 与 gCanvas 是内部渲染引擎，不参与 backend 注册，也不出现在
-`RendererBackend` 中。
+`RendererBackend` 中。TangoOpenGL 计划借用 gCanvas OpenGL 的已验收基础设施，但仍是独立的 Tango cell-grid presenter。
+详见 [Tango 双输出设计](../../tango/DUAL_PRESENTATION_DESIGN.md)。
 
 ## 分层
 
@@ -12,7 +14,8 @@ Flex scene / Renderer contract
              +-- flex_backend_opengl  ---- flex_render_engine_gcanvas ---- gCanvas::OpenGL
              |                       `--- flex_render_engine_nanovg (显式迁移回滚/对比)
              +-- flex_backend_vulkan ---- flex_render_engine_gcanvas ---- gCanvas::Vulkan
-             +-- flex_backend_tui
+             +-- flex_backend_tui   --------- TangoTTY (已有)
+             +-- TangoOpenGL (待实现) --- gCanvas GL + cell/glyph compositor
              +-- flex_backend_d2d
              `-- flex_render_engine_gcanvas (能力验证，不注册 backend)
 ```
@@ -21,7 +24,8 @@ Flex scene / Renderer contract
 |---|---|---|---|---|
 | OpenGL | `RendererBackend::OpenGL` | `flex_backend_opengl` | `backends/opengl/init.h` | gCanvas；可显式选 NanoVG 做迁移回滚 |
 | Vulkan | `RendererBackend::Vulkan` | `flex_backend_vulkan` | `backends/vulkan/init.h` | gCanvas 原生 Vulkan command recording |
-| TUI | `RendererBackend::TUI` | `flex_backend_tui` | `backends/tui/init.h` | Tango terminal buffer |
+| TUI / TangoTTY | `RendererBackend::TUI` | `flex_backend_tui` | `backends/tui/init.h` | Tango C11 terminal cell buffer 与 TTY/ConPTY |
+| TangoOpenGL（未实现） | `RendererBackend::TangoOpenGL` | 无已登记 target | 无生产入口 | 未来的共享 Tango cells + GL glyph/pixel 呈现；不是通用 OpenGL 的别名 |
 | Direct2D | `RendererBackend::Direct2D` | `flex_backend_d2d` | `backends/d2d/init.h` | Direct2D/WIC/DirectWrite |
 
 内部 target `flex_render_engine_nanovg` 和 `flex_render_engine_gcanvas` 只用于组合
@@ -269,6 +273,18 @@ auto renderer = flex::tui_backend::create_renderer(terminal);
 terminal 由宿主拥有，必须活到 renderer 析构之后。TUI 使用离散字符网格，不承诺
 与像素 backend 完全一致的曲线、旋转、阴影或模糊能力；调用方应通过
 `RendererCapabilities` 查询能力。
+
+### TangoOpenGL（独立、尚未实现）
+
+`RendererBackend::TangoOpenGL` 当前仅有公开枚举/注册槽位和 CPU effect-admission profile；
+**没有**注册工厂、GL glyph atlas、framebuffer、输入命中映射或 native resource-owner 实现。
+`is_renderer_backend_available(RendererBackend::TangoOpenGL)` 在没有明确注册时为 false，
+`create_renderer(RendererBackend::TangoOpenGL, ...)` 返回空，不尝试 `RendererBackend::TUI`
+或 `RendererBackend::OpenGL`。未来 GL presenter 必须显式接收宿主拥有的 context、Tango
+C11 cell-grid 快照及 cell→pixel metrics，使用设备域专属 program/texture/buffer 和
+GPU 完成/退休协议。TTY 的 TerminalCell 无 shader；TangoOpenGL 的已投影像素效果是
+独立 NativePixel/GLSL profile；二者不得混用或自动互换。
+详见 [Tango dual presentation](../../tango/DUAL_PRESENTATION_DESIGN.md)。
 
 ## Direct2D
 
