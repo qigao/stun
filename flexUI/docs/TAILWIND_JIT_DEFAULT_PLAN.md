@@ -1,5 +1,10 @@
 # Tailwind-like Utility JIT 默认化实施计划
 
+> **2026-10-29：历史实施计划。** 本文的完成记录属于既有 catalog → CSS → StyleEngine
+> 路径，不构成 Tailwind-only 或多后端 shader 验收。当前目标、删除边界和新的 M0–M5
+> 清单见 [TAILWIND_NATIVE_BACKENDS_DESIGN.md](TAILWIND_NATIVE_BACKENDS_DESIGN.md) 与 #17。
+> 保留原有验证事实；app CSS override、optional JIT、CSS theme 不再是目标作者契约。
+
 - 状态：核心实现、离屏视觉回归与性能基线完成；既有仓库失败项已分离
 - 日期：2026-07-15
 - 设计依据：[TAILWIND_JIT_DEFAULT_DESIGN.md](TAILWIND_JIT_DEFAULT_DESIGN.md)
@@ -359,3 +364,4 @@ examples 与安装包行为一致。
 
 不要在本计划中粘贴长构建日志；只勾选完成项，并在提交或变更说明中保留可复验
 命令和结果。
+

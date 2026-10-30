@@ -1,5 +1,11 @@
 # FlexUI TurboScript 行为控制器设计
 
+> **2026-10-29：** 样式与 shader 目标见
+> [TAILWIND_NATIVE_BACKENDS_DESIGN.md](TAILWIND_NATIVE_BACKENDS_DESIGN.md)。
+> controller 继续通过类型化、有界 mutation 驱动同一 UI；CSS property 输入需迁移为
+> 原生 token/property/effect 参数，不能让脚本持有后端程序或设备资源。
+> 本文旧 `.flex`/CSS 与 retained-mode 方案按其历史状态阅读，不能当作新能力完成证明。
+
 - 状态：提议，P0 契约与迁移边界已确认
 - 日期：2026-07-15
 - 范围：`flexUI` 行为脚本、Flex 动画边界、渲染 retained-mode 契约
@@ -251,3 +257,4 @@ FlexUI 接入前，TurboScript 需要在其自身仓库提供稳定 C ABI。以�
 - Electron-like 行为采用窗口级 controller 和命令批次，不复制 DOM/浏览器运行时。
 - 选择 TurboScript 代替愿景中的 QuickJS，条件是先补齐稳定宿主 ABI 与执行限制。
 - 动画 DSL 和原生 Timeline 保留；现有 NumericExpression MIR 已是正确的 JIT 层次。
+

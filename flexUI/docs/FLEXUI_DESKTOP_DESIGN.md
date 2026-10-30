@@ -1,5 +1,12 @@
 # FlexUI Desktop 应用运行时设计
 
+> **2026-10-29 样式与后端决策：** 当前目标是 XML + 原生 Tailwind + TurboScript，
+> 以 [TAILWIND_NATIVE_BACKENDS_DESIGN.md](TAILWIND_NATIVE_BACKENDS_DESIGN.md) 为准。
+> 手写 CSS、生成 CSS、CSS manifest/style 入口迁移为类型化 Theme/Preset 和原生程序；
+> D2D、gCanvas GL/GLES/Vulkan、Tango 各有明确效果与资源契约。下文的 `.css` 部署、
+> strict CSS load 和旧 manifest 示例是当前实现/历史方案，不能视为永久兼容入口。
+> 本次只更新设计；controller、服务、线程与组件所有权契约继续有效。
+
 - 状态：分阶段实施中（XML/CSS/TurboScript/DLL/gCanvas editor 闭环已落地；dirty binding、
   错误 UI 与完整 package discovery 尚未完成）
 - 日期：2026-09-01
@@ -1301,3 +1308,4 @@ FlexUI::Desktop
 - 无脚本、无 plugin、无动画窗口不产生脚本/plugin frame callback。
 - OpenGL GPU smoke、resize、DPI、text input、IME、clipboard 和 focus 回归通过。
 - benchmark 给出可复算基线，不用未经测量的“快于 Electron/Qt”作为完成结论。
+

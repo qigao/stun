@@ -1,7 +1,15 @@
-# FlexUI XML、CSS 与 TurboScript 架构决策
+# FlexUI XML、Tailwind 与 TurboScript 架构决策
 
-状态：架构决策已采用，实施与验收按下列工作项推进
-日期：2026-08-31
+状态：XML/controller 所有权决策与历史实施记录；样式和后端目标已于 2026-10-29 修订
+原决策日期：2026-08-31
+
+## 2026-10-29 原生 Tailwind 与后端效果决策
+
+[TAILWIND_NATIVE_BACKENDS_DESIGN.md](TAILWIND_NATIVE_BACKENDS_DESIGN.md) 是当前样式与
+shader 契约：XML + Tailwind + TurboScript，删除应用 CSS、生成 CSS 与 CSS fallback。
+Tailwind 直接生成类型化程序；D2D、gCanvas GL/GLES/Vulkan 与 Tango 分别准入效果、
+参数域、资源及设备代际。Tango 没有 GPU shader。运行时迁移仍待实施，下面的历史
+CSS/strict-load/CI 记录不表示新路径已完成。本文文件名保留以维持历史引用。
 
 ## 2026-10-28 P4.4 M4b2 Box 内部真实运行时 Borrower 快照（Draft）
 
@@ -349,7 +357,7 @@ P4.1 已通过 PR #282 合入 master。本轮为复用的 XML 组件增加编译
 | --- | --- | --- |
 | Text/Unicode | #76/#77/#78 已合并：XML 完整字节视图严格准入、Unicode 17 emoji 属性与呈现策略分离、字素级近似宽度/间距；事实与边界来自 `Salts::Unicode` | 真实 shaping/glyph advances、测量接入、编辑几何、完整应用字符串边界；见 [#15](https://github.com/qigao/stun/issues/15) |
 | XML | #12/#13/#14 提供注册内容模型预检、匿名节点、自然文本与严格 UTF-8 准入 | 完整 property/event/binding schema、稳定内部身份、精确解码文本 source map 和有序混合内容；见 [#16](https://github.com/qigao/stun/issues/16) |
-| CSS/Tailwind | 当前 catalog/JIT 生成 CSS 并进入同一个 StyleEngine cascade | 固定的 Tailwind v4 compatibility profile 与完整声明范围；见 [#17](https://github.com/qigao/stun/issues/17) |
+| Tailwind | 当前 catalog/JIT 仍生成 CSS 并进入 StyleEngine | 原生 Tailwind-only compiler、Theme/Preset、后端效果准入和 CSS 退役；见 [#17](https://github.com/qigao/stun/issues/17) |
 | Application | detached candidate 与 owner-thread publication/reload；真实无窗口 XML/registry/application 测试验证预检及失败回滚 | 真实 TurboScript JIT、完整 desktop/editor、安装分发及跨平台验收；见 [#31](https://github.com/qigao/stun/issues/31) |
 
 ### Text / Unicode 目标契约
@@ -391,14 +399,16 @@ font shaping/measurement、glyph 与 GPU font resource 分别属于其上层边�
 
 ### Tailwind compatibility 目标契约
 
-目标 authoring surface 是标准 `class="..."`，普通 semantic class 与 Tailwind candidate 共存，
-utility 只生成进入同一个 cascade 的规则。固定 Tailwind v4 profile 后，逐项声明 utility、
-variant stacking、responsive、dark、data/aria、container query、theme 与 arbitrary syntax 的
-支持范围；识别但不能表达的语义应明确报 Unsupported，不重新解释为本地不同语义。
+目标 authoring surface 是标准 `class="..."`，只接受 profile 声明的 Tailwind candidate 和
+合法 marker。业务身份使用 ID/part/data；不保留交给应用 CSS 的 semantic class。
+utility 原生编译为类型化声明、条件、Theme 引用和效果需求。固定 compatibility profile
+并逐项声明 utility、variant、responsive、dark、data/aria、container 与 arbitrary syntax；
+未实现语义明确报 Unsupported。Pixel 与 Terminal profile 的差异由新决策显式定义。
 
 官方 Tailwind compiler 可作为开发期 differential oracle，不作为安装后的 Node/npm 依赖。
 `utility_whitelist.json`、`UtilityCatalog` 与 exact-token lookup 继续作为当前实现及 coverage 数据，
-不能据此声称完整 Tailwind v4 兼容。只有 profiling/benchmark 证明必要时才考虑直接 Style IR lowering。
+不能据此声称完整 Tailwind v4 兼容。直接生成原生程序是已确定目标；生成 CSS、手写 CSS
+和 CSS-first theme 均需退役。迁移必须保持已有控件、主题、动画、Binding 与交互行为。
 
 ## 背景
 
@@ -409,22 +419,24 @@ FlexUI 需要形成类似 Qt `.ui` + QtScript 的桌面应用开发模型，但�
 ## 决策
 
 - XML 是 UI 结构与静态属性的唯一源格式。
-- CSS 是视觉、状态样式、transition 与 keyframes 的同一个 cascade；Tailwind utility 编译到该 pipeline。
+- Tailwind 是唯一样式输入，直接编译类型化视觉、状态、transition 与 keyframe 声明；
+  原生 Theme/Preset 和同一个属性求值器负责默认值、引用及覆盖顺序。
 - TurboScript（TBS）是交互、应用状态和命令编排的唯一可执行脚本语言；TBS 不创建或遍历一个
   通用 DOM，也不逐帧驱动动画。
 - Flex 的原生 Timeline、Track、Curve、显式三次贝塞尔、Physics/Box2D 和数值 MIR 保留为运行时
   能力；它们不属于要删除的 Flex DSL。
 - `.flex` parser、lexer、AST、binary DSL format 和 `Flex::Compiler` 在迁移完成后删除。
-- XML、CSS 和 TBS 都先编译为不可变程序，再在 UI owner thread 上实例化或执行。
+- XML、Tailwind 和 TBS 都先编译为不可变程序，再在相应 owner 上实例化或执行。
+- 效果语义与后端 shader 实现分离；候选发布前验证目标能力、所有可达状态和资源预算。
 
 ```mermaid
 flowchart TD
     XML[main.ui.xml] --> XP[XML adapter]
-    CSS[theme.css] --> CP[CSS / utility compiler]
+    TW["Tailwind classes / typed Theme"] --> CP["Native Tailwind compiler"]
     TBS[controller.tbs] --> TS[TurboScript module]
 
     XP --> UIIR[CompiledUiProgram]
-    CP --> StyleIR[CompiledStyleProgram]
+    CP --> StyleIR[TailwindProgram]
     CP --> AIR[Native Timeline / Curve IR]
     UIIR --> Box[FlexUI Box + typed widgets]
     StyleIR --> Box
@@ -442,7 +454,8 @@ flowchart TD
 |---|---|---|---|
 | XML adapter | XML source | load/reload 时可替换 | 语法、schema、source location |
 | `CompiledUiProgram` | UI definition、事件和 binding 表 | 不可变、可共享 | 语义、资源上限、重复 ID |
-| CSS compiler | stylesheet source | load/reload 时可替换 | selector、property、animation 引用 |
+| Tailwind compiler | class、类型化 Theme/Preset | 不可变程序，可事务替换 | utility、variant、类型、动画与效果引用 |
+| Backend effect owner | 已准入的目标计划和设备资源 | owner 与设备代际约束 | 能力、参数域、预算、提交和资源退休 |
 | Box/widget tree | 已实例化 UI 状态 | 仅 UI owner thread 修改 | mutation commit |
 | TurboScript controller | controller locals | 仅 controller owner thread 修改 | ABI、limits、handler export |
 | Timeline/Physics | 动画与物理状态 | runtime owner thread 修改 | 非法参数、缺失 target、资源上限 |
@@ -457,16 +470,17 @@ TBS 的一次事件返回一个不可变 effect envelope。宿主先完整校验
 sequenceDiagram
     participant App as Application
     participant XML as XML adapter
-    participant CSS as CSS compiler
+    participant TW as Native Tailwind compiler
     participant TBS as TurboScript adapter
     participant Runtime as FlexUI runtime
 
     App->>XML: parse + schema validate
     XML->>XML: compile CompiledUiProgram
-    App->>CSS: compile style/animation programs
+    App->>TW: compile typed style/animation/effect program
     App->>TBS: compile module + resolve exports
     App->>Runtime: validate cross references
     Runtime->>Runtime: instantiate detached widget tree
+    Runtime->>Runtime: admit target effects and prepare resources
     Runtime->>Runtime: atomically publish application instance
 ```
 
@@ -507,7 +521,7 @@ XML 解析采用仓库 vcpkg manifest 已声明的 pugixml，并通过其 CMake 
 
 ## 表达式策略
 
-短期保留现有数值 MIR 作为 CSS animation、binding 与原生 runtime 的编译后执行后端。这不是保留
+短期保留现有数值 MIR 作为原生 animation、binding 与 runtime 的编译后执行后端。这不是保留
 Flex DSL：用户不再编写 `.flex` 文档，MIR 也不负责 UI 结构或事件编排。
 
 如果后续要求所有表达式都使用 TBS 语法，应在 TurboScript 仓库提供受限的 pure-expression profile：
@@ -525,7 +539,7 @@ Flex DSL：用户不再编写 `.flex` 文档，MIR 也不负责 UI 结构或事�
 
 1. FlexUI、FlexPlayer、examples、FlexChart 与工具中的 `.flex` 消费者均已迁移或明确移除。
 2. XML 对 UI tree、属性、事件、binding 和资源具备等价测试。
-3. CSS/native runtime 对仍需保留的 animation、curve、physics 行为具备回归测试。
+3. 原生 runtime 对仍需保留的 animation、curve、physics 行为具备回归测试。
 4. 安装树不再导出 `Flex::Compiler`、`Flex::DSL` 或 DSL headers。
 5. 全仓库 configure/build/test 和 install-tree consumer 验证通过。
 
@@ -550,5 +564,6 @@ Flex DSL：用户不再编写 `.flex` 文档，MIR 也不负责 UI 结构或事�
   当前 Facade；现有实现验证的是 headless application candidate 事务。
 - `MED`（推论）：完整 TBS VM 若逐帧求每个属性，会增加调用、分配与 ABI 成本。依据是当前架构的
   per-frame native Timeline 热路径；需以 benchmark 决定是否增加 pure-expression profile。
-- `LOW`（常用做法）：XML/CSS/TBS 的职责分离更接近成熟桌面 UI 工具链，但本决策的主要依据仍是
+- `LOW`（常用做法）：XML/Tailwind/TBS 的职责分离更接近成熟桌面 UI 工具链，但本决策的主要依据仍是
   仓库现有 IR、runtime 与 controller 边界，而不是形式相似性。
+

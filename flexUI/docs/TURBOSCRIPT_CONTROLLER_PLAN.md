@@ -1,5 +1,9 @@
 # FlexUI TurboScript 行为控制器实施计划
 
+> **2026-10-29：** Tailwind-only 与后端效果的迁移/验收见
+> [TAILWIND_NATIVE_BACKENDS_DESIGN.md](TAILWIND_NATIVE_BACKENDS_DESIGN.md) 和 #17。
+> 本文历史 CSS/retained-mode 任务与完成记录不证明该新运行时已实现。
+
 - 状态：P0、P2 与 P3 私有 adapter 已落地；P1 retained-mode 公开契约与 P4 Box
   默认调度接入仍需单独审查
 - 日期：2026-07-15
@@ -201,3 +205,4 @@ P1 与 P2 可独立实施；P3 依赖 P2；P4 依赖 P3。P5 要求 retained、�
 
 完成条件：功能开关打开/关闭均可重复构建测试，性能与资源限制达标，文档只描述已实现
 行为。
+

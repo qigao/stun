@@ -1,5 +1,9 @@
 # Chart DSL 与 Flex UI Document 组合设计
 
+> **2026-10-29 样式修订：** ChartFrame 和 Widget UI chrome 使用
+> [原生 Tailwind 与后端效果契约](TAILWIND_NATIVE_BACKENDS_DESIGN.md)。
+> 既有 CSS/utility 实现是迁移基线；chart DSL、plot 数据与原生几何职责保持独立。
+
 ## 2026-10-27 XML migration checkpoint (#275 / Draft PR #276)
 
 This document's earlier `.flex` `ui ChartFrame` snippets describe the **retired proposal**, not the supported future authoring syntax. The canonical UI shell authoring source is now `charts/ui/assets/chart_frame.ui.xml`, which CMake embeds into `chart_ui` with no runtime current-working-directory lookup. The compiled XML definition and the same `UiDocumentInstantiator`, `WidgetRegistry`, `StyleEngine`, and Tailwind utility compiler are used for ChartFrame instantiation.
@@ -399,3 +403,4 @@ node/edge/cluster 数量限制，输入字节上限 `DOTGRAPH_MAX_INPUT_BYTES` �
 每一步都可以独立回滚到上一步提交。回滚不修改 Chart DSL 数据格式，不迁移持久化数据；若
 新 UiDocument API 尚无生产调用，可直接删除新增 adapter。进入去除旧 builder 的阶段后，回滚
 方式是恢复上一发布的 adapter 实现，而不是在运行时根据错误自动切换路径。
+

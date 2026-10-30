@@ -1,16 +1,23 @@
 # Stun
 
 Stun is a native C/C++ UI and charting stack built around **FlexUI**, **Flex**,
-and **gCanvas**. Its desktop application design uses XML, CSS/Tailwind utilities,
-and TurboScript without requiring a browser runtime in the installed application.
+and **gCanvas**, with D2D and Tango rendering adapters. Its adopted application
+design is **XML + native Tailwind + TurboScript**, with explicit target profiles
+for pixel and terminal output and no CSS authoring or generated-CSS stage.
+
+The [native Tailwind and backend design](flexUI/docs/TAILWIND_NATIVE_BACKENDS_DESIGN.md)
+defines that target. **Runtime migration is not complete:** the current utility
+catalog still generates CSS for StyleEngine. This design update does not replace
+that implementation or claim new shader/backend support.
 
 ## Application authoring and ownership
 
 - **XML** describes UI structure and static properties; FlexUI compiles it into an
   immutable `CompiledUiProgram` before instantiation.
-- **CSS** owns the style cascade and animation declarations. The current utility
-  catalog generates CSS into that same cascade. Full Tailwind v4 compatibility
-  is a separate compiler goal, not a property of the current whitelist.
+- **Tailwind** is the sole target styling input. The native compiler will produce
+  typed declarations, conditions, theme references and effect requirements;
+  handwritten CSS, CSS resources and CSS fallback are retired by the migration.
+  Full profile support is not a property of the current exact-token catalog.
 - **TurboScript** controllers receive typed event snapshots and request bounded
   UI mutations and service commands. The architecture keeps Element pointers,
   renderer access, and GPU resources in the native host.
@@ -18,8 +25,11 @@ and TurboScript without requiring a browser runtime in the installed application
   candidate publication. A failed reload must leave the active instance intact.
 - **Salts::Unicode** supplies strict UTF-8 scanning, versioned Unicode properties,
   and text boundaries. FlexUI owns typography and editing policy above them.
-- **gCanvas** owns canvas/window/GPU drawing resources and consumes rendering
-  commands; application semantics remain in FlexUI.
+- **Target renderer owners** will consume validated drawing/effect plans. D2D
+  primitives and new effect graphs will be qualified separately; gCanvas
+  GL/GLES/Vulkan will have separate program profiles. Tango uses terminal cells
+  and has no GPU shaders. Admission, budgets and generation contracts remain
+  implementation work.
 
 These ownership rules are the design contract. Current scope matters:
 
@@ -27,19 +37,21 @@ These ownership rules are the design contract. Current scope matters:
 | --- | --- | --- |
 | Unicode/text | Strict scalar scanning, emoji property/presentation separation, grapheme-based approximate layout, and XML UTF-8 admission | Real shaping/measurement integration, editable grapheme geometry, complete application boundary coverage ([#15](https://github.com/qigao/stun/issues/15)) |
 | XML | Registered content preflight, anonymous nodes, natural text, strict UTF-8 admission, and real headless load/reload regressions | Complete property/event/binding schemas, stable internal identity, precise decoded-text source maps, and ordered mixed content ([#16](https://github.com/qigao/stun/issues/16)) |
-| CSS/Tailwind | Catalog-based utility compilation into the existing StyleEngine cascade | Fixed Tailwind v4 profile, broader syntax, and differential conformance ([#17](https://github.com/qigao/stun/issues/17)) |
+| Tailwind | Catalog-based utility-to-CSS compilation into the existing StyleEngine | Native Tailwind-only compiler, typed Theme/Preset, complete behavior migration and CSS removal ([#17](https://github.com/qigao/stun/issues/17)) |
+| Backend effects | D2D primitives, Tango cell adapter and gCanvas GPU implementations with different current limits | Effect-domain admission, separate shader artifacts, strict unsupported behavior and resource retirement; the design matrix is not a current support claim ([#17](https://github.com/qigao/stun/issues/17)) |
 | Desktop delivery | Native application/controller code and focused component checks | Compatible TurboScript SDK integration, supported installed distributions/platforms, and physical-GPU qualification ([#31](https://github.com/qigao/stun/issues/31)) |
 
 See the [architecture](flexUI/docs/ARCHITECTURE.md),
-[XML/CSS/TurboScript decision](flexUI/docs/XML_CSS_TBS_ARCHITECTURE.md),
+[native Tailwind and backend decision](flexUI/docs/TAILWIND_NATIVE_BACKENDS_DESIGN.md),
+[XML/controller ownership history](flexUI/docs/XML_CSS_TBS_ARCHITECTURE.md),
 [desktop design](flexUI/docs/FLEXUI_DESKTOP_DESIGN.md),
 [controller design](flexUI/docs/TURBOSCRIPT_CONTROLLER_DESIGN.md), and
-[current utility JIT design](flexUI/docs/TAILWIND_JIT_DEFAULT_DESIGN.md).
+[current utility JIT implementation history](flexUI/docs/TAILWIND_JIT_DEFAULT_DESIGN.md).
 The application umbrella is [#1](https://github.com/qigao/stun/issues/1).
 
 ## Major modules
 
-- `flexUI/`: declarative UI, widgets, CSS, text, events, and application/controller runtime.
+- `flexUI/`: declarative UI, widgets, styles, text, events, and application/controller runtime.
 - `flex/`: expression, animation, scene/runtime, and rendering capabilities. Native
   capabilities remain useful independently of the legacy `.flex` source DSL.
 - `shared/gcanvas/`: native canvas/window/GPU substrate.
@@ -72,4 +84,5 @@ ctest --preset win-core-release-user -R '^(test_plugin_create_unwind|test_plugin
 
 This profile's install entry is `install-win-core-release-user`; its destination
 is `build/Msvc-Core-Release/install`, separate from both SDK roots.
+
 

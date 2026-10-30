@@ -1,10 +1,25 @@
 # flexUI Widget Development Guide
 
+## Target contract — 2026-10-29
+
+New styling design uses XML + native Tailwind + TurboScript, with typed Theme
+and per-part Tailwind Presets. See the
+[native Tailwind and backend contract](TAILWIND_NATIVE_BACKENDS_DESIGN.md).
+CSS authoring, generated CSS, stylesheet APIs and CSS fallback are migration
+removal targets. The implementation examples below still show existing APIs;
+they do not claim that the new compiler or backend admission is implemented.
+
+Widgets keep one semantic Element tree and emit backend-neutral commands.
+Effect requirements must be admitted for the explicit D2D, gCanvas API or Tango
+target before publication. Tango has no GPU shader; unsupported effects must
+fail explicitly rather than disappearing during drawing. Native typed property
+and animation behavior must survive the input-language migration.
+
 ## Architecture Overview
 
 ```
 Widget (logic + state)
-   └── Element host (layout + state + CSS)
+   └── Element host (layout + state + computed style)
        ├── track [part=track]
        ├── fill [part=fill]
        ├── thumb [part=thumb]
@@ -17,11 +32,11 @@ Do not mirror those parts in a private Group/Shape tree.
 
 ## Core Concepts
 
-### Tailwind classes and C++/MIR bindings
+### Existing Tailwind/CSS APIs and C++/MIR bindings — migration baseline
 
-默认 `Box` 已启用内嵌 Tailwind-like Utility JIT。新 UI 应使用显式 utility API，
-使拼写错误在进入样式树时立即失败；业务身份使用 `data-slot`、`part`、`role` 或
-`data-state`。`add_class()` 仅用于需要普通 CSS selector 的兼容/语义 class：
+当前 `Box` 已启用内嵌 Tailwind-like Utility JIT。以下示例记录现有显式 utility 和
+semantic CSS class API，作为迁移基线；目标只使用标准 Tailwind class 和类型化参数。
+业务身份使用 `data-slot`、`part`、`role` 或 `data-state`，不依赖手写 CSS class 规则：
 
 ```cpp
 button->set_attribute("data-slot", "dialog-action");
@@ -69,7 +84,8 @@ ui.targets().bind_value(*input, "title"); // two-way editable widget value
 
 Dynamic collections use `UiKeyedRepeater`. It reconciles one container's direct
 children by stable application keys, while every item remains a normal Element
-subtree styled by CSS or Tailwind classes:
+subtree. The following current utility API example must migrate to the single
+native Tailwind authoring contract:
 
 ```cpp
 UiKeyedRepeater rows(box, *list);
@@ -98,9 +114,11 @@ history and fails fast when exceeded.
 
 Inputs must be declared before binding and cannot change type. Invalid MIR
 expressions, missing inputs, duplicate target ownership, and invalid custom
-property names fail when the binding is created. CSS remains the only runtime
-style language; MIR evaluates data expressions and does not generate a second
-render or style system.
+property names fail when the binding is created. The current implementation
+still evaluates CSS; the target runtime evaluates native Tailwind declarations.
+MIR evaluates data expressions and does not create a second render/style system.
+Custom-property bindings must migrate to typed token/property/effect inputs while
+preserving their dynamic behavior.
 
 A binding exclusively owns its target until `unbind()` or `clear()`, which
 restores the value captured when the binding was created. Referenced inputs
@@ -179,7 +197,9 @@ void MyWidget::build_semantic_tree() {
 }
 ```
 
-Each part is a real Element with `[part=name]` and participates in normal CSS:
+Each part is a real Element with a stable `part` identity. The current
+implementation styles it with CSS; these rules must migrate to Tailwind Presets
+and typed parameters while preserving behavior:
 
 ```css
 [role=meter] > track {
@@ -197,7 +217,8 @@ Each part is a real Element with `[part=name]` and participates in normal CSS:
 }
 ```
 
-Applications may query and style parts, but the Widget owns their structure:
+Applications may query and style parts, but the Widget owns their structure.
+The following existing CSS query API must migrate to ID/part/typed queries:
 
 ```cpp
 Element* fill = box.query_selector("#volume > fill");
@@ -310,13 +331,14 @@ The same rule applies to scroll windows: if a helper translates content by a
 scroll offset, it must push the same offset into the command-list prefix until
 the scrolled content has finished emitting.
 
-### 6. CSS Properties and Compatibility Variables
+### 6. Tailwind part styles and typed parameters
 
-Use ordinary CSS properties on semantic parts for color, size, borders,
-typography, opacity, transforms, and animation. Custom properties are design
-tokens or compatibility fallbacks, not a replacement for part structure.
+The target design uses Tailwind classes on semantic parts for color, size,
+borders, typography, transforms and animation, with typed Theme and dynamic
+parameters. Part structure and ownership remain unchanged. Do not add a CSS
+fallback to implement missing Tailwind or backend behavior.
 
-**Reading CSS variables:**
+**Existing CSS variable reads to migrate, not the target authoring API:**
 ```cpp
 auto* style = elem.computed_style;
 
@@ -569,20 +591,24 @@ command list for text drawing.
 
 Before submitting a new widget:
 
+Style and effect entries below are target migration acceptance criteria; the
+new typed authoring and admission APIs are not yet implemented.
+
 - [ ] Header includes only necessary headers
 - [ ] Stable visual parts are widget-owned Elements created once by `build_semantic_tree()`
-- [ ] Parts expose `[part=name]` and ordinary CSS properties; custom variables are compatibility fallbacks
+- [ ] Parts expose stable `part` identities, Tailwind Presets, typed Theme tokens and typed dynamic parameters
 - [ ] Dynamic part geometry is synchronized in `sync_host_semantics_for_layout()`, not during render
 - [ ] Widget-owned structure is not exposed through append/remove/clear operations
-- [ ] Group/Shape is limited to atomic drawing that does not need independent CSS/query/event identity
+- [ ] Group/Shape is limited to atomic drawing that does not need independent style/query/event identity
 - [ ] All coordinates are LOCAL (0,0 = widget top-left)
 - [ ] `emit_render_commands()` emits local coordinates into the provided command list
 - [ ] `emit_overlay_commands()` emits window coordinates when the widget has an overlay
 - [ ] `handle_event()` converts event coords to local with `event.x - elem.absolute_x()`
 - [ ] Only valid EventType values used (no MouseLeave, MouseEnter)
-- [ ] CSS variable names documented in class comment
+- [ ] Theme tokens, parameter types/ranges and effect requirements are documented; existing CSS variables have explicit migration mappings
 - [ ] `type_name()` returns unique widget name
 - [ ] `dirty_` flag used to avoid unnecessary rebuilds
 - [ ] `elem.mark_paint_dirty()` called when state changes
 - [ ] No memory leaks (parts owned by Box, Widget owned by Box, optional shapes owned by Widget Group)
 - [ ] Added to CMakeLists.txt (both SOURCES and HEADERS)
+

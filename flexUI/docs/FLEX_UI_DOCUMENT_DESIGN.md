@@ -1,5 +1,9 @@
 # Flex DSL 到 FlexUI Element Tree 设计
 
+> **当前决策：** XML 结构与 controller 所有权沿用现有文档；样式与后端目标以
+> [TAILWIND_NATIVE_BACKENDS_DESIGN.md](TAILWIND_NATIVE_BACKENDS_DESIGN.md) 为准。
+> 本文的旧 `.flex`、utility/CSS 示例保留为实现与迁移记录，不定义未来作者输入。
+
 - 状态：最小 vertical slice 已实现并验证
 - 日期：2026-07-15
 - 范围：Flex `ui` 语法、不可变 UI definition、Box-owned Element tree
@@ -137,3 +141,4 @@ TurboScript 只接收 `{id, generation}` handle 和 `on.*` 事件，不接收裸
 - definition 拒绝多 root、重复 ID、错误 alias/type 和资源超限。
 - instantiator 保留 child order、class/utility/text/attributes/event metadata。
 - 安装失败时 Box root 保持不变；成功后 ID 查询和 Utility JIT 正常工作。
+

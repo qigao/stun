@@ -1,5 +1,10 @@
 # FlexUI Desktop TODO Checklist
 
+> **2026-10-29：** 新样式与后端任务按
+> [TAILWIND_NATIVE_BACKENDS_DESIGN.md](TAILWIND_NATIVE_BACKENDS_DESIGN.md) 的 M0–M5 与 #17
+> 跟踪。下面的 CSS 加载/部署任务是历史实现记录；不能将其完成状态继承为 Tailwind-only
+> 或 D2D/Tango/gCanvas 效果验收。既有 controller/service/ownership 门槛继续有效。
+
 - 状态：待实施
 - 日期：2026-08-14
 - 设计依据：[FLEXUI_DESKTOP_DESIGN.md](FLEXUI_DESKTOP_DESIGN.md)
@@ -500,4 +505,5 @@ ctest --preset win-dev-user -R "<smallest-related-test-regex>" --output-on-failu
 - [ ] Windows OpenGL 交付矩阵的输入、IME、DPI、clipboard、resize、focus 和 shutdown 通过。
 - [ ] TurboScript 和 DLL ABI 均有 install-tree 外部 consumer 测试。
 - [ ] 性能、安全、资源上限、部署文件和许可证均有记录。
+
 
