@@ -19,7 +19,7 @@ if(FLEX_BUILD_BACKEND_TANGO_OPENGL)
   add_library(flex_backend_tango_opengl STATIC gl_presenter.cpp)
   target_link_libraries(flex_backend_tango_opengl
     PUBLIC flex_tango_gl_frame flex_backend_opengl
-    PRIVATE flex_render_engine_gcanvas)
+    PRIVATE flex_render_engine_gcanvas glad::glad)
   target_include_directories(flex_backend_tango_opengl
     PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
   target_compile_features(flex_backend_tango_opengl PUBLIC cxx_std_17)

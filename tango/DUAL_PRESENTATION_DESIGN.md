@@ -309,6 +309,51 @@ context, or GL recovery after a native driver reset. Those remain strict
 OPEN gates along with physical GPU, true monitor HiDPI, IME and native
 Windows/macOS event injection. No production TangoOpenGL factory registration.
 
+## Native GLsync bounded frame completion and resource retirement (Draft)
+
+`NativeGLFrameFences` is a **context-owned, owner-thread-only** GLsync
+retirement contract layered over the *existing* gCanvas GL shader/cell renderer.
+It resolves `glFenceSync`, `glClientWaitSync`, `glDeleteSync`, `glFlush` and
+`glGetError` through the exact host-provided OpenGL proc loader.
+There is no second GL backend, fallback renderer or synthetic GPU completion.
+The host supplies a mandatory exact-current-context predicate and a nonzero
+`device_generation`. A new GL context uses an independent fence owner
+and new generation even if its C11 grid revision/submission counter repeats.
+
+Before a new GL frame, `require_capacity()` enforces a small explicitly
+bounded in-flight budget. After the native renderer successfully completes its
+pixel submission, `record_submitted_frame(presenter)` inserts a real
+`GL_SYNC_GPU_COMMANDS_COMPLETE` fence and flushes. It records the
+source revision, GPU-owner generation and strictly increasing presenter
+submission ID. Duplicated/invalid submissions and a full queue fail closed.
+
+`retire_completed(timeout_ns)` calls the real `glClientWaitSync` with a
+maximum of 100ms per poll; timeout returns Busy and keeps the GPU fence
+owned. Only `GL_ALREADY_SIGNALED` or `GL_CONDITION_SATISFIED` permits
+`glDeleteSync`, FIFO removal and publication of the retired submission.
+Wrong-thread/wrong-context operations are refused **before calling GL**.
+`close()` refuses while any fence remains. An abandoned object with
+outstanding GLsyncs fails fast rather than deleting them against a dead
+context. A bounded drain must complete **before** the gCanvas presenter and
+its glyph/atlas resources are released.
+
+The existing native Mesa/Xvfb test qualifies real fences against **two
+sequential distinct GLFW/OpenGL contexts** and actual gCanvas-rendered C11
+frames. It verifies queue capacity refusal, premature close denial,
+wrong-current-context and wrong-owner denial, explicit bounded real GPU
+signal, safe GLsync deletion and fresh-device independent fences at the
+same source revision. Its old X11/XTest pixel/input/resize qualifications
+remain mandatory.
+
+**Scope:** This proves real GLsync retirement for **orderly completion on
+Mesa llvmpipe**, not long-running GPU overlap, all gCanvas internal async
+uploads, application-wide shader/atlas lease retention, hardware device loss,
+fence failure after abrupt reset or context-free GL deletion. The current
+GLFW example has not yet been migrated onto this explicit fence holder;
+therefore production TangoOpenGL registration remains prohibited.
+Unexpected context loss, device-generation quarantine and GPU resource
+retirement during asynchronous shutdown still require independent gates.
+
 ## Native TTY presenter
 
 Owns/borrows the terminal, validates the bounded buffer, produces VT diff

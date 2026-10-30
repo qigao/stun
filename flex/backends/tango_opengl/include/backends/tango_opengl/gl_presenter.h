@@ -8,6 +8,8 @@
 #include <backends/opengl/init.h>
 
 #include <memory>
+#include <cstddef>
+#include <cstdint>
 #include <string>
 
 namespace flex::tango_opengl {
@@ -31,5 +33,58 @@ struct ExternalGLCellCreateInfo {
 // qualification remain explicit #342 gates.
 std::unique_ptr<CellPixelPresenter> create_external_gl_presenter(
     const ExternalGLCellCreateInfo& info);
+
+
+/*
+ * Bounded native OpenGL submission-fence owner for the existing gCanvas GL
+ * presenter. No second renderer, global GL loader, or fallback synchronization.
+ *
+ * The host must explicitly check capacity BEFORE drawing, then record the
+ * exact successful presenter submission on the SAME current native context.
+ * The fence protects the GCanvas renderer and its glyph/atlas resources from
+ * being destroyed until the GPU has signaled every GLsync. The input gate is
+ * a separate CPU acceptance contract: publication does not imply a GPU fence
+ * has completed. A context-lost recovery path is NOT implemented here.
+ */
+struct NativeGLFenceConfig final {
+    opengl_backend::OpenGLProcLoader get_proc_address = nullptr;
+    void* proc_user_data = nullptr;
+    // Synchronous host check must verify the ORIGINAL exact GL context,
+    // never just that some other GL context is current.
+    bool (*is_context_current)(void* user_data) = nullptr;
+    void* host_user_data = nullptr;
+    std::uint64_t device_generation = 0;
+    std::size_t max_in_flight = 0;
+};
+
+enum class NativeGLFencePoll { Drained, Busy };
+
+class NativeGLFrameFences final {
+public:
+    explicit NativeGLFrameFences(const NativeGLFenceConfig& config);
+    ~NativeGLFrameFences() noexcept;
+    NativeGLFrameFences(const NativeGLFrameFences&) = delete;
+    NativeGLFrameFences& operator=(const NativeGLFrameFences&) = delete;
+
+    // Fail closed when the queue is full or the GL context/owner has changed.
+    void require_capacity() const;
+    // Insert a real GL_SYNC_GPU_COMMANDS_COMPLETE fence after successful
+    // native renderer end_frame(). Frames are identified by source revision,
+    // monotonically increasing presenter submission ID and device generation.
+    void record_submitted_frame(const CellPixelPresenter& presenter);
+    // Wait up to this bounded per-fence time (nanoseconds); a timeout keeps
+    // the uncompleted GLsync owned and returns Busy. No glFinish fallback.
+    NativeGLFencePoll retire_completed(std::uint64_t timeout_nanoseconds);
+    // Can close only after every actual fence was observed signaled and
+    // deleted while the ORIGINAL GL context is current. No implicit draining.
+    void close();
+    std::size_t in_flight() const;
+    std::uint64_t last_retired_submission() const;
+    std::uint64_t device_generation() const noexcept;
+
+private:
+    struct Impl;
+    std::unique_ptr<Impl> impl_;
+};
 
 } // namespace flex::tango_opengl
