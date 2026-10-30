@@ -325,3 +325,115 @@ spec("FlexUI anonymous nodes stay outside the named index") {
     }
   }
 }
+
+
+spec("FlexUI typed native Props use the one Registry and XML compiler") {
+  it("preserves numeric-looking string Props and validates before Widget creation") {
+    int calls = 0;
+    flexUI::WidgetRegistry registry;
+    flexUI::UiNodeDescriptor schema{flexUI::UiNodeKind::Widget, flexUI::UiContentModel::Empty};
+    schema.properties = {
+        {"title", flexUI::UiPropertyKind::String, true},
+        {"enabled", flexUI::UiPropertyKind::Boolean, true},
+        {"count", flexUI::UiPropertyKind::Integer, false},
+        {"ratio", flexUI::UiPropertyKind::Number, false},
+    };
+    schema.reject_unknown_properties = true;
+    check_false(static_cast<bool>(registry.register_widget(
+        "typed", [&](const flexUI::UiNodeDefinition &) {
+          ++calls;
+          return std::make_unique<flexUI::ButtonWidget>();
+        }, schema)));
+
+    const auto compiled = flexUI::compile_ui_xml(
+        "<ui name=\"Typed\"><typed id=\"subject\" title=\"007\" enabled=\"true\" count=\"3\" ratio=\"0.5\"/></ui>",
+        registry, flexUI::UiDocumentLimits{});
+    check(static_cast<bool>(compiled));
+    if (!compiled) return;
+    const auto &props = compiled.program->definition().root.properties;
+    check_equal(std::get<std::string>(props.at("title")), "007");
+    check(std::get<bool>(props.at("enabled")));
+    check_equal(std::get<float>(props.at("count")), 3.0F);
+    check_equal(std::get<float>(props.at("ratio")), 0.5F);
+    check_equal(calls, 0);
+
+    flexUI::Box box(nullptr);
+    const auto created = flexUI::UiDocumentInstantiator::instantiate(
+        box, *compiled.program, registry);
+    check(static_cast<bool>(created));
+    check_equal(calls, 1);
+    check_not_null(box.get_by_id("subject"));
+  }
+
+  it("rejects missing, mistyped and unknown Props without factory side effects") {
+    int calls = 0;
+    flexUI::WidgetRegistry registry;
+    flexUI::UiNodeDescriptor schema{flexUI::UiNodeKind::Widget, flexUI::UiContentModel::Empty};
+    schema.properties = {
+        {"title", flexUI::UiPropertyKind::String, true},
+        {"enabled", flexUI::UiPropertyKind::Boolean, true},
+        {"count", flexUI::UiPropertyKind::Integer, false},
+        {"ratio", flexUI::UiPropertyKind::Number, false},
+    };
+    schema.reject_unknown_properties = true;
+    check_false(static_cast<bool>(registry.register_widget(
+        "typed", [&](const flexUI::UiNodeDefinition &) {
+          ++calls;
+          return std::make_unique<flexUI::ButtonWidget>();
+        }, schema)));
+
+    for (const auto *xml : {
+         "<ui name=\"Props\"><typed id=\"x\" enabled=\"true\"/></ui>",
+         "<ui name=\"Props\"><typed id=\"x\" title=\"T\" enabled=\"TRUE\"/></ui>",
+         "<ui name=\"Props\"><typed id=\"x\" title=\"T\" enabled=\"true\" count=\"2.5\"/></ui>",
+         "<ui name=\"Props\"><typed id=\"x\" title=\"T\" enabled=\"true\" count=\"16777217\"/></ui>",
+         "<ui name=\"Props\"><typed id=\"x\" title=\"T\" enabled=\"true\" ratio=\"nan\"/></ui>",
+         "<ui name=\"Props\"><typed id=\"x\" title=\"T\" enabled=\"true\" surprise=\"ok\"/></ui>",
+         "<ui name=\"Props\"><missing id=\"x\" title=\"T\"/></ui>",
+    }) {
+      const auto compiled = flexUI::compile_ui_xml(xml, registry, flexUI::UiDocumentLimits{});
+      check_false(static_cast<bool>(compiled));
+      check_null(compiled.program.get());
+      check(compiled.error.code == flexUI::UiDocumentErrorCode::InvalidProperty ||
+            compiled.error.code == flexUI::UiDocumentErrorCode::UnknownElementTag);
+      check_equal(calls, 0);
+    }
+
+    flexUI::UiNodeDefinition invalid;
+    invalid.tag = "typed";
+    invalid.id = "subject";
+    invalid.properties["title"] = std::string("T");
+    invalid.properties["enabled"] = 3.0F;
+    check(registry.create(invalid).error.code == flexUI::WidgetRegistryErrorCode::InvalidContent);
+    check_equal(calls, 0);
+  }
+
+  it("rejects invalid typed schema metadata and preserves legacy open tags") {
+    flexUI::WidgetRegistry registry;
+    flexUI::UiNodeDescriptor invalid{flexUI::UiNodeKind::Widget, flexUI::UiContentModel::Empty};
+    invalid.properties = {
+        {"duplicate", flexUI::UiPropertyKind::String, false},
+        {"duplicate", flexUI::UiPropertyKind::Boolean, false},
+    };
+    check(registry.register_widget("bad", [](const flexUI::UiNodeDefinition &) {
+      return std::make_unique<flexUI::ButtonWidget>();
+    }, invalid).code == flexUI::WidgetRegistryErrorCode::InvalidDescriptor);
+    check_false(registry.contains("bad"));
+
+    invalid.properties = {{"id", flexUI::UiPropertyKind::String, true}};
+    check(registry.register_widget("bad", [](const flexUI::UiNodeDefinition &) {
+      return std::make_unique<flexUI::ButtonWidget>();
+    }, invalid).code == flexUI::WidgetRegistryErrorCode::InvalidDescriptor);
+    check_false(registry.contains("bad"));
+
+    check_false(static_cast<bool>(registry.register_element("legacy")));
+    const auto original = flexUI::compile_ui_xml(
+        "<ui name=\"Legacy\"><legacy id=\"root\" arbitrary=\"42\"/></ui>");
+    check(static_cast<bool>(original));
+    check_false(static_cast<bool>(registry.validate(*original.program)));
+    const auto typed = flexUI::compile_ui_xml(
+        "<ui name=\"Legacy\"><legacy id=\"root\" arbitrary=\"42\"/></ui>", registry,
+        flexUI::UiDocumentLimits{});
+    check(static_cast<bool>(typed));
+  }
+}

@@ -1,4 +1,5 @@
 #include <flexUI/ui_xml.h>
+#include <flexUI/widget_registry.h>
 
 #include <pugixml.hpp>
 #include "ui_xml_admission.h"
@@ -7,6 +8,8 @@
 #include <charconv>
 #include <cmath>
 #include <cstddef>
+#include <cstdint>
+#include <limits>
 #include <string>
 #include <unordered_set>
 #include <utility>
@@ -96,9 +99,47 @@ UiDocumentValue parse_scalar(std::string_view property, std::string_view source)
   return std::string(source);
 }
 
+// Declared typed Props use the registry as the ONE source of truth. The
+// untyped legacy frontend keeps its original scalar inference behavior.
+bool parse_typed_property(UiPropertyKind kind, std::string_view value,
+                          UiDocumentValue &result) {
+  if (kind == UiPropertyKind::String) {
+    result = std::string(value);
+    return true;
+  }
+  if (kind == UiPropertyKind::Boolean) {
+    if (value == "true") { result = true; return true; }
+    if (value == "false") { result = false; return true; }
+    return false;
+  }
+  if (kind == UiPropertyKind::Number) {
+    float number = 0.0F;
+    const auto parsed = std::from_chars(value.data(), value.data() + value.size(),
+                                        number, std::chars_format::general);
+    if (parsed.ec != std::errc{} || parsed.ptr != value.data() + value.size() ||
+        !std::isfinite(number)) return false;
+    result = number;
+    return true;
+  }
+  if (kind == UiPropertyKind::Integer) {
+    std::int64_t integer = 0;
+    const auto parsed = std::from_chars(value.data(), value.data() + value.size(), integer);
+    if (parsed.ec != std::errc{} || parsed.ptr != value.data() + value.size() ||
+        integer < static_cast<std::int64_t>(std::numeric_limits<int>::min()) ||
+        integer > static_cast<std::int64_t>(std::numeric_limits<int>::max()))
+      return false;
+    const auto number = static_cast<float>(integer);
+    if (static_cast<std::int64_t>(number) != integer) return false;
+    result = number;
+    return true;
+  }
+  return false;
+}
+
 UiDocumentError parse_widget_node(std::string_view source, const pugi::xml_node &xml_node,
-                                  const UiDocumentLimits &limits, std::size_t depth,
-                                  std::size_t &node_count, std::unordered_set<std::string> &ids,
+                                  const UiDocumentLimits &limits, const WidgetRegistry *registry,
+                                  std::size_t depth, std::size_t &node_count,
+                                  std::unordered_set<std::string> &ids,
                                   UiNodeDefinition &definition) {
   const std::string_view tag(xml_node.name());
   if (tag == "ui" || tag == "resources" || tag == "resource") {
@@ -119,6 +160,12 @@ UiDocumentError parse_widget_node(std::string_view source, const pugi::xml_node 
                       tag.empty() ? UiDocumentErrorCode::InvalidNode
                                   : UiDocumentErrorCode::StringLimitExceeded,
                       "XML widget tag must be non-empty and within the string limit");
+  }
+
+  const UiNodeDescriptor *schema = registry ? registry->descriptor(tag) : nullptr;
+  if (registry && !schema) {
+    return node_error(source, xml_node, UiDocumentErrorCode::UnknownElementTag,
+                      "unknown registered UI tag: " + std::string(tag));
   }
 
   const auto id_attribute = xml_node.attribute("id");
@@ -176,7 +223,21 @@ UiDocumentError parse_widget_node(std::string_view source, const pugi::xml_node 
       return node_error(source, xml_node, UiDocumentErrorCode::StringLimitExceeded,
                         "XML UI attribute exceeds the string limit: " + property_name);
     }
-    definition.properties.emplace(property_name, parse_scalar(property_name, value));
+    UiDocumentValue parsed_value;
+    if (schema) {
+      if (const auto *spec = schema->property(property_name)) {
+        if (!parse_typed_property(spec->kind, value, parsed_value)) {
+          return node_error(source, xml_node, UiDocumentErrorCode::InvalidProperty,
+                            "UI tag '" + std::string(tag) + "' property '" +
+                            property_name + "' violates its declared type");
+        }
+      } else {
+        parsed_value = parse_scalar(property_name, value);
+      }
+    } else {
+      parsed_value = parse_scalar(property_name, value);
+    }
+    definition.properties.emplace(property_name, std::move(parsed_value));
     definition.property_spans.emplace(std::move(property_name),
                                       SourceSpan{location.line, location.column, xml_name.size()});
   }
@@ -191,7 +252,8 @@ UiDocumentError parse_widget_node(std::string_view source, const pugi::xml_node 
     if (child.type() == pugi::node_element) {
       has_element_children = true;
       definition.children.emplace_back();
-      auto error = parse_widget_node(source, child, limits, depth + 1, node_count, ids,
+      auto error = parse_widget_node(source, child, limits, registry, depth + 1,
+                                     node_count, ids,
                                      definition.children.back());
       if (error) {
         return error;
@@ -340,7 +402,8 @@ UiDocumentError parse_resources(std::string_view source, const pugi::xml_node &r
   return {};
 }
 
-XmlSource parse_xml_source(std::string_view source, const UiDocumentLimits &limits) {
+XmlSource parse_xml_source(std::string_view source, const UiDocumentLimits &limits,
+                           const WidgetRegistry *registry = nullptr) {
   XmlSource result;
   if (source.size() > limits.max_source_bytes) {
     result.error =
@@ -437,7 +500,8 @@ XmlSource parse_xml_source(std::string_view source, const UiDocumentLimits &limi
   std::size_t node_count = 0;
   std::unordered_set<std::string> ids;
   result.error =
-      parse_widget_node(source, widget_root, limits, 1, node_count, ids, result.definition.root);
+      parse_widget_node(source, widget_root, limits, registry, 1, node_count, ids,
+                        result.definition.root);
   return result;
 }
 
@@ -462,6 +526,27 @@ UiDocumentCompileResult compile_ui_xml(std::string_view source, const UiDocument
     return {{}, std::move(parsed.error)};
   }
   return compile_ui_definition(std::move(parsed.definition), std::move(parsed.resources), limits);
+}
+
+UiDocumentCompileResult compile_ui_xml(std::string_view source,
+                                       const WidgetRegistry &registry,
+                                       const UiDocumentLimits &limits) {
+  auto parsed = parse_xml_source(source, limits, &registry);
+  if (!parsed) return {{}, std::move(parsed.error)};
+  auto compiled = compile_ui_definition(std::move(parsed.definition),
+                                        std::move(parsed.resources), limits);
+  if (!compiled) return compiled;
+  if (auto error = registry.validate(*compiled.program, limits))
+    return {{}, std::move(error)};
+  return compiled;
+}
+
+UiDocumentParseResult parse_ui_xml(std::string_view source,
+                                   const WidgetRegistry &registry,
+                                   const UiDocumentLimits &limits) {
+  auto compiled = compile_ui_xml(source, registry, limits);
+  if (!compiled) return {{}, std::move(compiled.error)};
+  return {std::make_shared<const UiDocumentDefinition>(compiled.program->definition()), {}};
 }
 
 } // namespace flexUI
