@@ -63,9 +63,17 @@ struct GlfwWindow final {
                 "GLFW framebuffer size differs from the qualified Tango pixel grid");
         require(glGetString(GL_VERSION) != nullptr, "No live OpenGL version");
         require(glGetString(GL_RENDERER) != nullptr, "No live OpenGL renderer");
+        require(glGetString(GL_VENDOR) != nullptr, "No live OpenGL vendor");
+        const std::string renderer_name(
+            reinterpret_cast<const char*>(glGetString(GL_RENDERER)));
         std::cout << "GL_VERSION=" << glGetString(GL_VERSION) << '\n'
                   << "GL_RENDERER=" << glGetString(GL_RENDERER) << '\n'
                   << "GL_VENDOR=" << glGetString(GL_VENDOR) << '\n';
+        // The standalone job is a Mesa/llvmpipe software-driver gate, NOT a
+        // physical GPU acceptance. Do not trust the environment variable
+        // alone to prove which driver actually produced these pixels.
+        require(renderer_name.find("llvmpipe") != std::string::npos,
+                "Expected real Mesa llvmpipe OpenGL driver, not an unverified renderer");
     }
     ~GlfwWindow() {
         if (handle) {
