@@ -2,6 +2,8 @@
 
 #include <flexUI/ui_document.h>
 
+#include <cstddef>
+#include <cstdint>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -55,9 +57,21 @@ struct UiXmlModuleSource {
   std::string xml;
 };
 
+/** A REQUIRED trusted-host SHA-256 implementation for imported source bytes.
+ * The borrowed bytes and the output digest are valid for this synchronous
+ * callback only. The host must use its canonical cryptographic provider.
+ * No default hashing implementation, lazy import or fallback is installed.
+ * Return false if the provider fails; no module is then admitted.
+ */
+struct UiXmlSha256Provider {
+  bool (*compute)(const void *bytes, std::size_t count,
+                  std::uint8_t digest[32], void *userdata) = nullptr;
+  void *userdata = nullptr;
+};
+
 /**
  * M2c: compile explicit, SHA-256-pinned <imports> from a bounded immutable
- * source catalog. Each module source is <module namespace="urn:..." version="1">
+ * source catalog and a required host SHA-256 provider. Each module source is <module namespace="urn:..." version="1">
  * <components>...</components></module>; only its native component definitions
  * are admitted. Imported tags are bound by <import prefix="studio"
  * namespace="urn:studio:ui" source="components/editor.ui.xml"
@@ -71,6 +85,7 @@ struct UiXmlModuleSource {
 UiDocumentCompileResult compile_ui_xml(
     std::string_view source, const WidgetRegistry &registry,
     const std::vector<UiXmlModuleSource> &modules,
+    const UiXmlSha256Provider &sha256,
     const UiDocumentLimits &limits = {});
 
 } // namespace flexUI

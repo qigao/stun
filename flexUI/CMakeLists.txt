@@ -225,7 +225,7 @@ endif()
 # 链接依赖
 target_link_libraries(flexUI 
     PUBLIC ${LEXBOR_LIBRARY} Flex::Runtime Flex::Render Flex::Animation FlexUI::TailwindCSS Salts::Core Salts::CMeta nlohmann_json::nlohmann_json
-    PRIVATE Flex::Compiler Salts::Unicode Salts::Crypto unofficial::tree-sitter::tree-sitter pugixml::pugixml
+    PRIVATE Flex::Compiler Salts::Unicode unofficial::tree-sitter::tree-sitter pugixml::pugixml
 )
 set_target_properties(flexUI PROPERTIES FOLDER flexUI/)
 target_include_directories(

@@ -2331,6 +2331,32 @@ spec("FlexUI explicit immutable XML module imports use the one component compile
   static const std::string module_source = R"module(<module namespace="urn:studio:ui" version="1"><components><component name="EditorPanel"><interface><prop name="title" type="string" required="true"/><slot name="actions"/></interface><template><section id="panel"><label id="heading" text="$props.title"/><slot name="actions"/></section></template></component></components></module>)module";
   static const char *module_digest =
       "386d0ecf9934261ca948423c8f501365cc8b98a35b03c6581dc4bba38144756b";
+  static const std::string bad_module =
+      "<module namespace=\"urn:studio:ui\" version=\"1\"><imports/><components/></module>";
+  // Native fixed-source digest oracle: these two byte-for-byte immutable
+  // source fixtures have independently known SHA-256. This is a test for
+  // the host-verifier contract, NOT a second general-purpose SHA-256 engine.
+  static const flexUI::UiXmlSha256Provider pinned_digest{
+      [](const void *bytes, std::size_t count,
+         std::uint8_t out[32], void *) -> bool {
+        const std::string_view input(static_cast<const char *>(bytes), count);
+        static constexpr std::uint8_t original[32] = {
+            0x38, 0x6d, 0x0e, 0xcf, 0x99, 0x34, 0x26, 0x1c,
+            0xa9, 0x48, 0x42, 0x3c, 0x8f, 0x50, 0x13, 0x65,
+            0xcc, 0x8b, 0x98, 0xa3, 0x5b, 0x03, 0xc6, 0x58,
+            0x1d, 0xc4, 0xbb, 0xa3, 0x81, 0x44, 0x75, 0x6b};
+        static constexpr std::uint8_t recursive[32] = {
+            0xf5, 0x36, 0x57, 0x10, 0x8a, 0x69, 0xf6, 0x53,
+            0xe4, 0xa6, 0x72, 0x01, 0x40, 0x84, 0xb7, 0x23,
+            0xe9, 0x60, 0xab, 0xc7, 0x3a, 0xb1, 0x22, 0xba,
+            0x06, 0x73, 0xee, 0x1c, 0xb1, 0x9e, 0x45, 0x9a};
+        const std::uint8_t *known = input == module_source ? original :
+                                    input == bad_module ? recursive : nullptr;
+        if (!known) return false;
+        for (std::size_t i = 0; i < 32; ++i) out[i] = known[i];
+        return true;
+      }, nullptr};
+
   static const std::string app = R"xml(
     <ui name="Studio" xmlns:studio="urn:studio:ui"
         xmlns:on="urn:flexui:event" xmlns:bind="urn:flexui:binding">
@@ -2354,7 +2380,7 @@ spec("FlexUI explicit immutable XML module imports use the one component compile
     const std::vector<flexUI::UiXmlModuleSource> modules{
         {"components/editor.ui.xml", module_source}};
     const auto compiled = flexUI::compile_ui_xml(
-        app, registry, modules, flexUI::UiDocumentLimits{});
+        app, registry, modules, pinned_digest, flexUI::UiDocumentLimits{});
     check(static_cast<bool>(compiled));
     if (!compiled) return;
     check_equal(compiled.scoped_ownership.size(), std::size_t{1});
@@ -2389,7 +2415,7 @@ spec("FlexUI explicit immutable XML module imports use the one component compile
     const auto rejected = [&](const std::string &xml,
                               const std::vector<flexUI::UiXmlModuleSource> &sources) {
       const auto compiled = flexUI::compile_ui_xml(
-          xml, registry, sources, flexUI::UiDocumentLimits{});
+          xml, registry, sources, pinned_digest, flexUI::UiDocumentLimits{});
       check_false(static_cast<bool>(compiled));
       check_null(compiled.program.get());
       check(compiled.scoped_ownership.empty());
@@ -2403,6 +2429,11 @@ spec("FlexUI explicit immutable XML module imports use the one component compile
       return xml;
     };
     rejected(app, {}); // No automatic host loader.
+    const auto no_provider = flexUI::compile_ui_xml(
+        app, registry, real, flexUI::UiXmlSha256Provider{},
+        flexUI::UiDocumentLimits{});
+    check_false(static_cast<bool>(no_provider));
+    check_null(no_provider.program.get());
     rejected(app, {{"components/editor.ui.xml", module_source + " "}});
     rejected(app, {{"components/editor.ui.xml", module_source},
                    {"extra/ui.xml", module_source}});
@@ -2441,14 +2472,12 @@ spec("FlexUI explicit immutable XML module imports use the one component compile
         {"components/editor.ui.xml", module_source}};
     flexUI::UiDocumentLimits limits;
     limits.max_source_bytes = app.size() + module_source.size() - 1;
-    const auto limited = flexUI::compile_ui_xml(app, registry, real, limits);
+    const auto limited = flexUI::compile_ui_xml(app, registry, real, pinned_digest, limits);
     check_false(static_cast<bool>(limited));
     check(limited.error.code == flexUI::UiDocumentErrorCode::SourceTooLarge);
     check_null(limited.program.get());
     check(limited.scoped_ownership.empty());
 
-    const std::string bad_module =
-        "<module namespace=\"urn:studio:ui\" version=\"1\"><imports/><components/></module>";
     std::string changed = app;
     const auto old_hash = changed.find(module_digest);
     check(old_hash != std::string::npos);
@@ -2457,7 +2486,8 @@ spec("FlexUI explicit immutable XML module imports use the one component compile
                     "f53657108a69f653e4a672014084b723e960abc73ab122ba0673ee1cb19e459a");
     const auto recursive = flexUI::compile_ui_xml(
         changed, registry, std::vector<flexUI::UiXmlModuleSource>{
-            {"components/editor.ui.xml", bad_module}}, flexUI::UiDocumentLimits{});
+            {"components/editor.ui.xml", bad_module}}, pinned_digest,
+        flexUI::UiDocumentLimits{});
     check_false(static_cast<bool>(recursive));
     check_null(recursive.program.get());
   }

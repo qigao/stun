@@ -1,6 +1,5 @@
 #include <flexUI/ui_xml.h>
 #include <flexUI/widget_registry.h>
-#include <crypto/sha256.h>
 
 #include <pugixml.hpp>
 #include "ui_xml_admission.h"
@@ -862,11 +861,16 @@ bool xml_module_version(std::string_view text) {
          parsed.ptr == text.data() + text.size() && version != 0;
 }
 
-bool xml_module_sha256(std::string_view source, std::string_view hexdigest) {
+bool xml_module_sha256(
+    std::string_view source, std::string_view hexdigest,
+    const UiXmlSha256Provider &provider) {
   constexpr char hex[] = "0123456789abcdef";
-  if (hexdigest.size() != SALTS_CRYPTO_SHA256_DIGEST_SIZE * 2) return false;
-  std::array<uint8_t, SALTS_CRYPTO_SHA256_DIGEST_SIZE> digest{};
-  if (salts_crypto_sha256(source.data(), source.size(), digest.data()) != SALTS_CRYPTO_OK)
+  if (hexdigest.size() != 64 || provider.compute == nullptr) return false;
+  std::array<std::uint8_t, 32> digest{};
+  // One required externally-owned, synchronous canonical provider. No
+  // fallback or implicit dependency on stale Crypto exports from old SDKs.
+  if (!provider.compute(source.data(), source.size(), digest.data(),
+                        provider.userdata))
     return false;
   for (std::size_t i = 0; i < digest.size(); ++i) {
     if (hexdigest[i * 2] != hex[digest[i] >> 4] ||
@@ -879,7 +883,7 @@ UiDocumentError read_xml_imports(
     std::string_view application_source, const pugi::xml_node &ui,
     const pugi::xml_node &imports, const UiDocumentLimits &limits,
     const WidgetRegistry &registry, const std::vector<UiXmlModuleSource> &modules,
-    XmlComponentCatalog &catalog) {
+    const UiXmlSha256Provider &provider, XmlComponentCatalog &catalog) {
   if (!xml_attributes_only(imports, {}) ||
       !xml_structural_children_only(imports))
     return node_error(application_source, imports, UiDocumentErrorCode::InvalidNode,
@@ -958,7 +962,7 @@ UiDocumentError read_xml_imports(
       return node_error(application_source, entry, UiDocumentErrorCode::SourceTooLarge,
                         "application and imported module sources exceed the cumulative byte budget");
     admitted_bytes += selected->xml.size();
-    if (!xml_module_sha256(selected->xml, expected_hash))
+    if (!xml_module_sha256(selected->xml, expected_hash, provider))
       return node_error(application_source, entry, UiDocumentErrorCode::InvalidComponentScope,
                         "imported module content does not match the declared SHA-256");
 
@@ -1023,7 +1027,8 @@ UiDocumentError read_xml_imports(
 XmlSource parse_xml_source(
     std::string_view source, const UiDocumentLimits &limits,
     const WidgetRegistry *registry = nullptr,
-    const std::vector<UiXmlModuleSource> *modules = nullptr) {
+    const std::vector<UiXmlModuleSource> *modules = nullptr,
+    const UiXmlSha256Provider *provider = nullptr) {
   XmlSource result;
   if (source.size() > limits.max_source_bytes) {
     result.error =
@@ -1139,8 +1144,15 @@ XmlSource parse_xml_source(
   // frontend admits them; the legacy XML frontend remains unchanged.
   XmlComponentCatalog components;
   if (imports_root) {
+    if (provider == nullptr || provider->compute == nullptr) {
+      result.error = node_error(
+          source, imports_root, UiDocumentErrorCode::InvalidComponentScope,
+          "imported modules require an explicit trusted SHA-256 host provider");
+      return result;
+    }
     if (auto error = read_xml_imports(
-            source, ui, imports_root, limits, *registry, *modules, components)) {
+            source, ui, imports_root, limits, *registry, *modules,
+            *provider, components)) {
       result.error = std::move(error);
       return result;
     }
@@ -1215,8 +1227,9 @@ UiDocumentParseResult parse_ui_xml(std::string_view source,
 UiDocumentCompileResult compile_ui_xml(
     std::string_view source, const WidgetRegistry &registry,
     const std::vector<UiXmlModuleSource> &modules,
+    const UiXmlSha256Provider &provider,
     const UiDocumentLimits &limits) {
-  auto parsed = parse_xml_source(source, limits, &registry, &modules);
+  auto parsed = parse_xml_source(source, limits, &registry, &modules, &provider);
   if (!parsed) return {{}, std::move(parsed.error)};
   auto compiled = compile_ui_definition(
       std::move(parsed.definition), std::move(parsed.resources), limits);
