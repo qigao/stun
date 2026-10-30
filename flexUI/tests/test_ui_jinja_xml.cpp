@@ -152,6 +152,17 @@ spec("FlexUI uses installed JinjaCMeta only as a staged XML author compiler") {
     check_false(static_cast<bool>(syntax));
     check(syntax.error.stage == flexUI::UiJinjaXmlStage::TemplateCompile);
     check(syntax.error.template_status == JINJA_CMETA_ERR_SYNTAX);
+    check_equal(syntax.error.source_name, std::string("studio.ui.xml.jinja"));
+    check_equal(syntax.error.template_line, 1);
+    check_equal(syntax.error.template_column, 1);
+    check_equal(syntax.error.ui_error.line, 0);
+
+    const auto second_line = compile(
+        "<ui name='Unused'/>\r\n{% endif %}", StudioInputs{1});
+    check_false(static_cast<bool>(second_line));
+    check(second_line.error.stage == flexUI::UiJinjaXmlStage::TemplateCompile);
+    check_equal(second_line.error.template_line, 2);
+    check_equal(second_line.error.template_column, 1);
 
     const auto undefined = compile(
         "<ui name='Missing'><label>{{ missing_name }}</label></ui>",
@@ -166,6 +177,10 @@ spec("FlexUI uses installed JinjaCMeta only as a staged XML author compiler") {
     check_false(static_cast<bool>(malformed));
     check(malformed.error.stage == flexUI::UiJinjaXmlStage::XmlCompile);
     check(malformed.error.ui_error.code == flexUI::UiDocumentErrorCode::ParseError);
+    check_equal(malformed.error.source_name, std::string("studio.ui.xml.jinja"));
+    check_equal(malformed.error.template_line, 0);
+    check_equal(malformed.error.template_column, 0);
+    check(malformed.error.ui_error.line > 0);
 
     const auto duplicate = compile(R"(
       <ui name="Duplicate"><main>

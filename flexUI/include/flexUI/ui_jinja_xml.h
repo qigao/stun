@@ -28,10 +28,15 @@ enum class UiJinjaXmlStage {
 };
 
 struct UiJinjaXmlError {
+  // Exact trusted author-source identity, when admitted. Not a filesystem
+  // lookup or an implicitly authorized Jinja include/import path.
+  std::string source_name;
   UiJinjaXmlStage stage = UiJinjaXmlStage::None;
   int template_status = 0;      // JINJA_CMETA_STATUS, without a public Jinja header dependency.
-  std::size_t template_offset = 0; // Source byte offset for Jinja failures.
-  UiDocumentError ui_error;      // Generated XML location for XML/registry failures.
+  std::size_t template_offset = 0; // Original byte offset for Jinja failures.
+  int template_line = 0;         // Original Jinja source 1-based location.
+  int template_column = 0;       // Zero means no original-source mapping.
+  UiDocumentError ui_error;      // GENERATED XML location for XML/registry failures.
   std::string message;
 
   explicit operator bool() const noexcept { return stage != UiJinjaXmlStage::None; }
@@ -62,8 +67,10 @@ struct UiJinjaXmlCompileResult {
 // CompiledUiProgram owns its resulting XML definition independently of the
 // ephemeral template, CMeta root and render output.
 //
-// XmlCompile and RegistryValidate errors use GENERATED XML line/column;
-// mapping back through Jinja includes/macros requires a later source-map slice.
+// TemplateCompile/TemplateRender errors retain the ORIGINAL Jinja source
+// name and byte/line/column. XmlCompile/RegistryValidate errors retain the
+// name plus GENERATED XML line/column in ui_error. Do NOT claim the latter
+// points into the original template; render-time source maps are not available.
 UiJinjaXmlCompileResult compile_jinja_ui_xml(
     std::string_view template_name,
     std::string_view template_source,

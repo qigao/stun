@@ -7,6 +7,7 @@
 #include <vstr.h>
 
 #include <algorithm>
+#include <limits>
 #include <memory>
 #include <new>
 #include <string>
@@ -59,6 +60,30 @@ std::string jinja_message(const JINJA_CMETA_ERROR& error) {
   return std::string(begin, end);
 }
 
+// The Jinja provider reports original byte offsets. Resolve their position
+// only for template-stage errors; the XML parser reports GENERATED locations.
+std::pair<int, int> original_position(std::string_view source,
+                                       std::size_t offset) noexcept {
+  if (offset > source.size()) return {0, 0};
+  std::size_t line = 1, column = 1;
+  for (std::size_t i = 0; i < offset; ++i) {
+    if (source[i] == '\r') {
+      ++line;
+      column = 1;
+      if (i + 1 < offset && source[i + 1] == '\n') ++i;
+    } else if (source[i] == '\n') {
+      ++line;
+      column = 1;
+    } else {
+      ++column;
+    }
+  }
+  if (line > static_cast<std::size_t>(std::numeric_limits<int>::max()) ||
+      column > static_cast<std::size_t>(std::numeric_limits<int>::max()))
+    return {0, 0};
+  return {static_cast<int>(line), static_cast<int>(column)};
+}
+
 UiJinjaXmlCompileResult fail(
     UiJinjaXmlStage stage, std::string message,
     int template_status = 0, std::size_t offset = 0,
@@ -78,15 +103,33 @@ UiJinjaXmlCompileResult compile_jinja_ui_xml(
     std::string_view template_name, std::string_view template_source,
     const cmeta_data_desc* root_desc, const void* root,
     const WidgetRegistry& registry, const UiDocumentLimits& limits) {
+  const auto reject = [&](UiJinjaXmlStage stage, std::string message,
+                          int template_status = 0, std::size_t offset = 0,
+                          UiDocumentError ui_error = {}) {
+    auto rejected = fail(stage, std::move(message), template_status, offset,
+                         std::move(ui_error));
+    if (!template_name.empty() &&
+        template_name.size() <= limits.max_string_bytes &&
+        template_name.find('\0') == std::string_view::npos)
+      rejected.error.source_name.assign(template_name);
+    if (stage == UiJinjaXmlStage::TemplateCompile ||
+        stage == UiJinjaXmlStage::TemplateRender ||
+        stage == UiJinjaXmlStage::OutputLimit) {
+      const auto [line, column] = original_position(template_source, offset);
+      rejected.error.template_line = line;
+      rejected.error.template_column = column;
+    }
+    return rejected;
+  };
   if (!root_desc || !root || template_name.empty() ||
       template_name.find('\0') != std::string_view::npos ||
       template_name.size() > limits.max_string_bytes) {
-    return fail(UiJinjaXmlStage::InvalidInput,
+    return reject(UiJinjaXmlStage::InvalidInput,
                 "Jinja XML requires a named trusted source and immutable CMeta root");
   }
   if (template_source.size() > limits.max_source_bytes ||
       limits.max_source_bytes == 0) {
-    return fail(UiJinjaXmlStage::SourceLimit,
+    return reject(UiJinjaXmlStage::SourceLimit,
                 "Jinja XML source exceeds the configured XML source budget");
   }
 
@@ -101,7 +144,7 @@ UiJinjaXmlCompileResult compile_jinja_ui_xml(
   Environment env(jinja_cmeta_env_create(&env_options, &error),
                   jinja_cmeta_env_destroy);
   if (!env) {
-    return fail(UiJinjaXmlStage::TemplateCompile,
+    return reject(UiJinjaXmlStage::TemplateCompile,
                 "Jinja XML environment: " + jinja_message(error),
                 static_cast<int>(error.status), error.offset);
   }
@@ -111,7 +154,7 @@ UiJinjaXmlCompileResult compile_jinja_ui_xml(
           vstr_from_buf(template_source.data(), template_source.size()), &error),
       jinja_cmeta_release);
   if (!compiled) {
-    return fail(UiJinjaXmlStage::TemplateCompile,
+    return reject(UiJinjaXmlStage::TemplateCompile,
                 "Jinja XML source: " + jinja_message(error),
                 static_cast<int>(error.status), error.offset);
   }
@@ -129,16 +172,16 @@ UiJinjaXmlCompileResult compile_jinja_ui_xml(
       compiled.get(), root_desc, root, &render_options, &renderer, &stage, &error);
   if (status != JINJA_CMETA_OK) {
     if (stage.exceeded_limit) {
-      return fail(UiJinjaXmlStage::OutputLimit,
+      return reject(UiJinjaXmlStage::OutputLimit,
                   "rendered Jinja XML exceeds the configured XML source budget",
                   static_cast<int>(status), error.offset);
     }
     if (stage.allocation_failed) {
-      return fail(UiJinjaXmlStage::TemplateRender,
+      return reject(UiJinjaXmlStage::TemplateRender,
                   "Jinja XML staging allocation failed",
                   static_cast<int>(status), error.offset);
     }
-    return fail(UiJinjaXmlStage::TemplateRender,
+    return reject(UiJinjaXmlStage::TemplateRender,
                 "Jinja XML render: " + jinja_message(error),
                 static_cast<int>(status), error.offset);
   }
@@ -150,7 +193,7 @@ UiJinjaXmlCompileResult compile_jinja_ui_xml(
       std::string_view(stage.bytes.data(), stage.bytes.size()), limits);
   if (!parsed) {
     const std::string detail = parsed.error.message;
-    return fail(UiJinjaXmlStage::XmlCompile,
+    return reject(UiJinjaXmlStage::XmlCompile,
                 "rendered Jinja XML rejected: " + detail,
                 0, 0, std::move(parsed.error));
   }
@@ -159,7 +202,7 @@ UiJinjaXmlCompileResult compile_jinja_ui_xml(
   // mutation. Full property/child-role schema remains tracked in Stun #16.
   if (auto schema_error = registry.validate(*parsed.program, limits)) {
     const std::string detail = schema_error.message;
-    return fail(UiJinjaXmlStage::RegistryValidate,
+    return reject(UiJinjaXmlStage::RegistryValidate,
                 "rendered Jinja XML schema rejected: " + detail,
                 0, 0, std::move(schema_error));
   }
