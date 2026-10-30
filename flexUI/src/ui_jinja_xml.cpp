@@ -27,7 +27,10 @@ struct StagedXml {
 // production XML compiler has accepted the complete render.
 int stage_xml(const char* bytes, std::size_t length, void* opaque) noexcept {
   auto* stage = static_cast<StagedXml*>(opaque);
-  if (!stage || (length && !bytes)) return -1;
+  if (!stage) return -1;
+  // Avoid passing a null pointer to std::string::append even when length=0.
+  if (length == 0) return 0;
+  if (!bytes || stage->bytes.size() > stage->max_bytes) return -1;
   if (length > stage->max_bytes - stage->bytes.size()) {
     stage->exceeded_limit = true;
     return -1;
@@ -117,6 +120,9 @@ UiJinjaXmlCompileResult compile_jinja_ui_xml(
   stage.max_bytes = limits.max_source_bytes;
   JINJA_CMETA_RENDER_OPTIONS render_options = JINJA_CMETA_RENDER_OPTIONS_INIT;
   render_options.max_string_bytes = limits.max_source_bytes;
+  // Bound the Jinja intermediate activation graph to the same admitted
+  // node budget as the canonical XML compiler.
+  render_options.max_nodes = limits.max_nodes ? limits.max_nodes : 1u;
   render_options.max_render_depth = 16;
   const JINJA_CMETA_RENDERER renderer = {stage_xml};
   const JINJA_CMETA_STATUS status = jinja_cmeta_render(

@@ -211,9 +211,9 @@ target_include_directories(test_ui_xml PRIVATE ../include)
 set_target_properties(test_ui_xml PROPERTIES FOLDER "flexUI/tests")
 add_test(NAME test_ui_xml COMMAND test_ui_xml)
 
-# Only the explicit optional Jinja XML source-admission library needs the
-# installed Salts::JinjaCMeta target. Ordinary FlexUI tests have no dependency.
-if(TARGET FlexUI::JinjaXml)
+# Optional real Jinja/CMeta source compiler regression; controlled by the
+# explicit feature, not by probing whether a target happened to exist.
+if(FLEXUI_ENABLE_JINJA_XML)
   add_executable(test_ui_jinja_xml test_ui_jinja_xml.cpp)
   target_link_libraries(test_ui_jinja_xml PRIVATE
       FlexUI::JinjaXml Salts::JinjaCMeta Salts::TinyTest)
@@ -227,6 +227,7 @@ if(TARGET FlexUI::JinjaXml)
           $<TARGET_FILE_DIR:test_ui_jinja_xml>)
   endif()
 endif()
+
 
 add_executable(test_widget_registry test_widget_registry.cpp)
 target_link_libraries(test_widget_registry PRIVATE flexUI)

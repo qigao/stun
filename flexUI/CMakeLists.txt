@@ -21,26 +21,10 @@ set(FLEXUI_ROOT "${CMAKE_CURRENT_SOURCE_DIR}")
 set(FLEXUI_INCLUDE_DIR "${FLEXUI_ROOT}/include")
 add_subdirectory(modules/tailwindcss)
 
-# Find lexbor for CSS parsing
-find_path(LEXBOR_INCLUDE_DIR NAMES lexbor/core/base.h)
-find_library(LEXBOR_LIBRARY NAMES lexbor lexbor_static NAMES_PER_DIR)
-
-# Find tree-sitter for syntax highlighting (core only, languages via plugins)
+# Canonical REQUIRED dependency resolution; compiler/linker own the failure.
+find_path(LEXBOR_INCLUDE_DIR NAMES lexbor/core/base.h REQUIRED)
+find_library(LEXBOR_LIBRARY NAMES lexbor lexbor_static NAMES_PER_DIR REQUIRED)
 find_package(unofficial-tree-sitter CONFIG REQUIRED)
-
-if(NOT LEXBOR_INCLUDE_DIR)
-    message(FATAL_ERROR
-      "flexUI: Lexbor include directory not found. Please install via vcpkg: vcpkg install lexbor"
-    )
-endif()
-
-if(NOT LEXBOR_LIBRARY)
-    message(FATAL_ERROR
-      "flexUI: Lexbor library not found. Please install via vcpkg: vcpkg install lexbor"
-    )
-endif()
-
-message(STATUS "flexUI: Using lexbor from ${LEXBOR_INCLUDE_DIR}")
 include_directories(${LEXBOR_INCLUDE_DIR})
 
 set(FLEXUI_UTILITY_WHITELIST
@@ -243,21 +227,17 @@ target_link_libraries(flexUI
     PUBLIC ${LEXBOR_LIBRARY} Flex::Runtime Flex::Render Flex::Animation FlexUI::TailwindCSS Salts::Core Salts::CMeta nlohmann_json::nlohmann_json
     PRIVATE Flex::Compiler Salts::Unicode unofficial::tree-sitter::tree-sitter pugixml::pugixml
 )
-# Optional author-source Jinja preprocessor. Normal FlexUI consumers keep their
-# existing dependency graph and use compile_ui_xml() directly. The installed
-# SaltsUtils Jinja CMeta provider is required only when the feature is explicit.
+# Opt-in author-source Jinja XML compiler. Ordinary FlexUI builds do not
+# link the Salts Jinja provider or a second XML parser.
 option(FLEXUI_ENABLE_JINJA_XML
        "Build the separately linked Jinja XML source admission library" OFF)
 if(FLEXUI_ENABLE_JINJA_XML)
-  if(NOT TARGET Salts::JinjaCMeta)
-    message(FATAL_ERROR
-      "FLEXUI_ENABLE_JINJA_XML requires installed SaltsUtils::JinjaCMeta (Salts::JinjaCMeta); no source or alternate template fallback")
-  endif()
-
   add_library(flexUI_jinja_xml STATIC
       src/ui_jinja_xml.cpp include/flexUI/ui_jinja_xml.h)
   add_library(FlexUI::JinjaXml ALIAS flexUI_jinja_xml)
   target_compile_features(flexUI_jinja_xml PUBLIC cxx_std_17)
+  # Missing explicitly required targets fail at configure/generation/link.
+  # No if(TARGET) availability probe, source copy or fallback provider.
   target_link_libraries(flexUI_jinja_xml
       PUBLIC FlexUI::Core
       PRIVATE Salts::JinjaCMeta)

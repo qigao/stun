@@ -103,6 +103,18 @@ workflows applicable to the cumulative PR diff; subsequent `synchronize`
 events with the label run those checks for each new HEAD. Removing an unrelated
 label never requests full requalification.
 
+**Order matters:** apply `ci/full` **before pushing the final candidate HEAD**,
+rather than adding it while existing native work is already starting. The
+trusted status compares every required job's `started_at` with the timestamp
+of the most recent real `ci/full` admission event. A job started even seconds
+before that label is **ineligible**, despite a successful native result; merely
+adding a label does not retroactively qualify already-running jobs. Keep the
+label on subsequent meaningful source/documentation fixes so `synchronize`
+requalifies one new exact HEAD after admission. Do not toggle/re-add the label
+to mask an early job, reinterpret a skipped/cancelled run as a pass, introduce
+dummy workflow jobs or create no-op commits solely to change status. This
+prevents needless double native matrices while retaining fail-closed evidence.
+
 Do not merge unless **the exact HEAD** has a completed, successful *executed*
 Stun runtime conformance job with chart JSON CTests, plus the relevant platform,
 installed-SDK and lifecycle jobs. An old-head success or a skipped job is not
@@ -118,7 +130,7 @@ missing, skipped, neutral, cancelled, stale-head or failing required jobs.
 
 ## Isolate unrelated PR labels from real CI execution
 
-The nine workflows listening for `labeled` events accept `ci/full` as an
+The eight active workflows listening for `labeled` events accept `ci/full` as an
 explicit same-HEAD requalification. Any other label must not cancel a
 queued/running check or claim a green test. For unrelated label events,
 workflow concurrency uses a unique `github.run_id` suffix, and `changes`
@@ -183,6 +195,29 @@ does not itself infer the module matrix. See [Issue #315](https://github.com/qig
 for the required always-created GitHub status and administrator-enabled
 ruleset. Do not merge based solely on this validator or a green workflow
 summary.
+
+## Fail-fast CI/CMake policy (2026-10-30)
+
+**No detect-then-build probes.** CI should run real CMake configure, native
+build/link and actual CTest/application behavior. Do not add shell
+`grep`/file-existence/loaded-library/compile-command-text inspections, manual
+CMake header parsing, tool/package version sniffing, warnings followed by
+silent fallback, or synthetic installer/consumer projects and CI. A missing
+requested compiler, generator, imported target, resource or ABI must produce
+a failed REQUIRED configuration, compiler error, linker error or real test.
+
+Native semantic assertions stay in **tests**, including real terminal, GUI
+screenshots, shader/pixel, Android and lifecycle behavior; explicit product
+feature choices, trusted exact-head CI routing and release checksums are not
+substitutes for a build, but remain required for provenance. Compiler caches
+remain accelerators; report actual invocations, not source/manifest greps.
+Producer installation/export APIs remain part of the library; verify SDK
+integration using an **existing real downstream application/library** and its
+ordinary CI, not a dedicated consumer/installer fixture.
+
+The existing sole public CI policy job continues to execute real Python
+source-routing tests. It no longer duplicates static CMake/provider scans or
+compile-only pseudo-consumers that cannot establish runtime correctness.
 
 ## Trusted source-delta CI requirement matrix (stage M1)
 

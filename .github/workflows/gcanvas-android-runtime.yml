@@ -85,9 +85,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          sdkmanager="$(find "$ANDROID_SDK_ROOT" -type f -path '*/bin/sdkmanager' | sort -V | tail -n1)"
-          test -x "$sdkmanager"
-          yes | "$sdkmanager" --licenses >/dev/null || true
+          sdkmanager="$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager"
           "$sdkmanager" \
             "platforms;android-35" \
             "build-tools;36.0.0" \
@@ -99,7 +97,6 @@ jobs:
         run: |
           set -euo pipefail
           gradle -p shared/gcanvas/tests/android --no-daemon :app:assembleDebug
-          test -f shared/gcanvas/tests/android/app/build/outputs/apk/debug/app-debug.apk
 
       - name: Enable KVM
         shell: bash

@@ -21,6 +21,14 @@ struct StudioInputs {
 cmeta_reflect_data(StudioInputs, "stun.test.StudioInputs",
     cmeta_data_field(int, count, &cmeta_data_int, &cmeta_type_int));
 
+struct StudioTextInputs {
+  vstr title;
+};
+
+cmeta_reflect_data(StudioTextInputs, "stun.test.StudioTextInputs",
+    cmeta_data_field_id(vstr, title, "stun.test.StudioTextInputs.title",
+                        jinja_cmeta_vstr_data()));
+
 flexUI::UiJinjaXmlCompileResult compile(
     std::string_view source, const StudioInputs& inputs,
     const flexUI::UiDocumentLimits& limits = {}) {
@@ -95,6 +103,34 @@ spec("FlexUI uses installed JinjaCMeta only as a staged XML author compiler") {
     check_equal(root.children.size(), 0u);
     check_equal(std::get<std::string>(root.properties.at("text")),
                 "<button id=\"injected\" />");
+    }
+  }
+
+  it("escapes borrowed CMeta strings in XML attributes and text nodes") {
+    const std::string title = "<button id='injected'/> & \"quoted\"";
+    const StudioTextInputs data{vstr_from_buf(title.data(), title.size())};
+    auto registry = flexUI::WidgetRegistry::builtins();
+
+    const auto attr = flexUI::compile_jinja_ui_xml(
+        "author.ui.xml.jinja",
+        R"(<ui name="EscapedAttribute"><label id="safe" text="{{ title }}"/></ui>)",
+        cmeta_reflected_data(StudioTextInputs), &data, registry);
+    check_true(static_cast<bool>(attr));
+    if (attr) {
+      const auto& root = attr.program->definition().root;
+      check_equal(root.children.size(), 0u);
+      check_equal(std::get<std::string>(root.properties.at("text")), title);
+    }
+
+    const auto text = flexUI::compile_jinja_ui_xml(
+        "author.ui.xml.jinja",
+        R"(<ui name="EscapedText"><label id="safe">{{ title }}</label></ui>)",
+        cmeta_reflected_data(StudioTextInputs), &data, registry);
+    check_true(static_cast<bool>(text));
+    if (text) {
+      const auto& root = text.program->definition().root;
+      check_equal(root.children.size(), 0u);
+      check_equal(std::get<std::string>(root.properties.at("text")), title);
     }
   }
 

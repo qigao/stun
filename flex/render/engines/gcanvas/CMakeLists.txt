@@ -1,7 +1,8 @@
 add_library(flex_render_engine_gcanvas STATIC renderer.cpp)
 target_link_libraries(
   flex_render_engine_gcanvas PUBLIC flex_render gCanvas::Core gCanvas::Svg)
-if(TARGET gCanvas::OpenGL)
+if(GCANVAS_BUILD_OPENGL)
+  # Explicit requested backend. Missing provider fails target generation/link.
   target_link_libraries(flex_render_engine_gcanvas PUBLIC gCanvas::OpenGL)
   target_compile_definitions(flex_render_engine_gcanvas PRIVATE
                              FLEX_GCANVAS_HAS_OPENGL=1)

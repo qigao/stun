@@ -25,7 +25,8 @@ set_target_properties(
 
 install(TARGETS flexUI_gcanvas_application_input DESTINATION lib)
 
-if(TARGET gCanvas::Window AND TARGET flex_render_engine_gcanvas)
+# Depend on explicit requested features, not target-availability probes.
+if(GCANVAS_BUILD_WINDOW AND FLEX_BUILD_RENDER_ENGINE_GCANVAS)
   add_library(flexUI_gcanvas_window_host STATIC gcanvas_window_host.cpp)
   add_library(FlexUI::GCanvasWindowHost ALIAS flexUI_gcanvas_window_host)
 
@@ -43,7 +44,7 @@ if(TARGET gCanvas::Window AND TARGET flex_render_engine_gcanvas)
 
   install(TARGETS flexUI_gcanvas_window_host DESTINATION lib)
 
-  if(TARGET FlexUI::PluginHost)
+  if(FLEXUI_ENABLE_PLUGINS)
     add_library(flexUI_gcanvas_plugin_window_host STATIC
                 gcanvas_plugin_window_host.cpp)
     add_library(FlexUI::GCanvasPluginWindowHost ALIAS

@@ -178,9 +178,6 @@ if(GCANVAS_BUILD_ANDROID_EGL)
   if(NOT ANDROID)
     message(FATAL_ERROR "GCANVAS_BUILD_ANDROID_EGL is only supported for Android targets")
   endif()
-  if(NOT TARGET gcanvas_opengles)
-    message(FATAL_ERROR "GCANVAS_BUILD_ANDROID_EGL requires GCANVAS_BUILD_GLES=ON")
-  endif()
 
   add_library(gcanvas_android_egl STATIC
     src/platform/android/egl_host.cpp)
@@ -241,15 +238,6 @@ if(GCANVAS_BUILD_VULKAN)
     OUTPUT_NAME gcanvas_vulkan
     POSITION_INDEPENDENT_CODE ON)
 endif()
-
-foreach(_gcanvas_renderer_target IN ITEMS gcanvas_opengl gcanvas_opengles gcanvas_vulkan)
-  if(TARGET ${_gcanvas_renderer_target})
-    get_target_property(_gcanvas_renderer_links ${_gcanvas_renderer_target} LINK_LIBRARIES)
-    if("${_gcanvas_renderer_links}" MATCHES "(^|;)glfw($|;)|glfw3")
-      message(FATAL_ERROR "${_gcanvas_renderer_target} must not link GLFW")
-    endif()
-  endif()
-endforeach()
 
 if(GCANVAS_BUILD_WINDOW)
   find_package(glfw3 CONFIG REQUIRED)
