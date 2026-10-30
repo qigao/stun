@@ -427,7 +427,7 @@ void exercise_real_x11_input(
               << "TANGO_GL_XTEST_REAL_PIXEL_PASS=1\n";
 }
 
-void exercise_gpu(const std::string& font_path:
+void exercise_gpu(const std::string& font_path,
                   const std::string& bold_font_path,
                   const std::string& ppm) {
     GlfwSession glfw;
