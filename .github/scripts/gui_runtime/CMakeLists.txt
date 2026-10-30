@@ -15,7 +15,7 @@ find_program(RE2C_EXECUTABLE re2c REQUIRED)
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
-set(BUILD_TESTING ON) # native Stun MarkdownWidget + C11 adapter acceptance
+include(CTest) # register real Stun MarkdownWidget + C11 adapter acceptance
 set(BUILD_SHARED_LIBS OFF)
 set(NANOGUI_BUILD_EXAMPLES ON)
 set(NANOGUI_BUILD_GLFW ON)

@@ -12,6 +12,8 @@ on:
       - '.github/scripts/tests/test_gui_native_e2e.py'
       - '.github/scripts/tests/test_gui_native_suite.py'
       - '.github/scripts/gui_runtime/**'
+      - '.github/scripts/restore-flexui-tango-sdk.py'
+      - '.github/scripts/tests/test_restore_flexui_tango_sdk.py'
       - 'flexUI/examples/desktop_editor/**'
       - 'shared/markdown/**'
   workflow_dispatch:
@@ -33,6 +35,9 @@ jobs:
     timeout-minutes: 70
     env:
       GH_TOKEN: ${{ github.token }}
+      UTILS_CANDIDATE_RUN: '41146302764'
+      UTILS_CANDIDATE_SHA: 8389508e71b216e56b808c2ca79621c64248c65b
+      SDK_RID: linux-x64
       GITHUB_TOKEN: ${{ github.token }}
       LIBGL_ALWAYS_SOFTWARE: '1'
       GALLIUM_DRIVER: llvmpipe
@@ -88,8 +93,6 @@ jobs:
         run: |
           set -euo pipefail
           # Reproduce the same native dependency graph for each source HEAD.
-          echo "salts=v2.3.0-rc.17" >> "$GITHUB_OUTPUT"
-          echo "utils=v4.3.0-rc.11" >> "$GITHUB_OUTPUT"
           echo "chttp=v2.1.0-rc.6" >> "$GITHUB_OUTPUT"
           # Stable released TurboScript Host ABI v1; never guess a master build.
           echo "turboscript=v3.0.10" >> "$GITHUB_OUTPUT"
@@ -97,8 +100,6 @@ jobs:
       - name: Download and SHA256-verify official native SDK archives via curl
         shell: bash
         env:
-          SALTS_RELEASE: ${{ steps.releases.outputs.salts }}
-          UTILS_RELEASE: ${{ steps.releases.outputs.utils }}
           CHTTP_RELEASE: ${{ steps.releases.outputs.chttp }}
           TURBOSCRIPT_RELEASE: ${{ steps.releases.outputs.turboscript }}
         run: |
@@ -120,41 +121,42 @@ jobs:
             test "$actual" = "${expected#sha256:}"
             mv "$destination.part" "$destination"
           }
-          salted="${SALTS_RELEASE#v}"
-          utilv="${UTILS_RELEASE#v}"
           chttpv="${CHTTP_RELEASE#v}"
           turboscriptv="${TURBOSCRIPT_RELEASE#v}"
-          fetch_release_asset qigao/salts "$SALTS_RELEASE" "Salts.Native.$salted.nupkg" \
-            "$RUNNER_TEMP/stun-gui/packages/salts.nupkg"
-          fetch_release_asset qigao/salts-utils "$UTILS_RELEASE" "SaltsUtils.Native.$utilv.nupkg" \
-            "$RUNNER_TEMP/stun-gui/packages/utils.nupkg"
           fetch_release_asset qigao/chttp "$CHTTP_RELEASE" "CHttp.Native.$chttpv.nupkg" \
             "$RUNNER_TEMP/stun-gui/packages/chttp.nupkg"
           fetch_release_asset qigao/TurboScript "$TURBOSCRIPT_RELEASE" "TurboScript.Native.$turboscriptv.nupkg" \
             "$RUNNER_TEMP/stun-gui/packages/turboscript.nupkg"
-          for package in salts utils chttp turboscript; do
+          for package in chttp turboscript; do
             unzip -q "$RUNNER_TEMP/stun-gui/packages/$package.nupkg" \
               -d "$RUNNER_TEMP/stun-gui/$package"
           done
-          echo "SALTS_ROOT=$RUNNER_TEMP/stun-gui/salts/sdk/linux-x64" >> "$GITHUB_ENV"
-          # Confirm installed SaltsUtils canonical Markdown SDK BEFORE the
-          # expensive vcpkg/toolchain and GUI build. No fallback grammar.
-          utils_sdk="$RUNNER_TEMP/stun-gui/utils/sdk/linux-x64"
-          test -f "$utils_sdk/include/salts/markdown.h" || {
-            echo "RED: published SaltsUtils SDK lacks the canonical MarkdownParser header" >&2
-            exit 1
-          }
-          test -f "$utils_sdk/include/salts/markdown_html.h" || {
-            echo "RED: published SaltsUtils SDK lacks the MarkdownHtml header" >&2
-            exit 1
-          }
-          targets="$utils_sdk/lib/cmake/SaltsUtils/SaltsUtilsTargets.cmake"
-          test -f "$targets"
-          grep -Fq 'Salts::MarkdownParser' "$targets"
-          grep -Fq 'Salts::MarkdownHtml' "$targets"
-          echo "SALTS_UTILS_ROOT=$RUNNER_TEMP/stun-gui/utils/sdk/linux-x64" >> "$GITHUB_ENV"
           echo "CHTTP_ROOT=$RUNNER_TEMP/stun-gui/chttp/sdk/linux-x64" >> "$GITHUB_ENV"
           echo "TURBOSCRIPT_ROOT=$RUNNER_TEMP/stun-gui/turboscript/sdk/linux-x64" >> "$GITHUB_ENV"
+
+      - name: Restore exact qualified installed Markdown SDK
+        shell: bash
+        run: |
+          set -euo pipefail
+          producer="repos/qigao/salts-utils/actions"
+          gh api "$producer/runs/$UTILS_CANDIDATE_RUN" \
+            --jq '.head_sha + " " + .status + " " + .conclusion + " " + .path' \
+            > "$RUNNER_TEMP/stun-utils-producer.txt"
+          test "$(cat "$RUNNER_TEMP/stun-utils-producer.txt")" = \
+            "$UTILS_CANDIDATE_SHA completed success .github/workflows/ci.yml"
+          IFS=$'\t' read -r artifact digest < <(
+            gh api "$producer/runs/$UTILS_CANDIDATE_RUN/artifacts" \
+              --jq ".artifacts | map(select(.name == \"salts-utils-qualified-sdk-$SDK_RID\" and .expired == false)) | if length == 1 then .[0] | [.id, .digest] | @tsv else error(\"missing unique qualified SDK\") end")
+          [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]
+          archive="$RUNNER_TEMP/stun-utils-qualified.zip"
+          gh api "$producer/artifacts/$artifact/zip" > "$archive"
+          python -c 'import hashlib,pathlib,sys; actual=hashlib.sha256(pathlib.Path(sys.argv[1]).read_bytes()).hexdigest(); assert "sha256:"+actual==sys.argv[2], "qualified SDK digest mismatch"' "$archive" "$digest"
+          candidate="$RUNNER_TEMP/stun-utils-qualified"
+          python -m zipfile -e "$archive" "$candidate"
+          python .github/scripts/restore-flexui-tango-sdk.py \
+            --qualified-sdk "$candidate" --sdk "$RUNNER_TEMP/stun-markdown-sdk" \
+            --source-sha "$UTILS_CANDIDATE_SHA" --run-id "$UTILS_CANDIDATE_RUN" \
+            --rid "$SDK_RID" --export-env
 
       - name: Checkout pinned vcpkg baseline
         uses: actions/checkout@v4
@@ -247,17 +249,15 @@ jobs:
             -DRE2C_EXECUTABLE="$STUN_GUI_RE2C" \
             -DSTB_INCLUDE_DIRS="$GITHUB_WORKSPACE/.ci/vcpkg/installed/x64-linux/include"
 
-      - name: Build the actual production GUI and document service plugin
+      - name: Build the actual production GUI and native Markdown consumers
         shell: bash
         run: |
           set -euo pipefail
-          cmake --build build/stun-gui --target flexui_desktop_editor --parallel 2
           cmake --build build/stun-gui --target \
-            stun_ui_core_test stun_markdown_adapter_test \
-            stun_markdown_tango_candidate_test test_markdown_widget \
-            --parallel 2
+            flexui_desktop_editor stun_ui_core_test stun_markdown_adapter_test \
+            stun_markdown_tango_candidate_test test_markdown_widget --parallel 2
 
-      - name: Qualify one Markdown grammar, real C11/Tango/Widget consumers
+      - name: Qualify one Markdown grammar and real C11 Tango Widget consumers
         shell: bash
         run: |
           set -euo pipefail
@@ -265,40 +265,7 @@ jobs:
           export LD_LIBRARY_PATH="$SALTS_ROOT/lib:$SALTS_UTILS_ROOT/lib:$CHTTP_ROOT/lib:$TURBOSCRIPT_ROOT/lib:${LD_LIBRARY_PATH:-}"
           ctest --test-dir build/stun-gui --no-tests=error \
             --output-on-failure --timeout 120 \
-            -R '^(stun_ui_core_test|stun_markdown_adapter_test|stun_markdown_tango_candidate_test|test_markdown_widget)
-        shell: bash
-        run: |
-          set -euo pipefail
-          export LD_LIBRARY_PATH="$SALTS_ROOT/lib:$SALTS_UTILS_ROOT/lib:$CHTTP_ROOT/lib:$TURBOSCRIPT_ROOT/lib:${LD_LIBRARY_PATH:-}"
-          xvfb-run -a -s '-screen 0 1280x900x24 -nolisten tcp' \
-            /usr/bin/python3 .github/scripts/gui_native_suite.py \
-              --exe build/stun-gui/bin/flexui_desktop_editor \
-              --source-sha "${{ steps.source.outputs.sha }}" \
-              --out build/stun-gui/gui-e2e
-
-      - name: Preserve exact-head actual GUI screenshot evidence
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: stun-visible-gui-${{ steps.source.outputs.sha }}
-          retention-days: 3
-          if-no-files-found: warn
-          path: |
-            build/stun-gui/gui-e2e/
-            build/stun-gui/CMakeFiles/CMakeConfigureLog.yaml
-
-      - name: Report real compiler cache statistics
-        if: always() && steps.verified_cache.outcome == 'success'
-        shell: bash
-        run: bash .github/scripts/report-ccache.sh native-gui-linux
-
-      - name: Retain completed compiler work after a failed GUI qualification
-        if: failure() && steps.verified_cache.outcome == 'success'
-        uses: actions/cache/save@v4
-        with:
-          path: ${{ runner.temp }}/stun-ccache/native-gui-linux
-          key: stun-ccache-v1-4.14.2-native-gui-linux-${{ runner.os }}-${{ runner.arch }}-${{ steps.source.outputs.sha }}
-
+            -R '^(stun_ui_core_test|stun_markdown_adapter_test|stun_markdown_tango_candidate_test|test_markdown_widget)$'
 
       - name: Qualify real Stun Save and reject wrong visible states
         shell: bash
@@ -319,6 +286,8 @@ jobs:
           retention-days: 3
           if-no-files-found: warn
           path: |
+            ${{ runner.temp }}/stun-markdown-sdk/sdk-provenance.json
+            build/stun-gui/Testing/Temporary/LastTest.log
             build/stun-gui/gui-e2e/
             build/stun-gui/CMakeFiles/CMakeConfigureLog.yaml
 
