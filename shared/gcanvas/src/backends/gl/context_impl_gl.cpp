@@ -2019,6 +2019,55 @@ namespace GCANVAS_GL_PROFILE_NAMESPACE
         cleanup();
     }
 
+    bool ContextImplGl::native_gpu_resource_ids(
+        std::vector<NativeGpuResourceId>& out) const
+    {
+        // This inventory comes from the ORIGINAL gCanvas GL objects, never
+        // a CPU draw plan or guessed shader/atlas ID. An unbound/foreign
+        // native context must fail rather than relabel object names.
+        if (!shared_retained_ || shaderProgram == 0 ||
+            glIsProgram(static_cast<GLuint>(shaderProgram)) != GL_TRUE)
+            throw std::logic_error(
+                "gCanvas resource inventory requires its original live GPU program");
+
+        std::vector<NativeGpuResourceId> staged;
+        staged.reserve(2u + _owned_images.size() + _owned_fonts.size());
+        staged.push_back({NativeGpuResourceKind::ShaderProgram,
+                          static_cast<std::uint64_t>(shaderProgram)});
+        const auto add_texture = [&](const ImageImplGl& image,
+                                     NativeGpuResourceKind kind) {
+            if (!image._uploaded) return;
+            if (image._image == 0 || glIsTexture(image._image) != GL_TRUE)
+                throw std::logic_error(
+                    "gCanvas inventory found a stale or invalid uploaded GL texture");
+            staged.push_back({kind, static_cast<std::uint64_t>(image._image)});
+        };
+        if (dummy)
+            add_texture(*dummy, NativeGpuResourceKind::InternalTexture);
+        for (const auto& image : _owned_images)
+            add_texture(static_cast<const ImageImplGl&>(*image),
+                        NativeGpuResourceKind::ImageTexture);
+        for (const auto& font : _owned_fonts) {
+            if (!font)
+                throw std::logic_error("gCanvas resource inventory has a null font");
+            auto& atlas = font->get_image();
+            add_texture(static_cast<const ImageImplGl&>(atlas),
+                        NativeGpuResourceKind::GlyphAtlas);
+        }
+
+        // All three texture types share one GL texture-name namespace; GL
+        // programs have a separate namespace and may reuse numeric names.
+        for (std::size_t i = 0; i < staged.size(); ++i)
+            for (std::size_t j = i + 1u; j < staged.size(); ++j)
+                if (staged[i].kind != NativeGpuResourceKind::ShaderProgram &&
+                    staged[j].kind != NativeGpuResourceKind::ShaderProgram &&
+                    staged[i].native_name == staged[j].native_name)
+                    throw std::logic_error(
+                        "gCanvas inventory has a duplicate live native texture name");
+        out = std::move(staged);
+        return true;
+    }
+
     void ContextImplGl::cleanup() noexcept
     {
         if (!shared_retained_)
