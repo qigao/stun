@@ -243,6 +243,31 @@ target_link_libraries(flexUI
     PUBLIC ${LEXBOR_LIBRARY} Flex::Runtime Flex::Render Flex::Animation FlexUI::TailwindCSS Salts::Core Salts::CMeta nlohmann_json::nlohmann_json
     PRIVATE Flex::Compiler Salts::Unicode unofficial::tree-sitter::tree-sitter pugixml::pugixml
 )
+# Optional author-source Jinja preprocessor. Normal FlexUI consumers keep their
+# existing dependency graph and use compile_ui_xml() directly. The installed
+# SaltsUtils Jinja CMeta provider is required only when the feature is explicit.
+option(FLEXUI_ENABLE_JINJA_XML
+       "Build the separately linked Jinja XML source admission library" OFF)
+if(FLEXUI_ENABLE_JINJA_XML)
+  if(NOT TARGET Salts::JinjaCMeta)
+    message(FATAL_ERROR
+      "FLEXUI_ENABLE_JINJA_XML requires installed SaltsUtils::JinjaCMeta (Salts::JinjaCMeta); no source or alternate template fallback")
+  endif()
+
+  add_library(flexUI_jinja_xml STATIC
+      src/ui_jinja_xml.cpp include/flexUI/ui_jinja_xml.h)
+  add_library(FlexUI::JinjaXml ALIAS flexUI_jinja_xml)
+  target_compile_features(flexUI_jinja_xml PUBLIC cxx_std_17)
+  target_link_libraries(flexUI_jinja_xml
+      PUBLIC FlexUI::Core
+      PRIVATE Salts::JinjaCMeta)
+  target_include_directories(flexUI_jinja_xml
+      PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+             $<INSTALL_INTERFACE:include>)
+  set_target_properties(flexUI_jinja_xml PROPERTIES FOLDER "flexUI/jinja")
+  install(TARGETS flexUI_jinja_xml DESTINATION lib)
+endif()
+
 set_target_properties(flexUI PROPERTIES FOLDER flexUI/)
 target_include_directories(
   flexUI
