@@ -3,6 +3,7 @@
 - 决策日期：2026-10-29。
 - 状态：设计已确定，运行时迁移待实现；本文的概念接口不是现有公开 ABI。
 - 源码基线：[`5ef5d4428bbad4256986240b17a3662c379e3222`](https://github.com/qigao/stun/tree/5ef5d4428bbad4256986240b17a3662c379e3222)。
+- XML 组件/模块 Schema 评审：[XML_COMPONENT_MODULE_SCHEMA_DESIGN.md](XML_COMPONENT_MODULE_SCHEMA_DESIGN.md)（React / Qt .ui / QML 对照；当前是设计提案，未实现）。
 - 唯一实施 tracker：[#17](https://github.com/qigao/stun/issues/17)；XML schema 见 #16，平台交付见 #31，真实 GUI 验收见 #330。
 - 本文取代 `XML_CSS_TBS_ARCHITECTURE.md`、`TAILWIND_JIT_DEFAULT_DESIGN.md` 及相关计划中的 CSS-first、生成 CSS、可选应用 CSS 和 `@theme` 输入决策。原有 UI 所有权、controller、服务与组件退休契约继续有效。
 
