@@ -29,6 +29,12 @@ namespace GCANVAS_GL_PROFILE_NAMESPACE
         GLint _internal_format;
 
         bool _uploaded = false;
+        // Actual base pixel payload size accepted for this GL texture
+        // after native upload; zero until uploaded. Excludes mipmaps,
+        // driver alignment, residency and allocator overhead.
+        std::size_t uploaded_payload_bytes() const noexcept {
+            return _uploaded ? uploaded_bytes_ : 0u;
+        }
 
         // Configured by the owning GL Context before the first native
         // texture upload. The borrowed observer must outlive this Image.

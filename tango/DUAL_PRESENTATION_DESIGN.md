@@ -576,6 +576,54 @@ existing native Context/GLsync gate, serialized Atlas mutations and
 bounded upload-budget rules remain unchanged. The production TangoGL
 factory stays unregistered.
 
+## gCanvas transactional image-update modeled peak admission (Draft)
+
+The same gCanvas `Image::update_data()` now performs an **early peak
+payload preflight** before allocating the extra CPU candidate vector.
+The owning `gcanvas::Context` counts the exact retained **CPU pixel payload**
+across its image objects and font atlases, plus the prospective candidate's
+entire source payload. Existing desktop OpenGL and OpenGLES backends also
+report the **actually uploaded base-level texture payload** from
+`ImageImplGl`, including dummy/internal, image, and font-atlas textures.
+
+`ImageUpdatePeakUsage` reports:
+`retained_cpu_bytes`, `candidate_cpu_bytes`,
+`native_uploaded_base_bytes`, `modeled_peak_bytes`,
+`limit_bytes`, and `native_payload_known`. Non-GL backends never
+fabricate native GPU byte counts: `native_payload_known=false` explicitly
+marks CPU-only accounting. Overflow and an over-limit candidate fail
+**before candidate allocation**, leaving both the existing CPU Image
+and GL resources untouched. `ResourceLimits` defaults to a **2 GiB
+image-update modeled peak cap**, with an explicit limit up to 4 GiB.
+The original Context can lower/restore its next-update admission cap
+without evicting existing images; this does not silently allocate
+a second renderer/texture or reset its native GL ownership.
+
+An in-flight GLsync referencing an uploaded texture does NOT allocate
+another copy of that texture: its base pixel payload is counted exactly
+once in `native_uploaded_base_bytes`, including during in-flight
+GPU reads. The existing strict one-in-flight GPU fence/Atlas mutation
+gate continues to protect the same GL storage.
+
+Existing Xvfb/Mesa native context acceptance now measures the actual
+CPU/GL payload model, reduces the live Context limit by **one byte**
+below the measured transaction peak, and requires that an attempted
+image update is rejected *before GPU callbacks or CPU candidate
+mutation*. Both the retained CPU green pixels and the actual
+`glGetTexImage` green pixels must remain intact. Restoring the
+original cap requalifies the same image payload. This piggybacks
+on the existing real texture and native GLsync test; no new
+consumer, CI workflow, or artificial GPU implementation.
+
+**Strict interpretation:** this is an admission bound on *modeled image
+update transaction payload*, not total CPU RSS, vector capacity,
+intermediate FreeType staging memory, mipmap allocations, GPU residency
+fragmentation, driver VRAM, shader buffers, or application-wide peak
+resources. Construction of Fonts/Images remains subject to its separate
+existing budgets; the new cap does not retroactively evict live resources.
+Crashed/partially written GL operations still require device quarantine.
+Physical GPU/HiDPI and production TangoOpenGL factory remain open gates.
+
 ## Native TTY presenter
 
 Owns/borrows the terminal, validates the bounded buffer, produces VT diff

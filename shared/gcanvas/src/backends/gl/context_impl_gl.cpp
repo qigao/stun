@@ -2027,6 +2027,26 @@ namespace GCANVAS_GL_PROFILE_NAMESPACE
         cleanup();
     }
 
+    bool ContextImplGl::uploaded_native_texture_payload_bytes(
+        std::size_t& out) const
+    {
+        const auto add = [](std::size_t lhs, std::size_t rhs) {
+            if (rhs > (std::numeric_limits<std::size_t>::max)() - lhs)
+                throw std::overflow_error(
+                    "gCanvas uploaded native GL base texture bytes overflow");
+            return lhs + rhs;
+        };
+        std::size_t live_bytes = dummy ? dummy->uploaded_payload_bytes() : 0u;
+        for (const auto& image : _owned_images)
+            live_bytes = add(live_bytes,
+                static_cast<const ImageImplGl&>(*image).uploaded_payload_bytes());
+        for (const auto& font : _owned_fonts)
+            live_bytes = add(live_bytes,
+                static_cast<const ImageImplGl&>(font->get_image()).uploaded_payload_bytes());
+        out = live_bytes;
+        return true;
+    }
+
     bool ContextImplGl::native_gpu_resource_ids(
         std::vector<NativeGpuResourceId>& out) const
     {

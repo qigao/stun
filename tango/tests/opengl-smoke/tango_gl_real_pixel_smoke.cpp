@@ -914,6 +914,22 @@ void exercise_actual_gl_mutation_barrier(GLFWwindow* window) {
             "Actual GL ImageImplGl upload did not create a texture name");
     const GLuint texture = static_cast<GLuint>(image_id->native_name);
 
+    // Real original gCanvas Context payload inventory: retained CPU atlas
+    // and image pixels + one extra candidate vector + actually uploaded
+    // native GL base texture bytes. Pending GPU references are included
+    // in resident textures, not double-counted as another allocation.
+    const auto initial_peak = context->image_update_peak_usage(image, green.size());
+    require(initial_peak.native_payload_known &&
+            initial_peak.retained_cpu_bytes > red.size() &&
+            initial_peak.native_uploaded_base_bytes > red.size() &&
+            initial_peak.candidate_cpu_bytes == green.size() &&
+            initial_peak.modeled_peak_bytes ==
+                initial_peak.retained_cpu_bytes +
+                initial_peak.candidate_cpu_bytes +
+                initial_peak.native_uploaded_base_bytes &&
+            initial_peak.limit_bytes >= initial_peak.modeled_peak_bytes,
+            "Actual gCanvas CPU old/candidate/GL uploaded payload model is incoherent");
+
     const auto fence_create = reinterpret_cast<PFNGLFENCESYNCPROC>(
         glfwGetProcAddress("glFenceSync"));
     const auto fence_wait = reinterpret_cast<PFNGLCLIENTWAITSYNCPROC>(
@@ -976,6 +992,41 @@ void exercise_actual_gl_mutation_barrier(GLFWwindow* window) {
             std::equal(image.pixels().begin(), image.pixels().end(), green.begin()),
             "Successful native update failed to commit its CPU pixel candidate");
 
+    // Lower the same Context's modeled transaction cap by exactly ONE
+    // byte: the original CPU image and actual GPU texture already exist,
+    // but the extra candidate copy must be denied BEFORE any CPU allocation
+    // or native GL operation, without re-creating the expensive glyph atlas.
+    require(initial_peak.modeled_peak_bytes > 1u,
+            "Actual image transaction peak cannot be tested at zero bytes");
+    context->set_image_update_modeled_peak_limit(
+        initial_peak.modeled_peak_bytes - 1u);
+    const int budget_before_updates = audit.updates;
+    const int budget_before_denied = audit.denied;
+    bool modeled_peak_denied = false;
+    try { image.update_data(red.data(), red.size()); }
+    catch (const std::length_error&) { modeled_peak_denied = true; }
+    require(modeled_peak_denied &&
+            audit.updates == budget_before_updates &&
+            audit.denied == budget_before_denied &&
+            image.pixels().size() == green.size() &&
+            std::equal(image.pixels().begin(), image.pixels().end(), green.begin()),
+            "Modeled image peak budget denial changed retained CPU state or called GL");
+
+    glBindTexture(GL_TEXTURE_2D, texture);
+    glGetTexImage(GL_TEXTURE_2D, 0, GL_RGBA, GL_UNSIGNED_BYTE, actual.data());
+    require(actual == green && glGetError() == GL_NO_ERROR,
+            "Modeled candidate peak rejection modified real GPU green texels");
+    context->set_image_update_modeled_peak_limit(initial_peak.limit_bytes);
+    const auto restored = context->image_update_peak_usage(image, red.size());
+    require(restored.modeled_peak_bytes == initial_peak.modeled_peak_bytes &&
+            restored.limit_bytes == initial_peak.limit_bytes,
+            "Restoring Context candidate peak limit changed actual resource payloads");
+    bool zero_cap_denied = false;
+    try { context->set_image_update_modeled_peak_limit(0); }
+    catch (const std::invalid_argument&) { zero_cap_denied = true; }
+    require(zero_cap_denied,
+            "Native Context admitted an unbounded zero-byte candidate limit");
+
     // Failed validation (including a malformed input span) must not
     // overwrite old CPU bytes or issue a native driver update.
     bool invalid_span_refused = false;
@@ -1004,6 +1055,10 @@ void exercise_actual_gl_mutation_barrier(GLFWwindow* window) {
               << "TANGO_GL_CPU_IMAGE_ROLLBACK_ON_GPU_DENIAL=1\n"
               << "TANGO_GL_CPU_IMAGE_INVALID_SPAN_ROLLBACK=1\n"
               << "TANGO_GL_CPU_IMAGE_ALIAS_SAFE=1\n"
+              << "TANGO_GL_IMAGE_MODELED_PEAK_BYTES="
+              << initial_peak.modeled_peak_bytes << "\n"
+              << "TANGO_GL_IMAGE_PEAK_BUDGET_DENIED_BEFORE_ALLOC=1\n"
+              << "TANGO_GL_IMAGE_PEAK_CPU_GPU_INTACT=1\n"
               << "TANGO_GL_ACTUAL_GL_DELETE_AUDIT=1\n";
 }
 

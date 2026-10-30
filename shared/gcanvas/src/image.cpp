@@ -68,6 +68,11 @@ namespace gcanvas
         const std::size_t required = required_pixel_bytes();
         if (data == nullptr || size != required)
             throw std::invalid_argument("gCanvas image pixel span has the wrong size");
+        // Must qualify old retained CPU bytes + this extra candidate +
+        // actual uploaded native texture base bytes before allocating the
+        // candidate or changing either CPU/GPU state.
+        if (_owner != nullptr)
+            (void)_owner->image_update_peak_usage(*this, required);
         std::vector<std::uint8_t> candidate(data, data + size);
 
         // The existing backend's update_image() reads Image::_data. Temporarily
