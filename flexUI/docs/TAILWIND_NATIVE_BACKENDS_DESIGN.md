@@ -105,7 +105,7 @@ explicit backend admission and owned render plan
 - [ ] **D Dynamic**：数据集合增删改排、Tab/组件生命周期、load/reload/失败原子性、旧 generation 结果、cancel/close overlap、in-flight observer/worker/borrow 安全。
 - [ ] **E Present**：实际 D2D/gCanvas 可见 GUI 截图和输入命中；TTY 真实 PTY/ConPTY 字节流及独立终端画面 oracle。精确 HEAD、后端能力、正常和错误路径证据。
 - [ ] **F Designer**：Designer 产物经过 Save → `compile_ui_xml` → Registry → Mount → Reload → Export → Compile，结构与绑定不丢失。当前 `<ui><widget type=...><position/><size/>` 的旧导出与正式格式不相容，不能声称已通过。
-- [ ] **G Installed SDK**：安装版 SDK 使用同样通用 app loader 运行作者文件；不依赖源码树路径、Mock renderer、硬编码应用 ID 或二次 UI runtime；复用现有 CI 缓存/FIFO 取消与 native/sanitizer gates。
+- [ ] **G 真实下游应用/库 SDK 验证**：在**已经存在的真实下游应用或库**中，利用它们原本的构建/CI 与正式 SDK 运行同样通用 app loader 和作者文件；不依赖源码树路径、Mock renderer、硬编码应用 ID 或二次 UI runtime。**禁止**新建 installer/consumer 测试工程、伪下游 CMake 项目或专用 CI 文件；已有专用消费者必须删除。上游保留真实 native/sanitizer gates 和缓存/FIFO 取消。
 
 **DoD：对这个 Studio 的容器、Widget、界面结构、Tab/Tree/Table 内容、绑定、事件及 Theme 的一般改动，开发者只修改 XML + Tailwind + TurboScript 作者文件，不需改应用专有的 C++ 视图代码。** 新增真正的通用原生 Widget/Service 能力可以改 SDK，但必须同时增加版本化 XML/脚本契约和独立测试，不能给单一 Demo 开后门。
 

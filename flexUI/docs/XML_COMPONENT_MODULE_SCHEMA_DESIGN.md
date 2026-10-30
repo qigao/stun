@@ -150,7 +150,7 @@ struct UiTypeDescriptor {
 | M2 | 独立 Component 文件、Import、Props/Children/Slots、可嵌套实例 | 同一组件多实例 + caller slot binding、私有 ID、循环 import、版本/hash/预算越界，失败无部分发布 |
 | M3 | Tabs/Tree/Table/Accordion 真正由 XML 装配，完成 `bind:value` | 对比现有 C++ 控件语义，真正按键/鼠标/编辑/Tab+Tree+Table 动态行为，无应用专有 UI 装配代码 |
 | M4 | `repeat/when` + ItemTemplate + 可验证物理退休 | Key 重排/删改、Controller/Scope/stale generation、observer/worker join、OOM、取消/reload、Sanitizer |
-| M5 | Designer 使用同一 Schema + 完整 Studio 原生 App | Designer Save→Compile→Mount→Reload→Export→Compile；独立 SDK consumer；真实 GUI 窗口、TTY PTY/ConPTY，精确 HEAD 和错误 RED oracle |
+| M5 | Designer 使用同一 Schema + 完整 Studio 原生 App | Designer Save→Compile→Mount→Reload→Export→Compile；已有真实下游应用/库的 SDK 使用证据；真实 GUI 窗口、TTY PTY/ConPTY，精确 HEAD 和错误 RED oracle |
 
 **验收真值**：UI 的布局、Tree、Table、Tab、弹窗、事件、数据源、主题、绑定及服务连接，完全靠 XML+Tailwind+TurboScript 作者文件变化；不得由 Demo/Host 自己写 C++ `add_tab/add_node/add_row` 来冒充 XML 功能。通用 Native Widget/Service 的 C++/C11 SDK 实现可以继续保留。
 
@@ -158,6 +158,9 @@ struct UiTypeDescriptor {
 
 
 ## 9. SaltsUtils Mustache / Jinja CMeta 模板复用决策（2026-10-30）
+
+**2026-10-30 验收政策更新**：正式库的 `install()`/CMake exports 保持；只能在**已存在的真实下游应用/库**及其原有 CI 中开展 SDK 集成验证，或者执行上游原生测试。禁止创建专用 installer/consumer 测试项目、在 CI 中即时写 `CMakeLists.txt` 伪造消费者，以及新增消费者验收 CI 文件。旧的此类工程应删除；生产源码/Native tests/实际 Android App 不是待删除对象。参见 [stun Draft #348](https://github.com/qigao/stun/pull/348)。
+
 
 **决定：优先复用 `qigao/salts-utils` 的 `Salts::JinjaCMeta` / `Salts::Mustache`，不在 FlexUI 重写文本模板引擎；但文本模板和 UI 组件的类型化语义严格分层。** 这是候选设计，并非当前 FlexUI 已链接、已安装或已完成模板验收。
 
@@ -168,7 +171,7 @@ struct UiTypeDescriptor {
 | [Mustache README](https://github.com/qigao/salts-utils/blob/5b0be65de673261fc37b29485b0364ca38cc6cd6/mustache/README.md)、[CMake](https://github.com/qigao/salts-utils/blob/5b0be65de673261fc37b29485b0364ca38cc6cd6/mustache/CMakeLists.txt) | **C11 STATIC** `Salts::Mustache`；变量、section、partial、JSON/XML data provider；不可变 compiled template、可定制 escaped/verbatim 输出、arena 与深度上限 | 简单静态源片段/字符串、生成项目骨架/文档/Designer 辅助产物；不能替代 XML Widget/Slot 类型检查 |
 | [Jinja README](https://github.com/qigao/salts-utils/blob/5b0be65de673261fc37b29485b0364ca38cc6cd6/jinja/README.md)、[public API](https://github.com/qigao/salts-utils/blob/5b0be65de673261fc37b29485b0364ca38cc6cd6/jinja/include/jinja_cmeta.h) | **C11 SHARED** `Salts::JinjaCMeta`；CMeta 输入、if/for/macro/block、include/import/from/extends、具名同步 loader、可配置 autoescape/strict undefined、render_string 和资源/深度限额 | 较复杂的**静态 XML 作者源预展开**（可选、显式依赖）。严格按当前 C11 实现的已验证子集，不声称等同完整 Python Jinja 3.1 |
 | [Jinja CMake](https://github.com/qigao/salts-utils/blob/5b0be65de673261fc37b29485b0364ca38cc6cd6/jinja/CMakeLists.txt) | Jinja 链接 CMeta/Core，私有 Unicode/CSTL，**不直接链接 Mustache**；顶层 SaltsUtils README 关于“Jinja 复用 Mustache runtime”的旧文字不可作为实际链接关系依据 | 组件可按需直接依赖对应 installed target，**不得依赖未证实的 Jinja→Mustache 链接/回退** |
-| [Jinja compatibility](https://github.com/qigao/salts-utils/blob/5b0be65de673261fc37b29485b0364ca38cc6cd6/jinja/JINJA_COMPATIBILITY.md) | 上游对照固定在 Jinja 3.1.6 的部分子集；非完整沙箱；公开库具有同步、单 owner 环境与资源生命周期要求 | 固定原生宿主白名单与限额；安装版独立 C/C++ consumer、Windows/Linux/macOS 运行和相关 CI 必须单独验收 |
+| [Jinja compatibility](https://github.com/qigao/salts-utils/blob/5b0be65de673261fc37b29485b0364ca38cc6cd6/jinja/JINJA_COMPATIBILITY.md) | 上游对照固定在 Jinja 3.1.6 的部分子集；非完整沙箱；公开库具有同步、单 owner 环境与资源生命周期要求 | 固定原生宿主白名单与限额；只在已有真实下游应用/库及其原生 CI 中验证已安装 SDK 的 C/C++ ABI（禁止新建消费项目/CI 文件） |
 
 **特别注意：Mustache 的 XML data provider 是“以 XML 为输入数据”的能力，不等于输出的任何字符串已经是有效/安全的 FlexUI XML。** 普通 HTML escaping 不是 schema admission，更不能让原始 `{{{fragment}}}` 直接注入任意 Element 或 Controller Handler。
 
@@ -232,11 +235,11 @@ trusted .ui.xml / .ui.xml.jinja / .ui.xml.mustache + frozen typed context
 
 | 轨道 | 必须通过的证据 |
 | --- | --- |
-| S0 模板库存 | 从已安装 SaltsUtils SDK 分别编译/链接 Mustache STATIC 和 JinjaCMeta SHARED 的 C/C++ 消费者；核对真实 API/ABI、Loader、CMeta 和 RIDs，禁止 source-copy 或 fallback |
+| S0 模板库存 | 在已有真正下游应用/库或上游生产原生测试中验证已安装 SaltsUtils Mustache STATIC 与 JinjaCMeta SHARED 的 API/ABI、Loader、CMeta 和 RIDs；不得新建专用安装消费者项目或 CI，不允许 source-copy / fallback |
 | S1 Mustache / Jinja 预处理 | 正/负 if/for/section/partial/include/import/extends；只对 pinned author static data 生效；未知模板/缺权限/读错/扩张过限/OOM 显式失败，旧 UI 未变化 |
 | S2 XML Schema + 安全 | `<`、`&`、双/单引号、`</button>`、特殊字符、CDATA 和恶意 fragment；XML 属性/文本正确转义；错误的 Widget/Prop/Slot/Handler/Namespace、重复 ID 和超出预算必须 fail closed |
 | S3 跨模板/作用域 | Component typed Props/Children/Slots 的多实例 ID/ARIA/handler 词法隔离；Jinja include/import 与 FlexUI Component import 的来源、版本与预算互不混淆，无多一套 UI 树 |
 | S4 动态数据 | runtime ItemTemplate 的真实增删重排、Key、focus/state 保存和安全 unmount；模板字符串生成不能充当成功证据 |
-| S5 Designer / 实际 App | Designer 的 XML 使用同一 Schema；只改 XML/Tailwind/TurboScript 就能运行 Studio；GUI 真实窗口/PTY/ConPTY 与安装版 SDK、Sanitizer/错误回滚的同 HEAD 验收 |
+| S5 Designer / 实际 App | Designer 的 XML 使用同一 Schema；只改 XML/Tailwind/TurboScript 就能运行 Studio；在既有真实下游 App/Lib 与原有 CI 中验证 SDK，复用真实 GUI 窗口/PTY/ConPTY、Sanitizer/错误回滚的同 HEAD 证据 |
 
 **范围判定：** 优先做可选 Jinja 编译期 Author Source Template 与 Mustache 简单生成；是否让 Jinja 直接作为 UI typed Component/ItemTemplate 执行器，只有在能直接保留 **typed Node、caller slot/children、stable Key、完整 source map、owner/lifecycle** 的正式接口和测试成立后才讨论。纯字符串拼接不能被视为这个类型化接口的实现。所有跟踪 #16/#1/#275 和 PR #333 继续 Open/Draft。
