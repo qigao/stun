@@ -214,6 +214,9 @@ void exercise_gpu(const std::string& font_path,
 
     presenter->present(tango.frame, layout);
     const auto first_frame = read_back_rgba();
+    // Preserve the actual GPU pixels for audit EVEN when a subsequent color
+    // or glyph assertion fails; never synthesize a fallback screenshot.
+    save_ppm(first_frame, ppm);
     const Pixel background = at(first_frame, 4, 4);
     const Pixel red_cell = at(first_frame, kCellWidth + 2, kCellHeight + 2);
     const Pixel green_cell = at(first_frame, 5 * kCellWidth + 2,
@@ -253,7 +256,6 @@ void exercise_gpu(const std::string& font_path,
     require(read_back_rgba() == first_frame,
             "Rejected Tango grid mutation changed an already drawn GL frame");
 
-    save_ppm(first_frame, ppm);
     std::cout << "TANGO_GL_PIXEL_PASS=1\n";
 }
 
