@@ -19,6 +19,7 @@ on:
       - Markdown highlighter loader portability
       - FlexUI Tango cross-platform headless
       - Tango Native C Core
+      - Tango OpenGL native pixels
     types: [requested, completed]
 
 permissions:

@@ -69,6 +69,10 @@ void paint_demo_cells(tui_buffer_t* grid) {
 } // namespace
 
 int main(int argc, char** argv) {
+    if (argc != 3) {
+        std::cerr << "usage: tango_opengl_demo <regular-font.ttf> <bold-font.ttf>\n";
+        return 2;
+    }
     if (!glfwInit()) {
         std::cerr << "GLFW init failed\n";
         return 1;
@@ -92,11 +96,13 @@ int main(int argc, char** argv) {
 
     int exit_code = 0;
     try {
-        const auto font_path = argc > 1 ? std::string(argv[1]) : std::string{};
+        const std::string font_path(argv[1]);
+        const std::string bold_font_path(argv[2]);
         ExternalGLCellCreateInfo gl;
         gl.get_proc_address = &get_proc;
         gl.font_family = "tango-monospace";
         gl.font_path = font_path;
+        gl.bold_font_path = bold_font_path;
         auto presenter = flex::tango_opengl::create_external_gl_presenter(gl);
         TangoBuffer grid(48, 20);
         paint_demo_cells(grid.buffer);

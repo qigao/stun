@@ -1,0 +1,243 @@
+name: Tango OpenGL native pixels
+
+# Actual gCanvas desktop GL + Tango C11 pixel readback under a real Mesa/Xvfb
+# context. Deliberately separate from the TTY headless and CPU-only gates.
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled]
+    # Only shared code and desktop GL/glyph paths that can affect TangoGL.
+    # Do not run a Mesa desktop GPU check for Vulkan/Android-only edits.
+    # Keep paths as a contiguous list: ci_required_matrix.py parses it strictly.
+    paths:
+      - "tango/**"
+      - "flex/backends/tango_opengl/**"
+      - "flex/render/engines/gcanvas/**"
+      - "flex/modules/render/**"
+      - "shared/gcanvas/src/backends/gl/**"
+      - "shared/gcanvas/src/backends/opengl/**"
+      - "shared/gcanvas/src/font.cpp"
+      - "shared/gcanvas/src/context.cpp"
+      - "shared/gcanvas/src/color.cpp"
+      - "shared/gcanvas/src/image.cpp"
+      - "shared/gcanvas/src/path.cpp"
+      - "shared/gcanvas/include/gcanvas/**"
+      - "shared/gcanvas/CMakeLists.txt"
+      - ".github/workflows/tango-opengl-native-pixel.yml"
+      - ".github/actions/setup-ccache/**"
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: tango-gl-native-pixels-${{ github.event.pull_request.number || github.ref }}-${{ github.event.action == 'labeled' && github.event.label.name != 'ci/full' && github.run_id || 'qualification' }}
+  cancel-in-progress: true
+
+jobs:
+  changes:
+    if: github.event.action != 'labeled' || github.event.label.name == 'ci/full'
+    name: Tango OpenGL pixel scope
+    runs-on: ubuntu-24.04
+    outputs:
+      source_sha: ${{ steps.run_head.outputs.sha }}
+      affected: ${{ steps.scope.outputs.affected }}
+    steps:
+      - name: Resolve immutable Actions run head
+        id: run_head
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          sha="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" --jq '.head_sha')"
+          [[ "$sha" =~ ^[0-9a-fA-F]{40}$ && ! "$sha" =~ ^0+$ ]]
+          printf 'sha=%s\n' "$sha" >> "$GITHUB_OUTPUT"
+          echo "TangoGLSourceHEAD=$sha"
+      - name: Checkout immutable PR source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.run_head.outputs.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+      - name: Verify exact source identity
+        shell: bash
+        env:
+          EXPECTED_STUN_SHA: ${{ steps.run_head.outputs.sha }}
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_STUN_SHA"
+      - name: Detect Tango/desktop-GL delta without skipping an invalid source
+        id: scope
+        shell: bash
+        run: |
+          bash .github/scripts/ci-affected.sh \
+            'tango/*' 'flex/backends/tango_opengl/*' \
+            'flex/render/engines/gcanvas/*' 'flex/modules/render/*' \
+            'shared/gcanvas/src/backends/gl/*' \
+            'shared/gcanvas/src/backends/opengl/*' \
+            'shared/gcanvas/src/font.cpp' 'shared/gcanvas/src/context.cpp' \
+            'shared/gcanvas/src/color.cpp' 'shared/gcanvas/src/image.cpp' \
+            'shared/gcanvas/src/path.cpp' 'shared/gcanvas/include/gcanvas/*' \
+            'shared/gcanvas/CMakeLists.txt' \
+            '.github/workflows/tango-opengl-native-pixel.yml' \
+            '.github/actions/setup-ccache/*'
+
+  mesa-real-pixels:
+    needs: changes
+    if: needs.changes.outputs.affected == 'true'
+    name: Native TangoGL / Mesa llvmpipe real framebuffer
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    env:
+      LIBGL_ALWAYS_SOFTWARE: '1'
+      GALLIUM_DRIVER: llvmpipe
+      VCPKG_TARGET_TRIPLET: x64-linux
+      VCPKG_DISABLE_METRICS: '1'
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Checkout exact Tango source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.changes.outputs.source_sha }}
+          persist-credentials: false
+
+      - name: Verify exact source identity
+        shell: bash
+        env:
+          EXPECTED_STUN_SHA: ${{ needs.changes.outputs.source_sha }}
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_STUN_SHA"
+
+      - name: Restore isolated verified compiler cache
+        uses: ./.github/actions/setup-ccache
+        with:
+          profile: tango-gl-native-pixels-linux
+          source_sha: ${{ needs.changes.outputs.source_sha }}
+
+      - name: Install real Mesa GLX/GLFW and mono font prerequisites
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            build-essential cmake ninja-build pkg-config curl unzip xz-utils \
+            libgl1-mesa-dev libgl1-mesa-dri libglx-mesa0 \
+            libfreetype-dev libstb-dev libz-dev \
+            libglfw3-dev libx11-dev libxrandr-dev libxinerama-dev \
+            libxcursor-dev libxi-dev libxext-dev \
+            fonts-dejavu-core xvfb xauth
+          test -r /usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf
+          sha256sum /usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf
+
+      - name: Download and verify exact released Salts Unicode/Platform SDK
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          version='v2.3.0-rc.17'
+          asset='Salts.Native.2.3.0-rc.17.nupkg'
+          expected="$(gh api "repos/qigao/salts/releases/tags/$version" |
+            jq -er --arg name "$asset" \
+              '[.assets[] | select(.name==$name) | .digest] |
+               if length==1 then .[0] else error("missing unique SDK digest") end')"
+          [[ "$expected" =~ ^sha256:[0-9a-f]{64}$ ]]
+          mkdir -p "$RUNNER_TEMP/tango-gl-sdk"
+          curl --fail --silent --show-error --location --retry 3 \
+            --proto '=https' --proto-redir '=https' \
+            --connect-timeout 15 --max-time 300 \
+            "https://github.com/qigao/salts/releases/download/$version/$asset" \
+            -o "$RUNNER_TEMP/tango-gl-sdk/salts.nupkg.part"
+          actual="$(sha256sum "$RUNNER_TEMP/tango-gl-sdk/salts.nupkg.part" |
+            awk '{print $1}')"
+          test "$actual" = "${expected#sha256:}"
+          mv "$RUNNER_TEMP/tango-gl-sdk/salts.nupkg.part" \
+            "$RUNNER_TEMP/tango-gl-sdk/salts.nupkg"
+          unzip -q "$RUNNER_TEMP/tango-gl-sdk/salts.nupkg" \
+            -d "$RUNNER_TEMP/tango-gl-sdk/unpacked"
+          root="$RUNNER_TEMP/tango-gl-sdk/unpacked/sdk/linux-x64"
+          test -f "$root/lib/cmake/Salts/SaltsConfig.cmake"
+          echo "SALTS_ROOT=$root" >> "$GITHUB_ENV"
+          echo "InstalledSDK=$version AssetSHA256=$actual"
+
+      - name: Checkout pinned native vcpkg packages baseline
+        uses: actions/checkout@v4
+        with:
+          repository: microsoft/vcpkg
+          ref: b1b19307e2d2ec1eefbdb7ea069de7d4bcd31f01
+          path: .ci/vcpkg
+          persist-credentials: false
+
+      - name: Restore separate TangoGL third-party binary cache
+        id: vcpkg_cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ runner.temp }}/tango-gl-vcpkg-cache
+          key: tango-gl-vcpkg-v1-linux-x64-b1b19307-plutosvg-glad-stb
+          restore-keys: |
+            tango-gl-vcpkg-v1-linux-x64-b1b19307-
+
+      - name: Resolve actual native gCanvas GLSL and SVG dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          export VCPKG_DEFAULT_BINARY_CACHE="$RUNNER_TEMP/tango-gl-vcpkg-cache"
+          mkdir -p "$VCPKG_DEFAULT_BINARY_CACHE"
+          echo "VCPKG_DEFAULT_BINARY_CACHE=$VCPKG_DEFAULT_BINARY_CACHE" >> "$GITHUB_ENV"
+          .ci/vcpkg/bootstrap-vcpkg.sh -disableMetrics
+          .ci/vcpkg/vcpkg install --classic --triplet x64-linux \
+            glad plutosvg stb
+
+      - name: Save dependency cache without mixing compiler results
+        if: steps.vcpkg_cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ runner.temp }}/tango-gl-vcpkg-cache
+          key: ${{ steps.vcpkg_cache.outputs.cache-primary-key }}
+
+      - name: Configure only actual Tango C11 / Flex::Render / gCanvas GL sources
+        shell: bash
+        run: |
+          set -euo pipefail
+          cmake -S tango/tests/opengl-smoke -B build/tango-gl-native -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_TOOLCHAIN_FILE="$GITHUB_WORKSPACE/.ci/vcpkg/scripts/buildsystems/vcpkg.cmake" \
+            -DVCPKG_TARGET_TRIPLET=x64-linux -DVCPKG_MANIFEST_MODE=OFF \
+            "-DCMAKE_PREFIX_PATH=$SALTS_ROOT" \
+            -DTANGO_PIXEL_FONT=/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf \
+            -DSTB_INCLUDE_DIRS=/usr/include/stb \
+            -DStb_INCLUDE_DIR=/usr/include/stb
+
+      - name: Build actual Tango OpenGL shader/glyph renderer and test
+        shell: bash
+        run: |
+          set -euo pipefail
+          cmake --build build/tango-gl-native \
+            --target tango_gl_real_pixel_smoke --parallel 2
+          test -x build/tango-gl-native/tango_gl_real_pixel_smoke
+
+      - name: Validate exact-head real framebuffer and reject pre-submit failure
+        shell: bash
+        run: |
+          set -euo pipefail
+          export LD_LIBRARY_PATH="$SALTS_ROOT/lib:$SALTS_ROOT/bin:${LD_LIBRARY_PATH:-}"
+          xvfb-run -a -s '-screen 0 1280x900x24 -nolisten tcp' \
+            ctest --test-dir build/tango-gl-native \
+              --output-on-failure -V --no-tests=error \
+              -R '^tango_gl_real_pixel$' --timeout 120
+          test -s build/tango-gl-native/tango-gl-frame.ppm
+          head -c 2 build/tango-gl-native/tango-gl-frame.ppm | grep -q P6
+          echo "ExactHEAD=${{ needs.changes.outputs.source_sha }} TangoGLNativePixel=SUCCESS"
+
+      - name: Upload actual GPU-readback frame for visual audit
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: tango-gl-mesa-pixels-${{ needs.changes.outputs.source_sha }}
+          path: build/tango-gl-native/tango-gl-frame.ppm
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: Report isolated native compiler cache
+        if: always()
+        shell: bash
+        run: |
+          command -v ccache >/dev/null && ccache --show-stats || true
