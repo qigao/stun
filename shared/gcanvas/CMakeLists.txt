@@ -178,9 +178,6 @@ if(GCANVAS_BUILD_ANDROID_EGL)
   if(NOT ANDROID)
     message(FATAL_ERROR "GCANVAS_BUILD_ANDROID_EGL is only supported for Android targets")
   endif()
-  if(NOT TARGET gcanvas_opengles)
-    message(FATAL_ERROR "GCANVAS_BUILD_ANDROID_EGL requires GCANVAS_BUILD_GLES=ON")
-  endif()
 
   add_library(gcanvas_android_egl STATIC
     src/platform/android/egl_host.cpp)

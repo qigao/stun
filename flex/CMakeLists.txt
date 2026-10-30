@@ -50,11 +50,6 @@ if(FLEX_BUILD_BACKEND_OPENGL)
      FLEX_OPENGL_RENDER_ENGINE STREQUAL "nanovg")
     add_subdirectory(render/engines/nanovg)
   endif()
-  if(FLEX_OPENGL_RENDER_ENGINE STREQUAL "gcanvas" AND
-     (NOT TARGET flex_render_engine_gcanvas OR NOT TARGET gCanvas::OpenGL))
-    message(FATAL_ERROR
-      "FLEX_OPENGL_RENDER_ENGINE=gcanvas requires gCanvas OpenGL support")
-  endif()
   add_subdirectory(backends/opengl)
 endif()
 if(FLEX_BUILD_BACKEND_TUI)
