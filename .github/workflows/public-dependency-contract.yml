@@ -273,15 +273,17 @@ jobs:
             echo "installed FlexUI package still exports retired dependencies" >&2
             exit 1
           fi
-          if grep -R -n -E 'TURBO_(UTILS|PARSER)_(PACKAGE|RUNTIME)_DIR|Turbo(Utils|Parser)_DIR'               flexUI/tests/plugin_install_consumer flexUI/tests/CMakeLists.txt; then
-            echo "install consumer still injects retired package roots" >&2
+          if grep -R -n -E 'TURBO_(UTILS|PARSER)_(PACKAGE|RUNTIME)_DIR|Turbo(Utils|Parser)_DIR' \
+              flexUI/modules/plugin_host flexUI/modules/services flexUI/tests/CMakeLists.txt; then
+            echo "native FlexUI provider still injects retired package roots" >&2
             exit 1
           fi
           grep -Fq 'find_dependency(Salts CONFIG)' flexUI/cmake/FlexUIConfig.cmake.in
           grep -Fq 'find_dependency(SaltsUtils CONFIG)' flexUI/cmake/FlexUIConfig.cmake.in
-          grep -Fq 'FlexUI::PluginSDK' flexUI/tests/plugin_install_consumer/CMakeLists.txt
-          grep -Fq 'FlexUI::Services' flexUI/tests/plugin_install_consumer/CMakeLists.txt
-          grep -Fq 'FlexUI::PluginHost' flexUI/examples/plugin_echo/CMakeLists.txt
+          grep -Fq 'FlexUI::PluginSDK' flexUI/modules/plugin_host/CMakeLists.txt
+          grep -Fq 'FlexUI::Services' flexUI/modules/plugin_host/CMakeLists.txt
+          grep -Fq 'FlexUI::PluginHost' flexUI/modules/plugin_host/CMakeLists.txt
+          grep -Fq 'flexui_add_native_plugin_tests' flexUI/tests/plugin-native-targets.cmake
 
       - name: Compile PluginHost sources against canonical public headers
         shell: bash

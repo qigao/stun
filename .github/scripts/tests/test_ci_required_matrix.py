@@ -104,12 +104,9 @@ class RequirementTests(unittest.TestCase):
         self.assertIn(policy.RUNTIME, result)
         for workflow in (
             "gcanvas-android-egl.yml", "gcanvas-android-runtime.yml",
-            "gcanvas-gles-runtime.yml", "gcanvas-package-contract.yml",
-            "gcanvas-shader-tools-cache.yml",
+            "gcanvas-gles-runtime.yml", "gcanvas-shader-tools-cache.yml",
         ):
             self.assertIn(".github/workflows/" + workflow, result)
-        self.assertIn("android-default-cmake",
-                      result[".github/workflows/gcanvas-package-contract.yml"])
 
     def test_markdown_selects_sdk_and_headless(self):
         result = matrix("shared/markdown/src/markdown.c")
@@ -138,14 +135,25 @@ class RequirementTests(unittest.TestCase):
         self.assertIn(policy.PUBLIC, result)
         self.assertIn(policy.RUNTIME, result)
 
-    def test_shared_ccache_action_selects_real_consumers(self):
+    def test_shared_ccache_action_selects_real_native_workflows(self):
         result = matrix(".github/actions/setup-ccache/action.yml")
         for filename in (
-            "gcanvas-gles-runtime.yml", "gcanvas-package-contract.yml",
+            "gcanvas-gles-runtime.yml",
             "graphlayout-native.yml", "ui-core-c11.yml", "tango-core.yml",
             "flexui-tango-headless.yml", "markdown-highlighter-loader.yml",
         ):
             self.assertIn(".github/workflows/" + filename, result)
+
+    def test_no_synthetic_installed_consumer_projects_or_workflows(self):
+        for path in (
+            "flexUI/tests/plugin_install_consumer",
+            "flexUI/tests/unicode_install_consumer",
+            "shared/gcanvas/tests/install_consumer",
+            "flexUI/examples/plugin_echo",
+            ".github/workflows/gcanvas-package-contract.yml",
+        ):
+            self.assertFalse((ROOT / path).exists(), path)
+        self.assertNotIn("gcanvas-package-contract.yml", policy.WORKFLOWS)
 
     def test_unknown_sources_fail_closed_even_with_docs(self):
         for paths in (

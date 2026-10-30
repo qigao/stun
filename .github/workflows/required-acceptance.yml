@@ -13,7 +13,6 @@ on:
       - UI C11 Reflection Contract
       - GraphLayout native algorithm qualification
       - gCanvas OpenGLES runtime
-      - gCanvas package contract
       - gCanvas Android EGL compile
       - gCanvas Android runtime
       - gCanvas shader toolchain cache contract

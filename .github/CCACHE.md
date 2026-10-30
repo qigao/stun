@@ -310,53 +310,25 @@ CMake compiler configuration, forcing real native jobs to restore
 the prior cache by exact platform/profile prefix; confirm restored
 cache hit statistics instead of relying on the presence of archives.
 
-## gCanvas native GLES and Android NDK cross-compiler gates
+## gCanvas native GLES and Android gates
 
-The Linux OpenGLES pixel smoke and gCanvas package contract now use
-the same SHA-256 verified pinned ccache 4.14.2 action as the other
-native jobs. Three isolated profiles cover:
-- `gcanvas-gles-runtime`: actual Linux Debug OpenGLES and pixel smoke
-- `gcanvas-installed-consumer`: Linux Release GLES producer and real
-  installed `find_package(gCanvas)` consumer built in the same job
-- `gcanvas-android-arm64`: real NDK arm64-v8a C/C++ cross compiler under
-  the pinned Android toolchain, preserving actual NDK `--target` flags
+The active upstream qualifications test **production gCanvas targets**, not
+synthetic installed-package consumer projects: the Linux
+`gcanvas-gles-runtime.yml` compiles/executes the real OpenGLES renderer and
+pixel test with verified ccache, while `gcanvas-android-egl.yml` compiles the
+actual Android EGL adapter, and `gcanvas-android-runtime.yml` runs the real
+Android Surface replacement application. Each workflow retains exact-head and
+native runtime rules; consumer-only CI and generated `build/consumer` CMake
+projects are forbidden.
 
-Both CMake `CMAKE_C_COMPILER_LAUNCHER` and
-`CMAKE_CXX_COMPILER_LAUNCHER` are set before Ninja configuration.
-The generated `build.ninja` files must contain `ccache`.
-The compiler-output cache is version/profile/platform/HEAD-scoped and
-does NOT persist an NDK/host object or link artifact across targets.
-No target ABI, sanitized runtime test, package metadata or GPU test
-is weakened.
-
-Changes in the shared ccache action or stats script must trigger these
-workflows AND their separate `ci-affected.sh` classifier. Actual
-cacheable compilations, hit/miss metrics and existing native test
-artifacts are preserved independently. One cold run verifies real
-compiler invocation; warm-hit evidence requires a subsequent same-
-toolchain HEAD with unchanged C/C++ source and flags.
-
-## gCanvas first verified cold-run evidence (PR #308)
-
-[Exact cold HEAD `62f1fa96`](https://github.com/qigao/stun/commit/62f1fa96f1d0f4421b6fb7e8722dc518f8699d9b),
-[OpenGLES native run #40718548050](https://github.com/qigao/stun/actions/runs/40718548050)
-and [package/NDK run #40718548133](https://github.com/qigao/stun/actions/runs/40718548133)
-completed **SUCCESS**, including the actual GLSL/GLES pixel smoke,
-installed package consumer and NDK ABI target-contract gates.
-
-| Build profile | Cacheable C/C++ compilations | Hits | Misses |
-| --- | ---: | ---: | ---: |
-| `gcanvas-gles-runtime` | 17 | 0 | 17 |
-| `gcanvas-installed-consumer` | 17 | 1 | 16 |
-| `gcanvas-android-arm64` | 16 | 0 | 16 |
-
-All three compiler-output caches were saved with separate immutable
-ccache 4.14.2 keys; the one same-job native consumer hit is not
-cross-run evidence. The next SHA touches only these workflow comments
-and this documentation, so C++ sources, Android ABI/NDK toolchain and
-CMake flags remain identical. Follow-up runs must restore
-compiler-output caches via their prefix keys and report real hits on
-each of the **three** profiles; a zero-call result must fail.
+The former `gcanvas-package-contract.yml` combined a synthetic
+`find_package` consumer with a separate NDK-default configuration job. It
+was retired rather than allowed to remain a required synthetic consumer gate.
+The older [PR #308](https://github.com/qigao/stun/pull/308) installed-consumer,
+NDK and cache-hit observations are **historical evidence only**. The current
+merge acceptance derives from the surviving native GLES/Android jobs, and real
+existing downstream applications/libraries may add separate SDK-use evidence
+without creating test-only consumer projects or additional CI workflows.
 
 ## Completed release qualification (2026-10-28)
 
