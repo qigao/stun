@@ -82,7 +82,7 @@ class RequirementTests(unittest.TestCase):
     def test_markdown_source_fixture_requires_native_runtime(self):
         result = matrix("shared/markdown/tests/fixtures/parser.md")
         self.assertIn(policy.RUNTIME, result)
-        self.assertIn(".github/workflows/ui-core-c11.yml", result)
+        self.assertIn(".github/workflows/gui-native-e2e.yml", result)
         self.assertIn(".github/workflows/flexui-tango-headless.yml", result)
 
     def test_doc_only_nul_scope_classifier_is_fail_closed(self):
@@ -110,7 +110,7 @@ class RequirementTests(unittest.TestCase):
 
     def test_markdown_selects_sdk_and_headless(self):
         result = matrix("shared/markdown/src/markdown.c")
-        self.assertIn(".github/workflows/ui-core-c11.yml", result)
+        self.assertIn(".github/workflows/gui-native-e2e.yml", result)
         self.assertIn(".github/workflows/flexui-tango-headless.yml", result)
         self.assertIn(policy.RUNTIME, result)
 
@@ -139,7 +139,7 @@ class RequirementTests(unittest.TestCase):
         result = matrix(".github/actions/setup-ccache/action.yml")
         for filename in (
             "gcanvas-gles-runtime.yml",
-            "graphlayout-native.yml", "ui-core-c11.yml", "tango-core.yml",
+            "graphlayout-native.yml", "tango-core.yml",
             "flexui-tango-headless.yml", "markdown-highlighter-loader.yml",
         ):
             self.assertIn(".github/workflows/" + filename, result)

@@ -29,12 +29,6 @@ WORKFLOWS = {
         "Native C / ubuntu-latest", "Native C / macos-latest",
         "Native C / windows-latest",
     ),
-    "ui-core-c11.yml": (
-        "c11-headers", "C11 SDK compile / macos-15",
-        "C11 SDK compile / windows-2022",
-        "C11 native runtime / Windows x64 released Salts",
-        "C11 native runtime / macOS ARM64 released Salts",
-    ),
 }
 PUBLIC = ".github/workflows/public-dependency-contract.yml"
 RUNTIME = ".github/workflows/runtime-conformance.yml"
