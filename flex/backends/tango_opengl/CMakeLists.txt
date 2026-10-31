@@ -16,9 +16,14 @@ if(FLEX_BUILD_BACKEND_TANGO_OPENGL)
     message(FATAL_ERROR
       "TangoOpenGL requires an explicitly built gCanvas OpenGL backend")
   endif()
-  add_library(flex_backend_tango_opengl STATIC gl_presenter.cpp gl_fence.cpp gl_owner.cpp)
+  # The published-image source is a REAL SaltsCore FS consumer, not an
+  # in-gCanvas pathname reader or a fallback to the legacy Salts runtime.
+  # Fail-fast on absent released Salts::FS and conflicting package owners.
+  find_package(SaltsCore 0.1 CONFIG REQUIRED)
+  add_library(flex_backend_tango_opengl STATIC
+    gl_presenter.cpp gl_fence.cpp gl_owner.cpp published_source.cpp)
   target_link_libraries(flex_backend_tango_opengl
-    PUBLIC flex_tango_gl_frame flex_backend_opengl gCanvas::Core
+    PUBLIC flex_tango_gl_frame flex_backend_opengl gCanvas::Core Salts::FS
     PRIVATE flex_render_engine_gcanvas glad::glad)
   target_include_directories(flex_backend_tango_opengl
     PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)

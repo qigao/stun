@@ -11,6 +11,7 @@
 #include <GLFW/glfw3.h>
 #include <GL/glext.h>
 #include <gcanvas/backends/opengl.hpp>
+#include <backends/tango_opengl/published_source.h>
 // This existing Mesa/Xvfb-only test injects input at the X server, rather
 // than directly invoking an application callback or fabricating events.
 #define GLFW_EXPOSE_NATIVE_X11
@@ -26,6 +27,8 @@
 #include <cstdio>
 #include <cstdlib>
 #include <exception>
+#include <filesystem>
+#include <cerrno>
 #include <fstream>
 #include <iostream>
 #include <memory>
@@ -876,6 +879,204 @@ void actual_context_framebuffer_size(void* user, int* width, int* height) {
     glfwGetFramebufferSize(static_cast<GLFWwindow*>(user), width, height);
 }
 
+
+// This production-path adapter test is deliberately INSIDE the existing
+// native TangoGL/Mesa CTest. It requires an INSTALLED SaltsCore SDK with
+// one owner for Salts::FS, Salts::Unicode and Salts::Platform; the legacy
+// Salts SDK is not a substitute. There is no second file parser in gCanvas.
+struct RootedSaltsImagePublisher final {
+    std::unique_ptr<salts_fs_root_t, decltype(&salts_fs_root_close)> root{
+        nullptr, &salts_fs_root_close};
+    std::unique_ptr<salts_fs_root_writer_lease_t,
+                    decltype(&salts_fs_root_writer_lease_release)> writer{
+        nullptr, &salts_fs_root_writer_lease_release};
+    std::string prefix;
+    std::string highwater;
+    std::string current;
+    const std::string publisher_id = "mesa-publisher";
+    const std::string asset_id = "status-icon";
+    const std::array<std::string, 3> request_ids{
+        "00112233445566778899aabbccddeeff",
+        "10112233445566778899aabbccddeeff",
+        "20112233445566778899aabbccddeeff"};
+
+    explicit RootedSaltsImagePublisher(const std::string& evidence) {
+        const std::filesystem::path output(evidence);
+        const std::string host_root = output.parent_path().string();
+        require(!host_root.empty(),
+                "Real producer evidence must have an admitted host directory");
+        salts_fs_root_t* opened = nullptr;
+        require(salts_fs_root_open(host_root.c_str(), &opened) == 0 && opened,
+                "Could not admit actual Salts::FS producer root");
+        root.reset(opened);
+        // These are VERSIONS inside the same original admitted root, never
+        // absolute-path concatenations passed to the Salts FS API.
+        prefix = output.filename().string() + ".salts-image";
+        highwater = prefix + ".highwater";
+        current = prefix + ".current";
+        salts_fs_root_writer_lease_t* acquired = nullptr;
+        require(salts_fs_root_writer_lease_acquire(
+                    root.get(), highwater.c_str(), &acquired) == 0 && acquired,
+                "A second native Salts publisher owns this asset");
+        writer.reset(acquired);
+    }
+
+    void stage_bytes(const std::string& relative,
+                     const std::uint8_t* bytes, std::size_t size) {
+        require(bytes && size != 0u &&
+                size <= static_cast<std::size_t>((std::numeric_limits<int>::max)()),
+                "Native producer stage extent exceeds the bounded C11 API");
+        salts_fs_root_file_t* native = nullptr;
+        require(salts_fs_root_file_open(
+                    root.get(), relative.c_str(),
+                    SALTS_FS_O_WRONLY | SALTS_FS_O_CREAT | SALTS_FS_ROOT_O_EXCL,
+                    0600, &native) == 0 && native,
+                "Native Salts producer failed to create a unique staging file");
+        std::unique_ptr<salts_fs_root_file_t,
+                        decltype(&salts_fs_root_file_close)> file(
+            native, &salts_fs_root_file_close);
+        std::size_t written = 0u;
+        while (written < size) {
+            const int n = salts_fs_root_file_write(
+                file.get(), reinterpret_cast<const char*>(bytes + written),
+                size - written);
+            require(n > 0, "Native Salts producer could not write complete staged bytes");
+            written += static_cast<std::size_t>(n);
+        }
+        require(salts_fs_root_file_fsync(file.get()) == 0,
+                "Native Salts producer did not sync complete staging bytes");
+        const int closed = salts_fs_root_file_close(file.release());
+        require(closed == 0, "Native Salts producer could not close staged file");
+    }
+
+    std::array<gcanvas::PublishedEncodedImage, 3> publish_three(
+        const std::vector<std::uint8_t>& red,
+        const std::vector<std::uint8_t>& green,
+        std::size_t encoded_limit) {
+        std::array<gcanvas::PublishedEncodedImage, 3> frozen{};
+        for (std::size_t i = 0; i < frozen.size(); ++i) {
+            const auto& trusted = i == 1u ? green : red;
+            salts_fs_replace_state_t state = SALTS_FS_REPLACE_NOT_PUBLISHED;
+            std::uint64_t generation = 0u;
+            const std::string highwater_stage =
+                prefix + ".highwater-stage-" + std::to_string(i);
+            require(salts_fs_root_reserve_generation_recorded_owned(
+                        writer.get(), highwater_stage.c_str(),
+                        request_ids[i].c_str(), &generation, &state) == 0 &&
+                    state == SALTS_FS_REPLACE_PUBLISHED_DURABLE &&
+                    generation == i + 1u,
+                    "Salts native publisher did not durably reserve the next generation");
+
+            const std::string stage =
+                prefix + ".encoded-stage-" + std::to_string(generation);
+            const std::string revision =
+                prefix + ".revision-" + std::to_string(generation) + ".png";
+            stage_bytes(stage, trusted.data(), trusted.size());
+            state = SALTS_FS_REPLACE_NOT_PUBLISHED;
+            require(salts_fs_root_publish_file_noreplace(
+                        root.get(), stage.c_str(), revision.c_str(), &state) == 0 &&
+                    state == SALTS_FS_REPLACE_PUBLISHED_DURABLE,
+                    "Salts native publisher did not durably publish its immutable PNG");
+            // The CURRENT manifest is a separate durable FILE publication
+            // after the immutable generation was already admitted. Its
+            // source fields are supplied by this single write owner.
+            const std::string manifest =
+                "publisher=" + publisher_id + ";asset=" + asset_id +
+                ";generation=" + std::to_string(generation) +
+                ";request=" + request_ids[i] + ";revision=" + revision +
+                ";extent=" + std::to_string(trusted.size()) + "\n";
+            const std::string manifest_stage =
+                prefix + ".current-stage-" + std::to_string(generation);
+            stage_bytes(manifest_stage,
+                        reinterpret_cast<const std::uint8_t*>(manifest.data()),
+                        manifest.size());
+            state = SALTS_FS_REPLACE_NOT_PUBLISHED;
+            require(salts_fs_root_replace_file_durable(
+                        root.get(), manifest_stage.c_str(), current.c_str(), &state) == 0 &&
+                    state == SALTS_FS_REPLACE_PUBLISHED_DURABLE,
+                    "Salts native publisher did not durably update CURRENT after PNG");
+
+            const gcanvas::ImagePublicationIdentity id{
+                publisher_id, asset_id, generation};
+            frozen[i] = flex::tango_opengl::freeze_salts_published_image(
+                root.get(), revision, id, trusted, encoded_limit);
+            require(frozen[i].publication == id &&
+                    frozen[i].encoded_bytes == trusted,
+                    "Native file pin did not freeze the original published PNG");
+        }
+        // A->B->A is not an old-generation alias. An old request must keep
+        // generation 1 after CURRENT already points to generation 3.
+        salts_fs_replace_state_t state = SALTS_FS_REPLACE_NOT_PUBLISHED;
+        std::uint64_t replay = 0u;
+        const std::string replay_stage = prefix + ".highwater-old-replay";
+        require(salts_fs_root_reserve_generation_recorded_owned(
+                    writer.get(), replay_stage.c_str(),
+                    request_ids[0].c_str(), &replay, &state) == 0 &&
+                state == SALTS_FS_REPLACE_PUBLISHED_DURABLE && replay == 1u,
+                "Old Salts request reallocated generation after A-B-A");
+
+        const std::string oldest = prefix + ".revision-1.png";
+        const auto reread = flex::tango_opengl::freeze_salts_published_image(
+            root.get(), oldest, frozen[0].publication, red, encoded_limit);
+        require(reread.encoded_bytes == frozen[0].encoded_bytes,
+                "Old A1 bytes redirected by a later CURRENT generation");
+
+        // A trusted source WITNESS is required; a mismatched witness
+        // refuses before gCanvas/STB/GL upload. Caller-owned identity alone
+        // is not cryptographic authentication of a third-party publisher.
+        std::vector<std::uint8_t> false_witness = red;
+        false_witness[0] ^= 0x40u;
+        bool mismatch_denied = false;
+        try {
+            (void)flex::tango_opengl::freeze_salts_published_image(
+                root.get(), oldest, frozen[0].publication,
+                false_witness, encoded_limit);
+        } catch (const std::runtime_error&) {
+            mismatch_denied = true;
+        }
+        require(mismatch_denied,
+                "An untrusted encoded witness was accepted as published A1");
+        bool source_budget_denied = false;
+        try {
+            (void)flex::tango_opengl::freeze_salts_published_image(
+                root.get(), oldest, frozen[0].publication,
+                red, red.size() - 1u);
+        } catch (const std::length_error&) {
+            source_budget_denied = true;
+        }
+        require(source_budget_denied,
+                "Published PNG exceeded caller's bounded encoded source cap");
+
+        return frozen;
+    }
+
+    void retire_test_namespace() {
+        // These are isolated ephemeral native-test names. Production
+        // highwater, immutable journal and permanent reader-lock inodes
+        // MUST NOT be deleted/recycled after GC.
+        writer.reset();
+        for (std::size_t i = 0; i != 3u; ++i) {
+            const std::string version =
+                prefix + ".revision-" + std::to_string(i + 1u) + ".png";
+            require(salts_fs_root_revision_retire(
+                        root.get(), version.c_str()) == 0,
+                    "Salts GC failed after producer copied complete encoded revision");
+            const std::string pin_name = version + ".readers";
+            require(salts_fs_root_unlink(root.get(), pin_name.c_str()) == 0,
+                    "Isolated test could not clean revision lock namespace");
+            const std::string request = highwater + ".r." + request_ids[i];
+            require(salts_fs_root_unlink(root.get(), request.c_str()) == 0,
+                    "Isolated test could not clean historical journal");
+        }
+        require(salts_fs_root_unlink(root.get(), current.c_str()) == 0 &&
+                salts_fs_root_unlink(root.get(), highwater.c_str()) == 0,
+                "Isolated Salts source did not release CURRENT/highwater");
+        const std::string owner_name = highwater + ".writer";
+        require(salts_fs_root_unlink(root.get(), owner_name.c_str()) == 0,
+                "Isolated Salts source did not release writer-lock namespace");
+    }
+};
+
 // This invokes the REAL gCanvas ImageImplGl::upload_update() and destructor,
 // not a fake callback: before glTexSubImage2D, the native Context's admission
 // denies while its previous real GLsync remains unacknowledged. A native
@@ -1368,12 +1569,16 @@ void exercise_actual_gl_mutation_barrier(
     // PUBLISHER-OWNED REVISION CONTRACT: consume captured encoded content,
     // not a pathname or a second image decoder. Red publication A1 and A3
     // have identical source bytes but DISTINCT publisher generations.
-    const gcanvas::PublishedEncodedImage published_red_a1{
-        {"mesa-publisher", "status-icon", 1u}, trusted_red_encoded};
-    const gcanvas::PublishedEncodedImage published_green_b{
-        {"mesa-publisher", "status-icon", 2u}, trusted_green_encoded};
-    const gcanvas::PublishedEncodedImage published_red_a3{
-        {"mesa-publisher", "status-icon", 3u}, trusted_red_encoded};
+    // This source is no longer synthesized from local vectors and hardcoded
+    // generations. It is published through the installed native Salts::FS
+    // writer highwater, immutable revision/reader pin and CURRENT owner.
+    RootedSaltsImagePublisher native_publisher(evidence_prefix);
+    const auto native_published = native_publisher.publish_three(
+        trusted_red_encoded, trusted_green_encoded,
+        context->image_encoded_source_limit());
+    const auto& published_red_a1 = native_published[0];
+    const auto& published_green_b = native_published[1];
+    const auto& published_red_a3 = native_published[2];
     const int publisher_uploads_before = audit.uploads;
     std::vector<gcanvas::NativeGpuResourceId> publisher_inventory_before;
     require(context->native_gpu_resource_ids(publisher_inventory_before),
@@ -1443,6 +1648,7 @@ void exercise_actual_gl_mutation_barrier(
             "Mutable Image retained stale published source identity");
 
     context.reset(); // Actual ImageImplGl::~ and GL shader program deletion.
+    native_publisher.retire_test_namespace(); // Only after frozen GPU images.
     require(audit.deletes >= audit.uploads &&
             audit.program_deletes == audit.program_creates &&
             audit.program_deletes >= 1,
@@ -1468,6 +1674,8 @@ void exercise_actual_gl_mutation_barrier(
               << "TANGO_GL_TRUSTED_ENCODED_REVISION_REJECTED=1\n"
               << "TANGO_GL_CONCURRENT_INPLACE_VERSION_GUARD=1\n"
               << "TANGO_GL_PUBLISHED_ABA_REVISIONS=1\n"
+              << "TANGO_GL_SALTS_NATIVE_PUBLISHER_A1_B2_A3=1\n"
+              << "TANGO_GL_SALTS_FS_CHECKED_PIN_TO_FROZEN_GL=1\n"
               << "TANGO_GL_PUBLISHED_IMAGE_MUTATION_RETIRES_ID=1\n"
               << "TANGO_GL_ACTUAL_GL_DELETE_AUDIT=1\n";
 }
