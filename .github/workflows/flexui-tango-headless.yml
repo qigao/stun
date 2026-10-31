@@ -24,7 +24,7 @@ permissions:
   packages: read
 
 concurrency:
-  group: flexui-tango-cross-${{ github.event.pull_request.number || github.ref }}
+  group: flexui-tango-cross-${{ github.event.pull_request.number || github.ref }}-${{ github.event.action == 'labeled' && github.event.label.name != 'ci/full' && github.run_id || 'qualification' }}
   cancel-in-progress: true
 
 jobs:
@@ -244,6 +244,7 @@ jobs:
             -B build/flexui-tango-cross -G Ninja \
             -DCMAKE_BUILD_TYPE=Debug \
             -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreadedDLL \
+            -DCMAKE_MAP_IMPORTED_CONFIG_DEBUG=Release \
             "${compiler_args[@]}" \
             "-DCMAKE_TOOLCHAIN_FILE=$toolchain" \
             "-DVCPKG_TARGET_TRIPLET=$VCPKG_TRIPLET" \
