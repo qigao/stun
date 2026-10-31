@@ -4,6 +4,7 @@ name: FlexUI Tango cross-platform headless
 # target on every unrelated PR. No desktop window, GPU, Mono or .NET SDK.
 on:
   pull_request:
+    types: [opened, synchronize, reopened, labeled]
     paths:
       - 'flexUI/**'
       - 'flex/backends/tui/**'
@@ -23,16 +24,13 @@ permissions:
   packages: read
 
 concurrency:
-  group: flexui-tango-cross-${{ github.event.pull_request.number || github.ref }}
+  group: flexui-tango-cross-${{ github.event.pull_request.number || github.ref }}-${{ github.event.action == 'labeled' && github.event.label.name != 'ci/full' && github.run_id || 'qualification' }}
   cancel-in-progress: true
 
 jobs:
-  sdk-releases:
-    uses: ./.github/workflows/salts-sdk-releases.yml
-
   cross-platform:
     name: FlexUI/Tango headless / ${{ matrix.os }}
-    needs: sdk-releases
+    if: github.event.action != 'labeled' || github.event.label.name == 'ci/full'
     runs-on: ${{ matrix.os }}
     timeout-minutes: 40
     strategy:
@@ -47,8 +45,7 @@ jobs:
             triplet: x64-windows-static-md
     env:
       GH_TOKEN: ${{ github.token }}
-      SALTS_RELEASE: ${{ needs.sdk-releases.outputs.salts_release }}
-      SALTS_UTILS_RELEASE: ${{ needs.sdk-releases.outputs.salts_utils_release }}
+      UTILS_SOURCE_SHA: 768e2b76f4ae40289a9360541e17fe60ebcbd0e9
       SDK_RID: ${{ matrix.rid }}
       VCPKG_TRIPLET: ${{ matrix.triplet }}
     steps:
@@ -101,59 +98,36 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          echo "SALTS_ROOT=$RUNNER_TEMP/flexui-tango-sdk" >> "$GITHUB_ENV"
-          echo "PACKAGES_ROOT=$RUNNER_TEMP/flexui-tango-nuget" >> "$GITHUB_ENV"
           echo "VCPKG_ROOT=$GITHUB_WORKSPACE/.ci/vcpkg" >> "$GITHUB_ENV"
           echo "VCPKG_DEFAULT_BINARY_CACHE=$RUNNER_TEMP/vcpkg-cache" >> "$GITHUB_ENV"
           mkdir -p "$RUNNER_TEMP/vcpkg-cache"
 
-      - name: Download official Salts and SaltsUtils packages via curl
-        shell: bash
-        run: |
-          set -euo pipefail
-          curl_args=(--fail --silent --show-error --location --retry 3
-            --proto '=https' --proto-redir '=https'
-            --connect-timeout 15 --max-time 300
-            --user "$GITHUB_ACTOR:$GH_TOKEN")
-          curl "${curl_args[@]}" 'https://nuget.pkg.github.com/qigao/index.json' \
-            --output "$RUNNER_TEMP/flexui-tango-index.json"
-          package_base="$(jq -er '
-            [.resources[] | select(."@type" == "PackageBaseAddress/3.0.0") | ."@id"]
-            | unique
-            | if length == 1 and (.[0] | test("^https://nuget[.]pkg[.]github[.]com/qigao/[A-Za-z0-9/_-]*$"))
-              then .[0] else error("Unexpected NuGet content endpoint") end
-            ' "$RUNNER_TEMP/flexui-tango-index.json")"
-          fetch_package() {
-            local name="$1" version="${2#v}"
-            version="$(printf '%s' "$version" | tr '[:upper:]' '[:lower:]')"
-            [[ "$version" =~ ^[0-9]+[.][0-9]+[.][0-9]+(-[0-9a-z.]+)?$ ]]
-            local archive="$PACKAGES_ROOT/$name/$version/$name.$version.nupkg"
-            mkdir -p "$(dirname "$archive")"
-            curl "${curl_args[@]}" \
-              "${package_base%/}/$name/$version/$name.$version.nupkg" \
-              --output "$archive.part"
-            mv "$archive.part" "$archive"
-          }
-          fetch_package salts.native "$SALTS_RELEASE"
-          fetch_package saltsutils.native "$SALTS_UTILS_RELEASE"
+      - name: Restore cached installed source SDK
+        id: source_sdk_cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ runner.temp }}/stun-markdown-sdk
+          key: stun-source-sdk-v1-${{ runner.os }}-${{ runner.arch }}-${{ env.UTILS_SOURCE_SHA }}-${{ hashFiles('.github/scripts/restore-flexui-tango-sdk.py') }}
 
-      - name: Verify official release checksums and restore one SDK RID
+      - uses: actions/setup-python@v5
+        if: steps.source_sdk_cache.outputs.cache-hit != 'true'
+        with:
+          python-version: '3.12'
+
+      - name: Install canonical SDK from immutable producer source
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p "$RUNNER_TEMP/flexui-tango-checks/salts" \
-                   "$RUNNER_TEMP/flexui-tango-checks/utils"
-          gh release download "$SALTS_RELEASE" --repo qigao/salts \
-            --pattern SHA256SUMS --dir "$RUNNER_TEMP/flexui-tango-checks/salts"
-          gh release download "$SALTS_UTILS_RELEASE" --repo qigao/salts-utils \
-            --pattern SHA256SUMS --dir "$RUNNER_TEMP/flexui-tango-checks/utils"
           python .github/scripts/restore-flexui-tango-sdk.py \
-            --packages "$PACKAGES_ROOT" --sdk "$SALTS_ROOT" \
-            --rid "$SDK_RID" \
-            --salts-release "$SALTS_RELEASE" \
-            --salts-utils-release "$SALTS_UTILS_RELEASE" \
-            --salts-checksums "$RUNNER_TEMP/flexui-tango-checks/salts/SHA256SUMS" \
-            --salts-utils-checksums "$RUNNER_TEMP/flexui-tango-checks/utils/SHA256SUMS"
+            --build-source-sdk --sdk "$RUNNER_TEMP/stun-markdown-sdk" \
+            --source-sha "$UTILS_SOURCE_SHA" --rid "$SDK_RID" --export-env
+
+      - name: Retain completed source SDK before downstream qualification
+        if: steps.source_sdk_cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ runner.temp }}/stun-markdown-sdk
+          key: stun-source-sdk-v1-${{ runner.os }}-${{ runner.arch }}-${{ env.UTILS_SOURCE_SHA }}-${{ hashFiles('.github/scripts/restore-flexui-tango-sdk.py') }}
 
       - name: Checkout existing vcpkg baseline (minimal headless ports only)
         uses: actions/checkout@v4
@@ -271,6 +245,8 @@ jobs:
           cmake -S flexUI/tests/xml-runtime-standalone \
             -B build/flexui-tango-cross -G Ninja \
             -DCMAKE_BUILD_TYPE=Debug \
+            -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreadedDLL \
+            -DCMAKE_MAP_IMPORTED_CONFIG_DEBUG=Release \
             "${compiler_args[@]}" \
             "-DCMAKE_TOOLCHAIN_FILE=$toolchain" \
             "-DVCPKG_TARGET_TRIPLET=$VCPKG_TRIPLET" \
@@ -287,7 +263,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          targets=(test_plugin_abi test_plugin_host test_plugin_manifest test_plugin_create_unwind stun_gcanvas_window_host_source_compile test_ui_document test_desktop_application test_script_controller test_application_service_requests test_service_registry test_application_completion test_application_service_dispatcher chart_ui_test dotgraph_parser_test test_dotgraph_ui_xml test_markdown_widget test_flexui_tango_stream flexui_tui_streaming_demo)
+          targets=(stun_ui_core_test stun_markdown_adapter_test stun_markdown_tango_candidate_test test_plugin_abi test_plugin_host test_plugin_manifest test_plugin_create_unwind stun_gcanvas_window_host_source_compile test_ui_document test_desktop_application test_script_controller test_application_service_requests test_service_registry test_application_completion test_application_service_dispatcher chart_ui_test dotgraph_parser_test test_dotgraph_ui_xml test_markdown_widget test_flexui_tango_stream flexui_tui_streaming_demo)
           if [[ "$RUNNER_OS" == Windows ]]; then
             targets+=(test_tui_win32_console test_tui_win32_conpty)
           fi
@@ -313,7 +289,7 @@ jobs:
           fi
           ctest --test-dir build/flexui-tango-cross -C Debug \
             --no-tests=error --output-on-failure --timeout 120 \
-            -R "^(ChartUiTest|DotGraph(Xml|Parser)Test|test_(ui_document|desktop_application|script_controller|application_service_requests|service_registry|application_completion|application_service_dispatcher|plugin_abi|plugin_host|plugin_manifest|plugin_create_unwind|markdown_widget|flexui_tango_stream)|tui_streaming_demo_(smoke|posix_pty|win32_console|win32_conpty(_plain)?))"
+            -R "^(stun_ui_core_test|stun_markdown_adapter_test|stun_markdown_tango_candidate_test|ChartUiTest|DotGraph(Xml|Parser)Test|test_(ui_document|desktop_application|script_controller|application_service_requests|service_registry|application_completion|application_service_dispatcher|plugin_abi|plugin_host|plugin_manifest|plugin_create_unwind|markdown_widget|flexui_tango_stream)|tui_streaming_demo_(smoke|posix_pty|win32_console|win32_conpty(_plain)?))"
 
       - name: Repeat real POSIX PTY Home End and resize sessions
         if: runner.os == 'macOS'
@@ -371,7 +347,7 @@ jobs:
           retention-days: 3
           if-no-files-found: warn
           path: |
-            ${{ runner.temp }}/flexui-tango-sdk/flexui-tango-sdk-provenance.json
+            ${{ runner.temp }}/stun-markdown-sdk/sdk-provenance.json
             build/flexui-tango-cross/Testing/Temporary/LastTest.log
             build/flexui-tango-cross/Testing/Temporary/CTestCostData.txt
             ${{ runner.temp }}/stun-ccache-stats-flexui-tango.tsv

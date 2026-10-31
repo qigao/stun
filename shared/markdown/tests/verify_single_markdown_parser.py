@@ -1,97 +1,70 @@
 #!/usr/bin/env python3
-"""Static fast gate for Stun #172: the repository has one Markdown grammar.
-
-This supplements (never replaces) native C11 conformance and the real
-MarkdownWidget runtime tests.  The retired tools/md tree may retain only the
-immutable upstream CommonMark fixture and its explanatory README.
-"""
+"""Assert one Markdown grammar owner: imported SaltsUtils, no Stun fallback."""
 from pathlib import Path
 import re
 
-
 ROOT = Path(__file__).resolve().parents[3]
-
 
 def require(ok: bool, reason: str) -> None:
     if not ok:
-        raise SystemExit("MarkdownWidget canonical C11 contract: " + reason)
+        raise SystemExit("Stun canonical Markdown: " + reason)
 
-
-def read(path: str) -> str:
-    return (ROOT / path).read_text(encoding="utf-8-sig")
-
+def read(p: str) -> str:
+    return (ROOT / p).read_text(encoding="utf-8-sig")
 
 def main() -> None:
+    lib = read("shared/markdown/CMakeLists.txt")
+    adapter = read("shared/markdown/src/markdown_adapter.c")
+    ui = read("shared/markdown/src/ui_core.c")
+    header = read("shared/markdown/include/stun/ui_core.h")
     widget = read("flexUI/src/widgets/markdown_widget.cpp")
-    widget_header = read("flexUI/include/flexUI/widgets/markdown_widget.h")
-    widget_cmake = read("flexUI/CMakeLists.txt")
-    tests_cmake = read("flexUI/tests/CMakeLists.txt")
-    project_cmake = read("CMakeLists.txt")
-    demo = read("flexUI/examples/markdown_demo.cpp")
-    tools_cmake = read("tools/CMakeLists.txt")
-
-    fixture_root = ROOT / "tools/md"
-    retained = {
-        "tools/md/README.md",
-        "tools/md/test/spec.txt",
+    tests = read("shared/markdown/tests/CMakeLists.txt")
+    for name in ("markdown_c11.c", "markdown_entities.c",
+                 "markdown_entities.h", "markdown_entities_table.inc",
+                 "markdown_html.c"):
+        require(not (ROOT / "shared/markdown/src" / name).exists(),
+                "duplicate Markdown source: " + name)
+    require(not (ROOT / "tools/md/test/spec.txt").exists(),
+            "original CommonMark spec corpus must belong to SaltsUtils")
+    allowed = {
+        "CMakeLists.txt", "ui_core_test.c", "markdown_adapter_test.c",
+        "markdown_tango_candidate_test.c", "verify_single_markdown_parser.py",
     }
-    actual = {
-        path.relative_to(ROOT).as_posix()
-        for path in fixture_root.rglob("*")
-        if path.is_file()
-    }
-    require(actual == retained,
-            "retired tools/md contains parser/build files: " +
-            ", ".join(sorted(actual - retained)))
-    require(not re.search(r"add_subdirectory\s*\(\s*md\s*\)", tools_cmake),
-            "retired tools/md build reintroduced")
-
-    production_files = []
-    for root in (ROOT / "flexUI", ROOT / "tango", ROOT / "shared"):
-        production_files.extend(
-            path for path in root.rglob("*")
-            if path.is_file() and
-            (path.name == "CMakeLists.txt" or
-             path.suffix.lower() in {".c", ".cc", ".cpp", ".h", ".hpp"})
-        )
-    forbidden = re.compile(r"\bmd::parse\s*\(|\bmd_parser\b|"
-                           r"tools/md/(?:include|src)")
-    offenders = [
-        path.relative_to(ROOT).as_posix()
-        for path in production_files
-        if forbidden.search(path.read_text(encoding="utf-8-sig"))
-    ]
-    require(not offenders,
-            "legacy Markdown parser reference reintroduced: " +
-            ", ".join(offenders))
-
-    require(bool(re.search(r"^\s*#include <stun/markdown_c11\.h>",
-                           widget, re.M)), "missing canonical C11 header")
-    require(len(re.findall(r"\bstun_md_parse\s*\(", widget)) == 1,
-            "expected exactly one C11 parser call in MarkdownWidget")
-    require("stun_md_document_destroy" in widget,
-            "missing explicit C11 document ownership")
-    require("stun_md_document_view" in widget,
-            "missing typed RichDoc projection")
-    require(not re.search(r'^\s*#include\s*[<"](?:md|md4c)(?:[/\.]|>)',
-                          widget, re.M), "legacy parser header reintroduced")
-    require("vendor/md/include" not in widget_cmake,
-            "legacy Markdown headers exported by FlexUI")
-    require("vendor/md4c/src" not in tests_cmake,
-            "legacy MD4C header path retained by Widget test")
-    require(bool(re.search(r"target_link_libraries\s*\(\s*flexUI\s+"
-                           r"PRIVATE\s+Stun::UICore\s*\)", project_cmake)),
-            "canonical Stun::UICore missing from Widget runtime link")
-    require("src/widgets/markdown_widget.cpp" in widget_cmake,
-            "production widget source is missing")
-    require("test_markdown_widget.cpp" in tests_cmake and
-            "add_test(NAME test_markdown_widget" in tests_cmake,
-            "real Widget ownership/runtime test is unregistered")
-    require("MarkdownWidget" in widget_header and
-            "stun_md_parse" in widget and "MD4C" not in demo,
-            "public Widget/demo authority is inconsistent")
-    print("PASS: repository-wide single C11 RichDoc parser boundary (#172)")
-
+    actual = {p.name for p in (ROOT / "shared/markdown/tests").iterdir()
+              if p.is_file()}
+    require(actual == allowed, "parser-only tests still in Stun: "
+            + repr(sorted(actual - allowed)))
+    for target in ("Salts::MarkdownParser", "Salts::MarkdownHtml"):
+        require(target in lib, "missing imported " + target)
+    require("src/markdown_adapter.c" in lib, "missing forwarder")
+    require("src/markdown_c11.c" not in lib and
+            "src/markdown_html.c" not in lib,
+            "Stun Markdown grammar/renderer reintroduced")
+    require("salts_md_parse(" in adapter and
+            "salts_md_get_document_view(" in adapter,
+            "public Stun C API must forward into canonical parser")
+    require("salts_md_parse(" not in ui and
+            "stun_md_parse(" not in ui, "UI runtime must not parse Markdown")
+    require("#include <salts/markdown.h>" in header,
+            "Markdown types must alias canonical RichDoc types")
+    require("stun_md_parse(" in widget and
+            "stun_md_document_destroy" in widget and
+            "stun_md_document_view" in widget,
+            "real MarkdownWidget not using Stun forwarding entrypoint")
+    require("find_package(SaltsUtils CONFIG REQUIRED" in read("CMakeLists.txt"),
+            "Stun must have exactly one installed SaltsUtils dependency")
+    require("stun_markdown_adapter_test" in tests and
+            "stun_markdown_tango_candidate_test" in tests,
+            "Stun real consumer tests missing")
+    require("test_markdown_widget" in read("flexUI/tests/CMakeLists.txt"),
+            "real MarkdownWidget test missing")
+    for folder in (ROOT / "shared/markdown", ROOT / "flexUI"):
+        for f in folder.rglob("*"):
+            if not f.is_file() or f.suffix not in (".h",".hpp",".c",".cc",".cpp"):
+                continue
+            require(not re.search(r"\bmd::parse\s*\(",f.read_text(encoding="utf-8-sig")),
+                    "deprecated C++ grammar: " + str(f))
+    print("PASS: Stun uses one imported SaltsUtils Markdown frontend")
 
 if __name__ == "__main__":
     main()

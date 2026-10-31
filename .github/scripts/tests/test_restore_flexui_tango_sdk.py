@@ -2,6 +2,8 @@
 """Small adversarial tests for the official cross-platform SDK admission gate."""
 import hashlib
 import importlib.util
+import json
+import os
 import pathlib
 import stat
 import tempfile
@@ -9,6 +11,7 @@ import unittest
 import warnings
 import zipfile
 from types import SimpleNamespace
+from unittest.mock import patch
 
 
 SCRIPT = pathlib.Path(__file__).resolve().parents[1] / "restore-flexui-tango-sdk.py"
@@ -135,6 +138,89 @@ class RestoreSDKTest(unittest.TestCase):
         ], self.utils)
         with self.assertRaisesRegex(RuntimeError, "symlink"):
             module.restore(self.args())
+        self.assertFalse(self.sdk.exists())
+
+    def qualified_args(self):
+        candidate = self.root / "candidate"
+        entries = {
+            "salts/lib/cmake/Salts/SaltsConfig.cmake": b"salts-config",
+            "utils/include/salts/markdown.h": b"parser-header",
+            "utils/include/salts/markdown_html.h": b"html-header",
+            "utils/lib/cmake/SaltsUtils/SaltsUtilsConfig.cmake": b"utils-config",
+            "utils/lib/libmarkdown_parser.a": b"parser-archive",
+            "utils/lib/libmarkdown_html.a": b"html-archive",
+            "crypto/lib/cmake/Crypto/CryptoConfig.cmake": b"crypto-config",
+        }
+        for name, data in entries.items():
+            target = candidate / name
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(data)
+        manifest = dict(repository="qigao/salts-utils", source_sha="a" * 40,
+                        run_id="123", rid="macos-arm64", configuration="Release")
+        (candidate / "sdk-provenance.json").write_text(json.dumps(manifest))
+        return SimpleNamespace(qualified_sdk=candidate, sdk=self.sdk,
+            source_sha="a" * 40, run_id="123", rid=self.rid, export_env=False)
+
+    def test_qualified_installed_providers_preserve_bytes(self):
+        args = self.qualified_args()
+        module.restore_qualified(args)
+        self.assertEqual((self.sdk / "lib/libmarkdown_parser.a").read_bytes(),
+                         b"parser-archive")
+        self.assertTrue((self.sdk / "lib/cmake/Crypto/CryptoConfig.cmake").is_file())
+
+    def test_qualified_wrong_head_run_or_rid_never_installs(self):
+        args = self.qualified_args()
+        for key, bad in (("source_sha", "b" * 40), ("run_id", "124"),
+                         ("rid", "windows-x64")):
+            original = getattr(args, key)
+            setattr(args, key, bad)
+            with self.subTest(key=key), self.assertRaisesRegex(RuntimeError, "provenance mismatch"):
+                module.restore_qualified(args)
+            self.assertFalse(self.sdk.exists())
+            setattr(args, key, original)
+
+    def test_qualified_provider_collision_never_installs(self):
+        args = self.qualified_args()
+        conflict = args.qualified_sdk / "crypto/include/salts/markdown.h"
+        conflict.parent.mkdir(parents=True)
+        conflict.write_bytes(b"conflicting-provider")
+        with self.assertRaisesRegex(RuntimeError, "provider conflict"):
+            module.restore_qualified(args)
+        self.assertFalse(self.sdk.exists())
+
+    def test_qualified_missing_static_archive_never_installs(self):
+        args = self.qualified_args()
+        (args.qualified_sdk / "utils/lib/libmarkdown_html.a").unlink()
+        with self.assertRaisesRegex(RuntimeError, "missing libmarkdown_html.a"):
+            module.restore_qualified(args)
+        self.assertFalse(self.sdk.exists())
+
+    def test_source_cache_reuses_installed_bytes_without_network(self):
+        args = self.qualified_args()
+        module.restore_qualified(args)
+        args.export_env = True
+        exported = self.root / "environment.txt"
+        with patch.dict(os.environ, {"GITHUB_ENV": str(exported)}), \
+             patch.object(module.subprocess, "run", side_effect=AssertionError("cache hit rebuilt SDK")):
+            module.build_source_sdk(args)
+        self.assertEqual((self.sdk / "lib/libmarkdown_parser.a").read_bytes(), b"parser-archive")
+        values = dict(line.split("=", 1) for line in exported.read_text().splitlines())
+        self.assertEqual(set(values), {"SALTS_ROOT", "SALTS_UTILS_ROOT", "CRYPTO_ROOT", "CMAKE_PREFIX_PATH"})
+        self.assertEqual(set(values.values()), {str(self.sdk.resolve())})
+
+    def test_source_cache_wrong_sha_is_rejected_without_rebuilding(self):
+        args = self.qualified_args()
+        module.restore_qualified(args)
+        args.source_sha = "b" * 40
+        with patch.object(module.subprocess, "run", side_effect=AssertionError("invalid cache rebuilt SDK")), \
+             self.assertRaisesRegex(RuntimeError, "Source SDK provenance mismatch: source_sha"):
+            module.build_source_sdk(args)
+
+    def test_source_request_rejects_invalid_revision_before_build(self):
+        args = self.qualified_args()
+        args.source_sha = "master"
+        with self.assertRaisesRegex(RuntimeError, "Invalid source SDK SHA"):
+            module.build_source_sdk(args)
         self.assertFalse(self.sdk.exists())
 
 
