@@ -263,12 +263,20 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          targets=(stun_ui_core_test stun_markdown_adapter_test stun_markdown_tango_candidate_test test_plugin_abi test_plugin_host test_plugin_manifest test_plugin_create_unwind stun_gcanvas_window_host_source_compile test_ui_document test_desktop_application test_script_controller test_application_service_requests test_service_registry test_application_completion test_application_service_dispatcher chart_ui_test dotgraph_parser_test test_dotgraph_ui_xml test_markdown_widget test_flexui_tango_stream flexui_tui_streaming_demo)
+          targets=(flex test_ui_jinja_xml stun_ui_core_test stun_markdown_adapter_test stun_markdown_tango_candidate_test test_plugin_abi test_plugin_host test_plugin_manifest test_plugin_create_unwind stun_gcanvas_window_host_source_compile test_ui_document test_desktop_application test_script_controller test_application_service_requests test_service_registry test_application_completion test_application_service_dispatcher chart_ui_test dotgraph_parser_test test_dotgraph_ui_xml test_markdown_widget test_flexui_tango_stream flexui_tui_streaming_demo)
           if [[ "$RUNNER_OS" == Windows ]]; then
             targets+=(test_tui_win32_console test_tui_win32_conpty)
           fi
           cmake --build build/flexui-tango-cross --config Debug \
             --target "${targets[@]}" --parallel 2
+          # Install the actual Core/JinjaXml producer graph from this build.
+          # No separately generated installer or test consumer.
+          install_prefix="$RUNNER_TEMP/stun-flexui-sdk"
+          if [[ "$RUNNER_OS" == Windows ]]; then
+            install_prefix="$(cygpath -m "$install_prefix")"
+          fi
+          cmake --install build/flexui-tango-cross --config Debug \
+            --component FlexUICore --prefix "$install_prefix"
 
       - name: Validate bounded POSIX PTY diagnostic trace reader
         if: runner.os == 'macOS'
@@ -289,7 +297,7 @@ jobs:
           fi
           ctest --test-dir build/flexui-tango-cross -C Debug \
             --no-tests=error --output-on-failure --timeout 120 \
-            -R "^(stun_ui_core_test|stun_markdown_adapter_test|stun_markdown_tango_candidate_test|ChartUiTest|DotGraph(Xml|Parser)Test|test_(ui_document|desktop_application|script_controller|application_service_requests|service_registry|application_completion|application_service_dispatcher|plugin_abi|plugin_host|plugin_manifest|plugin_create_unwind|markdown_widget|flexui_tango_stream)|tui_streaming_demo_(smoke|posix_pty|win32_console|win32_conpty(_plain)?))"
+            -R "^(stun_ui_core_test|stun_markdown_adapter_test|stun_markdown_tango_candidate_test|ChartUiTest|DotGraph(Xml|Parser)Test|test_(ui_jinja_xml|ui_document|desktop_application|script_controller|application_service_requests|service_registry|application_completion|application_service_dispatcher|plugin_abi|plugin_host|plugin_manifest|plugin_create_unwind|markdown_widget|flexui_tango_stream)|tui_streaming_demo_(smoke|posix_pty|win32_console|win32_conpty(_plain)?))"
 
       - name: Repeat real POSIX PTY Home End and resize sessions
         if: runner.os == 'macOS'

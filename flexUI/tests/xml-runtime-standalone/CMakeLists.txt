@@ -21,6 +21,7 @@ set(BUILD_SHARED_LIBS OFF)
 set(NANOGUI_BUILD_EXAMPLES OFF)
 set(FLEXUI_ENABLE_PLUGINS ON)
 set(FLEXUI_ENABLE_TURBOSCRIPT OFF)
+set(FLEXUI_ENABLE_JINJA_XML ON CACHE BOOL "Real installed Salts Jinja XML" FORCE)
 foreach(option IN ITEMS GCANVAS_BUILD_OPENGL GCANVAS_BUILD_GLES
     GCANVAS_BUILD_ANDROID_EGL GCANVAS_BUILD_VULKAN GCANVAS_BUILD_SVG
     GCANVAS_BUILD_WINDOW GCANVAS_BUILD_TESTS GCANVAS_BUILD_EXAMPLES
@@ -68,6 +69,22 @@ foreach(test IN ITEMS test_ui_content_models test_ui_xml_admission test_ui_xml
   set_tests_properties(${test} PROPERTIES TIMEOUT 120)
   add_dependencies(stun_xml_runtime_qualification ${test})
 endforeach()
+# Same real installed Salts::JinjaCMeta -> immutable XML -> WidgetRegistry
+# path. Extend this original product CTest graph; no new consumer project.
+add_executable(test_ui_jinja_xml
+    "${STUN_ROOT}/flexUI/tests/test_ui_jinja_xml.cpp")
+target_link_libraries(test_ui_jinja_xml PRIVATE
+    FlexUI::JinjaXml Salts::JinjaCMeta Salts::TinyTest)
+add_test(NAME test_ui_jinja_xml COMMAND test_ui_jinja_xml)
+set_tests_properties(test_ui_jinja_xml PROPERTIES TIMEOUT 120)
+add_dependencies(stun_xml_runtime_qualification test_ui_jinja_xml)
+if(WIN32)
+  add_custom_command(TARGET test_ui_jinja_xml POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        $<TARGET_FILE:Salts::JinjaCMeta>
+        $<TARGET_FILE_DIR:test_ui_jinja_xml>)
+endif()
+
 # This exact production Controller/service boundary now includes the registry,
 # bounded MPSC mailbox, and owner-thread dispatcher; all run with ASan/UBSan
 # and a separate LSan build, plus Windows/macOS headless native CTest.

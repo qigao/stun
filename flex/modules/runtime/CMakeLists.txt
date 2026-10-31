@@ -11,9 +11,9 @@ target_include_directories(
   flex_runtime
   PUBLIC $<BUILD_INTERFACE:${FLEX_ENGINE_INCLUDE_DIR}>
          $<BUILD_INTERFACE:${FLEX_ENGINE_BINARY_DIR}>
-         ${CMAKE_SOURCE_DIR}/vendor/tinyfsm/
+         $<BUILD_INTERFACE:${CMAKE_SOURCE_DIR}/vendor/tinyfsm/>
          $<INSTALL_INTERFACE:include>
-         ${Stb_INCLUDE_DIR}
+         $<BUILD_INTERFACE:${Stb_INCLUDE_DIR}>
          $<BUILD_INTERFACE:${CMAKE_SOURCE_DIR}/vendor/mir>
          $<BUILD_INTERFACE:${CMAKE_SOURCE_DIR}/vendor/miniblas>)
 target_compile_features(flex_runtime PUBLIC cxx_std_17)

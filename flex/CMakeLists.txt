@@ -2,6 +2,8 @@
 cmake_minimum_required(VERSION 3.16)
 
 project(flex LANGUAGES C CXX)
+include(GNUInstallDirs)
+include(CMakePackageConfigHelpers)
 find_package(Stb REQUIRED)
 
 set(FLEX_ENGINE_ROOT "${CMAKE_CURRENT_SOURCE_DIR}")
@@ -107,15 +109,49 @@ set(FLEX_EXPORT_TARGETS
   flex_dsl
   flex_core)
 
-install(
-  TARGETS ${FLEX_EXPORT_TARGETS}
-  EXPORT flex-targets
-  LIBRARY DESTINATION lib
-  ARCHIVE DESTINATION lib
-  RUNTIME DESTINATION bin)
+# Export the production archives and their canonical bundled link owners.
+set_target_properties(flex PROPERTIES EXPORT_NAME Engine)
+set_target_properties(flex_expression PROPERTIES EXPORT_NAME Expression)
+set_target_properties(flex_animation PROPERTIES EXPORT_NAME Animation)
+set_target_properties(flex_render PROPERTIES EXPORT_NAME Render)
+set_target_properties(flex_compiler PROPERTIES EXPORT_NAME Compiler)
+set_target_properties(flex_runtime PROPERTIES EXPORT_NAME Runtime)
+set_target_properties(flex_dsl PROPERTIES EXPORT_NAME DSL)
+set_target_properties(flex_core PROPERTIES EXPORT_NAME Core)
+set_target_properties(mir_static PROPERTIES EXPORT_NAME MIR)
+set_target_properties(miniblas_linalg PROPERTIES EXPORT_NAME Miniblas)
 
 install(
-  DIRECTORY include/flex
-  DESTINATION include
+  TARGETS ${FLEX_EXPORT_TARGETS} mir_static miniblas_linalg
+  EXPORT flex-targets
+  LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT FlexUICore
+  ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT FlexUICore
+  RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+  COMPONENT FlexUICore)
+install(EXPORT flex-targets
+  FILE FlexTargets.cmake
+  NAMESPACE Flex::
+  DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/Flex"
+  COMPONENT FlexUICore)
+
+configure_package_config_file(
+  cmake/FlexConfig.cmake.in
+  "${CMAKE_CURRENT_BINARY_DIR}/FlexConfig.cmake"
+  INSTALL_DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/Flex")
+write_basic_package_version_file(
+  "${CMAKE_CURRENT_BINARY_DIR}/FlexConfigVersion.cmake"
+  VERSION "1.0.0" COMPATIBILITY SameMajorVersion)
+install(FILES "${CMAKE_CURRENT_BINARY_DIR}/FlexConfig.cmake"
+              "${CMAKE_CURRENT_BINARY_DIR}/FlexConfigVersion.cmake"
+  DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/Flex"
+  COMPONENT FlexUICore)
+install(DIRECTORY include/flex DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
+  COMPONENT FlexUICore
   PATTERN "bridge/renderer_*.h" EXCLUDE)
-install(FILES include/flex.h DESTINATION include)
+install(FILES include/flex.h
+  DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
+  COMPONENT FlexUICore)
+# Public Flex FSM headers include the upstream tinyfsm header.
+install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../vendor/tinyfsm/tinyfsm.hpp"
+  DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
+  COMPONENT FlexUICore)

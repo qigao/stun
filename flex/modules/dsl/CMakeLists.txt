@@ -42,7 +42,7 @@ target_include_directories(
   flex_compiler
   PUBLIC $<BUILD_INTERFACE:${FLEX_ENGINE_INCLUDE_DIR}>
          $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}>
-         ${CMAKE_SOURCE_DIR}/vendor/tinyfsm/
+         $<BUILD_INTERFACE:${CMAKE_SOURCE_DIR}/vendor/tinyfsm/>
          $<INSTALL_INTERFACE:include>)
 target_compile_features(flex_compiler PUBLIC cxx_std_17)
 target_link_libraries(flex_compiler PUBLIC Salts::Core Flex::Runtime)

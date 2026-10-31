@@ -24,6 +24,21 @@ target_include_directories(stun_ui_core PUBLIC
 target_link_libraries(stun_ui_core PUBLIC
     Salts::CMeta Salts::Unicode Salts::MarkdownParser Salts::MarkdownHtml)
 
+# Export ONLY the adapter in the actual product package. The canonical
+# MarkdownParser/Html implementation remains owned by installed SaltsUtils.
+set_target_properties(stun_ui_core PROPERTIES EXPORT_NAME UICore)
+include(GNUInstallDirs)
+install(TARGETS stun_ui_core EXPORT StunUICoreTargets
+  ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT FlexUICore
+  LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT FlexUICore
+  RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+  COMPONENT FlexUICore)
+install(EXPORT StunUICoreTargets FILE StunUICoreTargets.cmake
+  NAMESPACE Stun:: DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/FlexUI"
+  COMPONENT FlexUICore)
+install(DIRECTORY include/stun DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
+  COMPONENT FlexUICore)
+
 if(BUILD_TESTING)
     add_subdirectory(tests)
 endif()

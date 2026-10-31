@@ -211,6 +211,22 @@ target_include_directories(test_ui_xml PRIVATE ../include)
 set_target_properties(test_ui_xml PROPERTIES FOLDER "flexUI/tests")
 add_test(NAME test_ui_xml COMMAND test_ui_xml)
 
+# Only the explicitly enabled installed JinjaCMeta -> canonical XML path.
+if(FLEXUI_ENABLE_JINJA_XML)
+  add_executable(test_ui_jinja_xml test_ui_jinja_xml.cpp)
+  target_link_libraries(test_ui_jinja_xml PRIVATE
+      FlexUI::JinjaXml Salts::JinjaCMeta Salts::TinyTest)
+  flexui_configure_tinytest(test_ui_jinja_xml)
+  set_target_properties(test_ui_jinja_xml PROPERTIES FOLDER "flexUI/tests")
+  add_test(NAME test_ui_jinja_xml COMMAND test_ui_jinja_xml)
+  if(WIN32)
+    add_custom_command(TARGET test_ui_jinja_xml POST_BUILD
+      COMMAND ${CMAKE_COMMAND} -E copy_if_different
+          $<TARGET_FILE:Salts::JinjaCMeta>
+          $<TARGET_FILE_DIR:test_ui_jinja_xml>)
+  endif()
+endif()
+
 add_executable(test_widget_registry test_widget_registry.cpp)
 target_link_libraries(test_widget_registry PRIVATE flexUI)
 flexui_configure_tinytest(test_widget_registry)

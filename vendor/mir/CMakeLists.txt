@@ -49,7 +49,9 @@ set_target_properties(mir PROPERTIES FOLDER vendor/mir)
 
 # ------------------ LIBMIR -----------------------
 add_library(mir_static STATIC)
-target_link_libraries(mir_static PRIVATE mir)
+# The archive contains the MIR objects; exclude the build-only object library
+# from the installed target's transitive link interface.
+target_link_libraries(mir_static PRIVATE $<BUILD_INTERFACE:mir>)
 set_target_properties(mir_static PROPERTIES FOLDER vendor/mir)
 
 # ------------------ LIBMIR SO --------------------
