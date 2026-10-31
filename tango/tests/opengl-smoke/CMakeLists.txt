@@ -11,7 +11,9 @@ set(CMAKE_C_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-find_package(Salts CONFIG REQUIRED)
+# The old Salts::Core package cannot coexist with the new SaltsCore
+# package owner. Require one installed source-verified SaltsCore SDK.
+find_package(SaltsCore 0.1 CONFIG REQUIRED)
 find_package(Threads REQUIRED)
 find_package(ZLIB REQUIRED)
 find_package(Freetype REQUIRED)
@@ -26,8 +28,10 @@ find_path(TANGO_XTEST_INCLUDE_DIR NAMES X11/extensions/XTest.h REQUIRED)
 find_library(TANGO_XTEST_LIBRARY NAMES Xtst REQUIRED)
 find_path(STB_INCLUDE_DIRS NAMES stb_image.h PATH_SUFFIXES stb REQUIRED)
 find_path(Stb_INCLUDE_DIR NAMES stb_sprintf.h PATH_SUFFIXES stb REQUIRED)
-if(NOT TARGET Salts::Unicode OR NOT TARGET Salts::Platform)
-  message(FATAL_ERROR "Tango pixel smoke requires canonical Salts Unicode/Platform")
+if(NOT TARGET Salts::Unicode OR NOT TARGET Salts::Platform OR
+   NOT TARGET Salts::FS)
+  message(FATAL_ERROR
+    "Tango pixel smoke requires one installed SaltsCore Unicode/Platform/FS SDK")
 endif()
 if(NOT TARGET glad::glad OR NOT TARGET glfw)
   message(FATAL_ERROR "Tango pixel smoke requires canonical glad and GLFW targets")

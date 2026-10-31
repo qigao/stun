@@ -127,36 +127,40 @@ jobs:
           test -r /usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf
           sha256sum /usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf
 
-      - name: Download and verify exact released Salts Unicode/Platform SDK
+      - name: Checkout exact upstream SaltsCore FS/Unicode source owner
+        uses: actions/checkout@v4
+        with:
+          repository: qigao/salts-core
+          ref: e85de8ace9a04870d5eaf45b57950e502ed6bd8a
+          path: .ci/salts-core-source
+          persist-credentials: false
+
+      - name: Restore canonical re2c 4.6 Unicode 17 host generator
+        uses: qigao/vcpkg-cache/.github/actions/setup-re2c-tools@2e214ae44a3e3244eded5db6361194576356fc9e
+        with:
+          token: ${{ github.token }}
+
+      - name: Build and install original SaltsCore Unicode/Platform/FS SDK
         shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          version='v2.3.0-rc.17'
-          asset='Salts.Native.2.3.0-rc.17.nupkg'
-          expected="$(gh api "repos/qigao/salts/releases/tags/$version" |
-            jq -er --arg name "$asset" \
-              '[.assets[] | select(.name==$name) | .digest] |
-               if length==1 then .[0] else error("missing unique SDK digest") end')"
-          [[ "$expected" =~ ^sha256:[0-9a-f]{64}$ ]]
-          mkdir -p "$RUNNER_TEMP/tango-gl-sdk"
-          curl --fail --silent --show-error --location --retry 3 \
-            --proto '=https' --proto-redir '=https' \
-            --connect-timeout 15 --max-time 300 \
-            "https://github.com/qigao/salts/releases/download/$version/$asset" \
-            -o "$RUNNER_TEMP/tango-gl-sdk/salts.nupkg.part"
-          actual="$(sha256sum "$RUNNER_TEMP/tango-gl-sdk/salts.nupkg.part" |
-            awk '{print $1}')"
-          test "$actual" = "${expected#sha256:}"
-          mv "$RUNNER_TEMP/tango-gl-sdk/salts.nupkg.part" \
-            "$RUNNER_TEMP/tango-gl-sdk/salts.nupkg"
-          unzip -q "$RUNNER_TEMP/tango-gl-sdk/salts.nupkg" \
-            -d "$RUNNER_TEMP/tango-gl-sdk/unpacked"
-          root="$RUNNER_TEMP/tango-gl-sdk/unpacked/sdk/linux-x64"
-          test -f "$root/lib/cmake/Salts/SaltsConfig.cmake"
-          echo "SALTS_ROOT=$root" >> "$GITHUB_ENV"
-          echo "InstalledSDK=$version AssetSHA256=$actual"
+          expected='e85de8ace9a04870d5eaf45b57950e502ed6bd8a'
+          test "$(git -C .ci/salts-core-source rev-parse HEAD)" = "$expected"
+          test -f "$RE2C_ROOT/share/re2c/stdlib/unicode_properties.re"
+          test -f "$RE2C_ROOT/share/re2c/stdlib/unicode_categories.re"
+          sdk="$RUNNER_TEMP/tango-gl-saltscore-sdk"
+          cmake -S .ci/salts-core-source -B "$RUNNER_TEMP/tango-gl-saltscore-build" \
+            -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF \
+            -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ \
+            -DSALTSCORE_BUILD_UNICODE=ON -DSALTSCORE_BUILD_FS=ON \
+            "-DCMAKE_INSTALL_PREFIX=$sdk"
+          cmake --build "$RUNNER_TEMP/tango-gl-saltscore-build" --parallel 2
+          cmake --install "$RUNNER_TEMP/tango-gl-saltscore-build"
+          test -f "$sdk/lib/cmake/SaltsCore/SaltsCoreConfig.cmake"
+          test -f "$sdk/include/salts/fs.h"
+          test -f "$sdk/include/salts_unicode.h"
+          echo "SALTS_ROOT=$sdk" >> "$GITHUB_ENV"
+          echo "InstalledSaltsCoreSHA=$expected NativeFSAndUnicode=one-owner"
 
       - name: Checkout pinned native vcpkg packages baseline
         uses: actions/checkout@v4
@@ -199,6 +203,7 @@ jobs:
           set -euo pipefail
           cmake -S tango/tests/opengl-smoke -B build/tango-gl-native -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ \
             -DCMAKE_TOOLCHAIN_FILE="$GITHUB_WORKSPACE/.ci/vcpkg/scripts/buildsystems/vcpkg.cmake" \
             -DVCPKG_TARGET_TRIPLET=x64-linux -DVCPKG_MANIFEST_MODE=OFF \
             "-DCMAKE_PREFIX_PATH=$SALTS_ROOT" \
