@@ -45,8 +45,7 @@ jobs:
             triplet: x64-windows-static-md
     env:
       GH_TOKEN: ${{ github.token }}
-      UTILS_CANDIDATE_RUN: '41146302764'
-      UTILS_CANDIDATE_SHA: 8389508e71b216e56b808c2ca79621c64248c65b
+      UTILS_SOURCE_SHA: 768e2b76f4ae40289a9360541e17fe60ebcbd0e9
       SDK_RID: ${{ matrix.rid }}
       VCPKG_TRIPLET: ${{ matrix.triplet }}
     steps:
@@ -103,29 +102,32 @@ jobs:
           echo "VCPKG_DEFAULT_BINARY_CACHE=$RUNNER_TEMP/vcpkg-cache" >> "$GITHUB_ENV"
           mkdir -p "$RUNNER_TEMP/vcpkg-cache"
 
-      - name: Restore exact qualified installed Markdown SDK
+      - name: Restore cached installed source SDK
+        id: source_sdk_cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ runner.temp }}/stun-markdown-sdk
+          key: stun-source-sdk-v1-${{ runner.os }}-${{ runner.arch }}-${{ env.UTILS_SOURCE_SHA }}-${{ hashFiles('.github/scripts/restore-flexui-tango-sdk.py') }}
+
+      - uses: actions/setup-python@v5
+        if: steps.source_sdk_cache.outputs.cache-hit != 'true'
+        with:
+          python-version: '3.12'
+
+      - name: Install canonical SDK from immutable producer source
         shell: bash
         run: |
           set -euo pipefail
-          producer="repos/qigao/salts-utils/actions"
-          gh api "$producer/runs/$UTILS_CANDIDATE_RUN" \
-            --jq '.head_sha + " " + .status + " " + .conclusion + " " + .path' \
-            > "$RUNNER_TEMP/stun-utils-producer.txt"
-          test "$(cat "$RUNNER_TEMP/stun-utils-producer.txt")" = \
-            "$UTILS_CANDIDATE_SHA completed success .github/workflows/ci.yml"
-          IFS=$'\t' read -r artifact digest < <(
-            gh api "$producer/runs/$UTILS_CANDIDATE_RUN/artifacts" \
-              --jq ".artifacts | map(select(.name == \"salts-utils-qualified-sdk-$SDK_RID\" and .expired == false)) | if length == 1 then .[0] | [.id, .digest] | @tsv else error(\"missing unique qualified SDK\") end")
-          [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]
-          archive="$RUNNER_TEMP/stun-utils-qualified.zip"
-          gh api "$producer/artifacts/$artifact/zip" > "$archive"
-          python -c 'import hashlib,pathlib,sys; actual=hashlib.sha256(pathlib.Path(sys.argv[1]).read_bytes()).hexdigest(); assert "sha256:"+actual==sys.argv[2], "qualified SDK digest mismatch"' "$archive" "$digest"
-          candidate="$RUNNER_TEMP/stun-utils-qualified"
-          python -m zipfile -e "$archive" "$candidate"
           python .github/scripts/restore-flexui-tango-sdk.py \
-            --qualified-sdk "$candidate" --sdk "$RUNNER_TEMP/stun-markdown-sdk" \
-            --source-sha "$UTILS_CANDIDATE_SHA" --run-id "$UTILS_CANDIDATE_RUN" \
-            --rid "$SDK_RID" --export-env
+            --build-source-sdk --sdk "$RUNNER_TEMP/stun-markdown-sdk" \
+            --source-sha "$UTILS_SOURCE_SHA" --rid "$SDK_RID" --export-env
+
+      - name: Retain completed source SDK before downstream qualification
+        if: steps.source_sdk_cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ runner.temp }}/stun-markdown-sdk
+          key: stun-source-sdk-v1-${{ runner.os }}-${{ runner.arch }}-${{ env.UTILS_SOURCE_SHA }}-${{ hashFiles('.github/scripts/restore-flexui-tango-sdk.py') }}
 
       - name: Checkout existing vcpkg baseline (minimal headless ports only)
         uses: actions/checkout@v4

@@ -3,6 +3,7 @@
 import hashlib
 import importlib.util
 import json
+import os
 import pathlib
 import stat
 import tempfile
@@ -10,6 +11,7 @@ import unittest
 import warnings
 import zipfile
 from types import SimpleNamespace
+from unittest.mock import patch
 
 
 SCRIPT = pathlib.Path(__file__).resolve().parents[1] / "restore-flexui-tango-sdk.py"
@@ -191,6 +193,34 @@ class RestoreSDKTest(unittest.TestCase):
         (args.qualified_sdk / "utils/lib/libmarkdown_html.a").unlink()
         with self.assertRaisesRegex(RuntimeError, "missing libmarkdown_html.a"):
             module.restore_qualified(args)
+        self.assertFalse(self.sdk.exists())
+
+    def test_source_cache_reuses_installed_bytes_without_network(self):
+        args = self.qualified_args()
+        module.restore_qualified(args)
+        args.export_env = True
+        exported = self.root / "environment.txt"
+        with patch.dict(os.environ, {"GITHUB_ENV": str(exported)}), \
+             patch.object(module.subprocess, "run", side_effect=AssertionError("cache hit rebuilt SDK")):
+            module.build_source_sdk(args)
+        self.assertEqual((self.sdk / "lib/libmarkdown_parser.a").read_bytes(), b"parser-archive")
+        values = dict(line.split("=", 1) for line in exported.read_text().splitlines())
+        self.assertEqual(set(values), {"SALTS_ROOT", "SALTS_UTILS_ROOT", "CRYPTO_ROOT", "CMAKE_PREFIX_PATH"})
+        self.assertEqual(set(values.values()), {str(self.sdk.resolve())})
+
+    def test_source_cache_wrong_sha_is_rejected_without_rebuilding(self):
+        args = self.qualified_args()
+        module.restore_qualified(args)
+        args.source_sha = "b" * 40
+        with patch.object(module.subprocess, "run", side_effect=AssertionError("invalid cache rebuilt SDK")), \
+             self.assertRaisesRegex(RuntimeError, "Source SDK provenance mismatch: source_sha"):
+            module.build_source_sdk(args)
+
+    def test_source_request_rejects_invalid_revision_before_build(self):
+        args = self.qualified_args()
+        args.source_sha = "master"
+        with self.assertRaisesRegex(RuntimeError, "Invalid source SDK SHA"):
+            module.build_source_sdk(args)
         self.assertFalse(self.sdk.exists())
 
 
