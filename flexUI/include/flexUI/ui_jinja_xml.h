@@ -37,6 +37,10 @@ struct UiJinjaXmlError {
   int template_line = 0;         // Original Jinja source 1-based location.
   int template_column = 0;       // Zero means no original-source mapping.
   UiDocumentError ui_error;      // GENERATED XML location for XML/registry failures.
+  // Zero-based byte offset in the staged XML; may equal its length at EOF.
+  // npos means the canonical XML compiler reported no valid position.
+  // This is NOT a Jinja source or author-template byte/column offset.
+  std::size_t generated_offset = std::string_view::npos;
   std::string message;
 
   explicit operator bool() const noexcept { return stage != UiJinjaXmlStage::None; }
@@ -69,8 +73,10 @@ struct UiJinjaXmlCompileResult {
 //
 // TemplateCompile/TemplateRender errors retain the ORIGINAL Jinja source
 // name and byte/line/column. XmlCompile/RegistryValidate errors retain the
-// name plus GENERATED XML line/column in ui_error. Do NOT claim the latter
-// points into the original template; render-time source maps are not available.
+// name plus GENERATED XML line/byte-column in ui_error. generated_offset
+// resolves that location in the exact staged XML, or npos if absent/invalid.
+// None of these coordinates points into the original author template; the
+// upstream trace SDK and author-source mapping remain independent gates.
 UiJinjaXmlCompileResult compile_jinja_ui_xml(
     std::string_view template_name,
     std::string_view template_source,

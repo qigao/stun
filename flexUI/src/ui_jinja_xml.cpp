@@ -85,6 +85,26 @@ std::pair<int, int> original_position(std::string_view source,
   return {static_cast<int>(line), static_cast<int>(column)};
 }
 
+
+/* Inverse of the canonical XML parser's xml_source_span: one byte per column,
+ * including CR, with only LF advancing the line. No XML scanning/parser or
+ * original Jinja source heuristics. The generated stage owns all input bytes. */
+std::size_t generated_xml_byte_offset(std::string_view generated,
+                                      int line, int column) noexcept {
+  if (line <= 0 || column <= 0) return std::string_view::npos;
+  std::size_t begin = 0;
+  for (int row = 1; row < line; ++row) {
+    const std::size_t lf = generated.find('\n', begin);
+    if (lf == std::string_view::npos) return std::string_view::npos;
+    begin = lf + 1u;
+  }
+  const std::size_t lf = generated.find('\n', begin);
+  const std::size_t end = lf == std::string_view::npos ? generated.size() : lf;
+  const std::size_t zero_based_column = static_cast<std::size_t>(column - 1);
+  if (zero_based_column > end - begin) return std::string_view::npos;
+  return begin + zero_based_column;
+}
+
 UiJinjaXmlCompileResult fail(
     UiJinjaXmlStage stage, std::string message,
     int template_status = 0, std::size_t offset = 0,
@@ -194,18 +214,26 @@ UiJinjaXmlCompileResult compile_jinja_ui_xml(
       std::string_view(stage.bytes.data(), stage.bytes.size()), limits);
   if (!parsed) {
     const std::string detail = parsed.error.message;
-    return reject(UiJinjaXmlStage::XmlCompile,
+    auto rejected = reject(UiJinjaXmlStage::XmlCompile,
                 "rendered Jinja XML rejected: " + detail,
                 0, 0, std::move(parsed.error));
+    rejected.error.generated_offset = generated_xml_byte_offset(
+        std::string_view(stage.bytes.data(), stage.bytes.size()),
+        rejected.error.ui_error.line, rejected.error.ui_error.column);
+    return rejected;
   }
 
   // Typed tag/content preflight is required BEFORE any Widget factory or Box
   // mutation. Full property/child-role schema remains tracked in Stun #16.
   if (auto schema_error = registry.validate(*parsed.program, limits)) {
     const std::string detail = schema_error.message;
-    return reject(UiJinjaXmlStage::RegistryValidate,
+    auto rejected = reject(UiJinjaXmlStage::RegistryValidate,
                 "rendered Jinja XML schema rejected: " + detail,
                 0, 0, std::move(schema_error));
+    rejected.error.generated_offset = generated_xml_byte_offset(
+        std::string_view(stage.bytes.data(), stage.bytes.size()),
+        rejected.error.ui_error.line, rejected.error.ui_error.column);
+    return rejected;
   }
 
   UiJinjaXmlCompileResult result;
