@@ -12,7 +12,10 @@ on:
       - '.github/scripts/tests/test_gui_native_e2e.py'
       - '.github/scripts/tests/test_gui_native_suite.py'
       - '.github/scripts/gui_runtime/**'
+      - '.github/scripts/restore-flexui-tango-sdk.py'
+      - '.github/scripts/tests/test_restore_flexui_tango_sdk.py'
       - 'flexUI/examples/desktop_editor/**'
+      - 'shared/markdown/**'
   workflow_dispatch:
 
 permissions:
@@ -32,6 +35,8 @@ jobs:
     timeout-minutes: 70
     env:
       GH_TOKEN: ${{ github.token }}
+      UTILS_SOURCE_SHA: 768e2b76f4ae40289a9360541e17fe60ebcbd0e9
+      SDK_RID: linux-x64
       GITHUB_TOKEN: ${{ github.token }}
       LIBGL_ALWAYS_SOFTWARE: '1'
       GALLIUM_DRIVER: llvmpipe
@@ -87,8 +92,6 @@ jobs:
         run: |
           set -euo pipefail
           # Reproduce the same native dependency graph for each source HEAD.
-          echo "salts=v2.3.0-rc.17" >> "$GITHUB_OUTPUT"
-          echo "utils=v4.3.0-rc.11" >> "$GITHUB_OUTPUT"
           echo "chttp=v2.1.0-rc.6" >> "$GITHUB_OUTPUT"
           # Stable released TurboScript Host ABI v1; never guess a master build.
           echo "turboscript=v3.0.10" >> "$GITHUB_OUTPUT"
@@ -96,8 +99,6 @@ jobs:
       - name: Download and SHA256-verify official native SDK archives via curl
         shell: bash
         env:
-          SALTS_RELEASE: ${{ steps.releases.outputs.salts }}
-          UTILS_RELEASE: ${{ steps.releases.outputs.utils }}
           CHTTP_RELEASE: ${{ steps.releases.outputs.chttp }}
           TURBOSCRIPT_RELEASE: ${{ steps.releases.outputs.turboscript }}
         run: |
@@ -119,26 +120,45 @@ jobs:
             test "$actual" = "${expected#sha256:}"
             mv "$destination.part" "$destination"
           }
-          salted="${SALTS_RELEASE#v}"
-          utilv="${UTILS_RELEASE#v}"
           chttpv="${CHTTP_RELEASE#v}"
           turboscriptv="${TURBOSCRIPT_RELEASE#v}"
-          fetch_release_asset qigao/salts "$SALTS_RELEASE" "Salts.Native.$salted.nupkg" \
-            "$RUNNER_TEMP/stun-gui/packages/salts.nupkg"
-          fetch_release_asset qigao/salts-utils "$UTILS_RELEASE" "SaltsUtils.Native.$utilv.nupkg" \
-            "$RUNNER_TEMP/stun-gui/packages/utils.nupkg"
           fetch_release_asset qigao/chttp "$CHTTP_RELEASE" "CHttp.Native.$chttpv.nupkg" \
             "$RUNNER_TEMP/stun-gui/packages/chttp.nupkg"
           fetch_release_asset qigao/TurboScript "$TURBOSCRIPT_RELEASE" "TurboScript.Native.$turboscriptv.nupkg" \
             "$RUNNER_TEMP/stun-gui/packages/turboscript.nupkg"
-          for package in salts utils chttp turboscript; do
+          for package in chttp turboscript; do
             unzip -q "$RUNNER_TEMP/stun-gui/packages/$package.nupkg" \
               -d "$RUNNER_TEMP/stun-gui/$package"
           done
-          echo "SALTS_ROOT=$RUNNER_TEMP/stun-gui/salts/sdk/linux-x64" >> "$GITHUB_ENV"
-          echo "SALTS_UTILS_ROOT=$RUNNER_TEMP/stun-gui/utils/sdk/linux-x64" >> "$GITHUB_ENV"
           echo "CHTTP_ROOT=$RUNNER_TEMP/stun-gui/chttp/sdk/linux-x64" >> "$GITHUB_ENV"
           echo "TURBOSCRIPT_ROOT=$RUNNER_TEMP/stun-gui/turboscript/sdk/linux-x64" >> "$GITHUB_ENV"
+
+      - name: Restore cached installed source SDK
+        id: source_sdk_cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ runner.temp }}/stun-markdown-sdk
+          key: stun-source-sdk-v1-${{ runner.os }}-${{ runner.arch }}-${{ env.UTILS_SOURCE_SHA }}-${{ hashFiles('.github/scripts/restore-flexui-tango-sdk.py') }}
+
+      - uses: actions/setup-python@v5
+        if: steps.source_sdk_cache.outputs.cache-hit != 'true'
+        with:
+          python-version: '3.12'
+
+      - name: Install canonical SDK from immutable producer source
+        shell: bash
+        run: |
+          set -euo pipefail
+          python .github/scripts/restore-flexui-tango-sdk.py \
+            --build-source-sdk --sdk "$RUNNER_TEMP/stun-markdown-sdk" \
+            --source-sha "$UTILS_SOURCE_SHA" --rid "$SDK_RID" --export-env
+
+      - name: Retain completed source SDK before downstream qualification
+        if: steps.source_sdk_cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ runner.temp }}/stun-markdown-sdk
+          key: stun-source-sdk-v1-${{ runner.os }}-${{ runner.arch }}-${{ env.UTILS_SOURCE_SHA }}-${{ hashFiles('.github/scripts/restore-flexui-tango-sdk.py') }}
 
       - name: Checkout pinned vcpkg baseline
         uses: actions/checkout@v4
@@ -231,11 +251,23 @@ jobs:
             -DRE2C_EXECUTABLE="$STUN_GUI_RE2C" \
             -DSTB_INCLUDE_DIRS="$GITHUB_WORKSPACE/.ci/vcpkg/installed/x64-linux/include"
 
-      - name: Build the actual production GUI and document service plugin
+      - name: Build the actual production GUI and native Markdown consumers
         shell: bash
         run: |
           set -euo pipefail
-          cmake --build build/stun-gui --target flexui_desktop_editor --parallel 2
+          cmake --build build/stun-gui --target \
+            flexui_desktop_editor stun_ui_core_test stun_markdown_adapter_test \
+            stun_markdown_tango_candidate_test test_markdown_widget --parallel 2
+
+      - name: Qualify one Markdown grammar and real C11 Tango Widget consumers
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 shared/markdown/tests/verify_single_markdown_parser.py
+          export LD_LIBRARY_PATH="$SALTS_ROOT/lib:$SALTS_UTILS_ROOT/lib:$CHTTP_ROOT/lib:$TURBOSCRIPT_ROOT/lib:${LD_LIBRARY_PATH:-}"
+          ctest --test-dir build/stun-gui --no-tests=error \
+            --output-on-failure --timeout 120 \
+            -R '^(stun_ui_core_test|stun_markdown_adapter_test|stun_markdown_tango_candidate_test|test_markdown_widget)$'
 
       - name: Qualify real Stun Save and reject wrong visible states
         shell: bash
@@ -256,6 +288,8 @@ jobs:
           retention-days: 3
           if-no-files-found: warn
           path: |
+            ${{ runner.temp }}/stun-markdown-sdk/sdk-provenance.json
+            build/stun-gui/Testing/Temporary/LastTest.log
             build/stun-gui/gui-e2e/
             build/stun-gui/CMakeFiles/CMakeConfigureLog.yaml
 

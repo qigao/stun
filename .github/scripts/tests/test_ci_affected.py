@@ -87,6 +87,12 @@ def verify_labeled_workflow_isolation():
             assert ("jobs:\n  screenshot:\n"
                     "    name: GUI visible screenshot / Linux X11\n"
                     + guard + "\n") in source, path.name
+        elif path.name == "flexui-tango-headless.yml":
+            # The existing native matrix is guarded directly; no extra
+            # runner is needed only to admit a ci/full label event.
+            assert ("jobs:\n  cross-platform:\n"
+                    "    name: FlexUI/Tango headless / ${{ matrix.os }}\n"
+                    + guard + "\n") in source, path.name
         else:
             assert "jobs:\n  changes:\n" + guard + "\n" in source, path.name
         group = next(
@@ -106,9 +112,9 @@ def verify_labeled_workflow_isolation():
         "gcanvas-gles-runtime.yml",
         "graphlayout-native.yml",
         "gui-native-e2e.yml",
+        "flexui-tango-headless.yml",
         "public-dependency-contract.yml",
         "runtime-conformance.yml",
-        "ui-core-c11.yml",
     }, guarded
     assert master_push_and_dispatch.issubset(set(guarded)), guarded
 

@@ -51,7 +51,7 @@ set_target_properties(test_style_engine PROPERTIES FOLDER "flexUI/tests")
 add_test(NAME test_style_engine COMMAND test_style_engine)
 
 add_executable(test_style_property_registry test_style_property_registry.cpp
-               ${CMAKE_SOURCE_DIR}/flex/tests/cmeta_types_peer.cpp)
+               ${CMAKE_CURRENT_LIST_DIR}/../../flex/tests/cmeta_types_peer.cpp)
 target_link_libraries(test_style_property_registry PRIVATE flexUI)
 flexui_configure_tinytest(test_style_property_registry)
 target_include_directories(test_style_property_registry PRIVATE ../include)
@@ -80,7 +80,7 @@ set_target_properties(test_css_typed_apply PROPERTIES FOLDER "flexUI/tests")
 add_test(NAME test_css_typed_apply COMMAND test_css_typed_apply)
 
 add_executable(test_typed_transition test_typed_transition.cpp
-               ${CMAKE_SOURCE_DIR}/flex/tests/cmeta_types_peer.cpp)
+               ${CMAKE_CURRENT_LIST_DIR}/../../flex/tests/cmeta_types_peer.cpp)
 target_link_libraries(test_typed_transition PRIVATE flexUI)
 flexui_configure_tinytest(test_typed_transition)
 target_include_directories(test_typed_transition PRIVATE ../include)
@@ -88,7 +88,7 @@ set_target_properties(test_typed_transition PROPERTIES FOLDER "flexUI/tests")
 add_test(NAME test_typed_transition COMMAND test_typed_transition)
 
 add_executable(test_typed_animation test_typed_animation.cpp
-               ${CMAKE_SOURCE_DIR}/flex/tests/cmeta_types_peer.cpp)
+               ${CMAKE_CURRENT_LIST_DIR}/../../flex/tests/cmeta_types_peer.cpp)
 target_link_libraries(test_typed_animation PRIVATE flexUI)
 flexui_configure_tinytest(test_typed_animation)
 target_include_directories(test_typed_animation PRIVATE ../include)
@@ -211,8 +211,7 @@ target_include_directories(test_ui_xml PRIVATE ../include)
 set_target_properties(test_ui_xml PROPERTIES FOLDER "flexUI/tests")
 add_test(NAME test_ui_xml COMMAND test_ui_xml)
 
-# Optional real Jinja/CMeta source compiler regression; controlled by the
-# explicit feature, not by probing whether a target happened to exist.
+# Only the explicitly enabled installed JinjaCMeta -> canonical XML path.
 if(FLEXUI_ENABLE_JINJA_XML)
   add_executable(test_ui_jinja_xml test_ui_jinja_xml.cpp)
   target_link_libraries(test_ui_jinja_xml PRIVATE
@@ -227,7 +226,6 @@ if(FLEXUI_ENABLE_JINJA_XML)
           $<TARGET_FILE_DIR:test_ui_jinja_xml>)
   endif()
 endif()
-
 
 add_executable(test_widget_registry test_widget_registry.cpp)
 target_link_libraries(test_widget_registry PRIVATE flexUI)

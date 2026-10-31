@@ -67,25 +67,7 @@ static int test_live_cmeta_reflection(void) {
     return 0;
 }
 
-typedef struct visit_context {
-    size_t count;
-    size_t text_bytes;
-    bool stop_early;
-} visit_context;
-
-static stun_ui_status collect_block(const stun_ui_block *block, const char *text,
-                                    size_t bytes, void *raw_context) {
-    visit_context *ctx = (visit_context *)raw_context;
-    if (!block || (!text && bytes)) return STUN_UI_INVALID_ARGUMENT;
-    ctx->count += 1u;
-    if (block->kind == STUN_UI_BLOCK_HEADING ||
-        block->kind == STUN_UI_BLOCK_CODE_FENCE)
-        ctx->text_bytes += bytes;
-    return ctx->stop_early && ctx->count == 2u
-        ? STUN_UI_INVALID_ARGUMENT : STUN_UI_OK;
-}
-
-static int test_layout_and_document_ir(void) {
+static int test_layout_ir(void) {
     const stun_ui_rect rects[] = {
         { 100u, STUN_UI_PARENT_NONE, 0.f, 0.f, 80.f, 24.f },
         { 101u, 0u, 0.f, 0.f, 20.f, 24.f },
@@ -104,36 +86,6 @@ static int test_layout_and_document_ir(void) {
     CHECK(stun_ui_rect_view_validate(&scene, 2u) ==
           STUN_UI_INVALID_ARGUMENT);
 
-    static const char source[] = "# Hello\n\n```c\nint x;\n```\n";
-    const char *heading = strstr(source, "Hello");
-    const char *code = strstr(source, "int x;");
-    CHECK(heading != NULL && code != NULL);
-    const size_t h0 = (size_t)(heading - source);
-    const size_t c0 = (size_t)(code - source);
-    const stun_ui_block blocks[] = {
-        {1u, STUN_UI_PARENT_NONE, STUN_UI_BLOCK_DOCUMENT, 0u,
-            0u, sizeof(source) - 1u},
-        {2u, 0u, STUN_UI_BLOCK_HEADING, 1u, h0, h0 + 5u},
-        {3u, 0u, STUN_UI_BLOCK_CODE_FENCE, 0u, c0, c0 + 6u}
-    };
-    stun_ui_document_view doc = {source, sizeof(source) - 1u, blocks, 3u};
-    CHECK(stun_ui_document_validate(&doc, 3u) == STUN_UI_OK);
-
-    visit_context ctx = {0};
-    CHECK(stun_ui_document_visit(&doc, 3u, collect_block, &ctx) == STUN_UI_OK);
-    CHECK(ctx.count == 3u && ctx.text_bytes == 11u);
-
-    ctx = (visit_context){.stop_early = true};
-    CHECK(stun_ui_document_visit(&doc, 3u, collect_block, &ctx) ==
-          STUN_UI_INVALID_ARGUMENT);
-    CHECK(ctx.count == 2u);
-
-    const stun_ui_block invalid[] = {
-        {1u, STUN_UI_PARENT_NONE, STUN_UI_BLOCK_DOCUMENT, 0u, 0u, 2u},
-        {2u, 0u, STUN_UI_BLOCK_HEADING, 1u, 0u, 999u}
-    };
-    doc = (stun_ui_document_view){source, sizeof(source) - 1u, invalid, 2u};
-    CHECK(stun_ui_document_validate(&doc, 2u) == STUN_UI_INVALID_ARGUMENT);
     return 0;
 }
 
@@ -173,7 +125,7 @@ static int test_scope_cleanup(void) {
 
 int main(void) {
     if (test_live_cmeta_reflection()) return 1;
-    if (test_layout_and_document_ir()) return 1;
+    if (test_layout_ir()) return 1;
     if (test_scope_cleanup()) return 1;
     puts("Stun C11 UI semantic core: tests passed");
     return 0;

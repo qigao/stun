@@ -53,6 +53,11 @@ add_subdirectory("${STUN_ROOT}/shared/layout" graphlayout)
 
 set(BUILD_TESTING ON)
 add_custom_target(stun_xml_runtime_qualification)
+# Qualify the real C11 forwarding ABI and Tango projection with the same
+# installed SDK as MarkdownWidget, without enabling unrelated module suites.
+add_subdirectory("${STUN_ROOT}/shared/markdown/tests" markdown-consumer-tests)
+add_dependencies(stun_xml_runtime_qualification
+  stun_ui_core_test stun_markdown_adapter_test stun_markdown_tango_candidate_test)
 foreach(test IN ITEMS test_ui_content_models test_ui_xml_admission test_ui_xml
     test_ui_document test_widget_registry test_desktop_application
     test_script_controller test_application_service_requests
@@ -64,8 +69,8 @@ foreach(test IN ITEMS test_ui_content_models test_ui_xml_admission test_ui_xml
   set_tests_properties(${test} PROPERTIES TIMEOUT 120)
   add_dependencies(stun_xml_runtime_qualification ${test})
 endforeach()
-# Actual installed Salts::JinjaCMeta -> immutable UI XML -> real Widget
-# factory. No synthetic consumer, provider substitution or separate CI workflow.
+# Same real installed Salts::JinjaCMeta -> immutable XML -> WidgetRegistry
+# path. Extend this original product CTest graph; no new consumer project.
 add_executable(test_ui_jinja_xml
     "${STUN_ROOT}/flexUI/tests/test_ui_jinja_xml.cpp")
 target_link_libraries(test_ui_jinja_xml PRIVATE

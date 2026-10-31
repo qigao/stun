@@ -1,10 +1,8 @@
-# CommonMark conformance fixture
+# Retired Stun Markdown grammar
 
-This directory no longer contains a Markdown parser or a build target.
-`test/spec.txt` is the unmodified CommonMark 0.31.2, 652-example fixture used
-by the canonical C11 RichDoc semantic and HTML gates under
-`shared/markdown/tests`.
-
-Production Markdown parsing belongs exclusively to `Stun::UICore` and
-`stun_md_parse()`. Do not add parser sources, headers, CMake targets, or a
-fallback grammar here.
+All normative CommonMark 0.31.2 fixtures, immutable expected HTML baselines
+and parser-generic tests are moved to `qigao/salts-utils/parser/markdown/tests`
+under https://github.com/qigao/salts-utils/issues/722.
+There is no Stun-local parser, CommonMark spec corpus or fallback implementation.
+Stun `stun_md_*` functions are consumer-side forwarders to the one
+SaltsUtils C11 parser and renderer.

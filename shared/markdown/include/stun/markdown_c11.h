@@ -7,7 +7,7 @@
 extern "C" {
 #endif
 
-/* Canonical native C11 Markdown grammar and RichDoc ownership.
+/* Stun compatibility API over the single SaltsUtils C11 Markdown grammar.
  *
  * Since Stun PR #231, MarkdownWidget calls stun_md_parse() directly. There
  * is no alternate C++/MD4C parser or error fallback in that production path.
@@ -21,7 +21,7 @@ extern "C" {
  * CommonMark/GFM feature and compatibility claims must be established by
  * independent fixtures; this API does not promise universal conformance.
  */
-typedef struct stun_md_document stun_md_document;
+typedef salts_md_document stun_md_document;
 
 /* Bounded node and source admission; zero budgets are invalid.
  * Input is an exact-length byte sequence, not a NUL-terminated string.
