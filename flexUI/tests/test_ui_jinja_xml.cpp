@@ -266,9 +266,11 @@ spec("FlexUI uses installed JinjaCMeta only as a staged XML author compiler") {
     check(wrong_widget.error.stage == flexUI::UiJinjaXmlStage::RegistryValidate);
     check(wrong_widget.error.ui_error.code == flexUI::UiDocumentErrorCode::UnknownElementTag);
     check_equal(wrong_widget.error.ui_error.line, 4);
-    check_equal(wrong_widget.error.ui_error.column, 5);
-    check_equal(wrong_widget.error.generated_offset, generated.find("<unsupported"));
-    check(wrong_widget.error.generated_offset != author.find("<unsupported"));
+    // PugiXML's canonical offset_debug() points to the first NAME byte
+    // after '<', not to the '<' delimiter. Never normalize that position.
+    check_equal(wrong_widget.error.ui_error.column, 6);
+    check_equal(wrong_widget.error.generated_offset, generated.find("<unsupported") + 1u);
+    check(wrong_widget.error.generated_offset != author.find("<unsupported") + 1u);
     check_equal(wrong_widget.error.template_line, 0);
     check_equal(wrong_widget.error.template_column, 0);
 
@@ -278,10 +280,10 @@ spec("FlexUI uses installed JinjaCMeta only as a staged XML author compiler") {
     const auto utf8 = compile(one_line, StudioInputs{1});
     check_false(static_cast<bool>(utf8));
     check(utf8.error.stage == flexUI::UiJinjaXmlStage::RegistryValidate);
-    check_equal(utf8.error.generated_offset, one_line.find("<unsupported"));
+    check_equal(utf8.error.generated_offset, one_line.find("<unsupported") + 1u);
     check_equal(utf8.error.ui_error.line, 1);
     check_equal(static_cast<std::size_t>(utf8.error.ui_error.column),
-                one_line.find("<unsupported") + 1u);
+                one_line.find("<unsupported") + 2u);
   }
 
   it("does not invent generated or original source offsets for errors with no position") {
