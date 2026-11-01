@@ -60,6 +60,16 @@ add_subdirectory("${STUN_ROOT}/flex" flex)
 add_subdirectory("${STUN_ROOT}/flexUI" flexUI)
 target_link_libraries(flexUI PRIVATE Stun::UICore)
 
+# The real GraphCanvas is supplied by the existing Charts::UI target and
+# Stun's ONE GraphLayout kernel, not by an alternative GUI-only solver.
+# This existing native GUI qualification builds production sources directly.
+set(_gui_build_testing ${BUILD_TESTING})
+set(BUILD_TESTING OFF)
+add_subdirectory("${STUN_ROOT}/shared/layout" graphlayout)
+set(BUILD_TESTING ${_gui_build_testing})
+add_subdirectory("${STUN_ROOT}/charts/ui" chart_ui)
+target_link_libraries(flexui_desktop_editor PRIVATE Charts::UI)
+
 # The official TurboScript.Native SDK depends on the ONE canonical
 # SaltsUtils DataBind DSO. Linux linkers reject its unresolved data_bind_*
 # and cserde_* symbols unless that published provider is on the consumer

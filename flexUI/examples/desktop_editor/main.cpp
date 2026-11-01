@@ -1,4 +1,6 @@
 #include "native_timeline_widget.h"
+#include <charts/ui/graph_canvas_widget.h>
+#include <charts/ui/graph_edit_document.h>
 
 #include <flexUI/application_turboscript.h>
 #include <flexUI/gcanvas_plugin_window_host.h>
@@ -115,9 +117,13 @@ flexUI::PluginHostBuildResult build_plugins(const std::filesystem::path &plugin_
 }
 
 flexUI::DesktopApplicationBuilder application_builder(
-    SourceBundle sources, std::shared_ptr<flexui_demo::TimelineState> timeline_model) {
+    SourceBundle sources, std::shared_ptr<flexui_demo::TimelineState> timeline_model,
+    std::shared_ptr<charts::ui::GraphEditDocument> graph_model) {
   auto registry = flexUI::WidgetRegistry::builtins();
   if (auto error = flexui_demo::register_timeline_widget(registry, std::move(timeline_model))) {
+    throw std::runtime_error(error.message);
+  }
+  if (auto error = charts::ui::register_graph_canvas_widget(registry, std::move(graph_model))) {
     throw std::runtime_error(error.message);
   }
   flexUI::TurboScriptControllerOptions script_options;
@@ -163,7 +169,8 @@ bool pump_until_saved(flexUI::GCanvasPluginWindowHost &host, const flexUI::Eleme
 }
 
 int run_smoke(flexUI::GCanvasPluginWindowHost &host,
-              const std::shared_ptr<flexui_demo::TimelineState> &timeline_model) {
+              const std::shared_ptr<flexui_demo::TimelineState> &timeline_model,
+              const std::shared_ptr<charts::ui::GraphEditDocument> &graph_model) {
   auto pumped = host.pump_once(0.0);
   if (!pumped) {
     return fail("initial frame", pumped.error.message);
@@ -199,6 +206,79 @@ int run_smoke(flexUI::GCanvasPluginWindowHost &host,
   }
   pumped = host.pump_once(0.0);
   if (!pumped) return fail("native timeline repaint", pumped.error.message);
+
+  // Drive the real linked GraphCanvas through precisely the same application
+  // EventDispatcher/Box as Timeline, TurboScript, and PluginHost. Ports are
+  // measured on node boundaries, and a connection is only published after
+  // actual Stun::GraphOrthogonal routing + independent geometry validation.
+  auto *graph = host.application().box().get_by_id("graph");
+  if (!graph || !graph->widget) {
+    return fail("native graph lookup", "registered GraphCanvas is absent");
+  }
+  const float gx = graph->absolute_x(), gy = graph->absolute_y();
+  auto connect_down = flexUI::Event::mouse_down(gx + 180.0F, gy + 72.0F);
+  if (!host.application().dispatch_event(connect_down) || !connect_down.handled ||
+      host.application().box().capturing_element() != graph) {
+    return fail("graph port down", "source port did not capture the connection");
+  }
+  auto connect_move = flexUI::Event::mouse_move(gx + 440.0F, gy + 72.0F);
+  auto connect_up = flexUI::Event::mouse_up(gx + 440.0F, gy + 72.0F);
+  if (!host.application().dispatch_event(connect_move) || !connect_move.handled ||
+      !host.application().dispatch_event(connect_up) || !connect_up.handled ||
+      host.application().box().capturing_element() != nullptr ||
+      graph_model->snapshot().edges.size() != 1 ||
+      graph_model->snapshot().routes.size() != 1) {
+    return fail("graph connect", "measured native ports did not produce a committed route");
+  }
+
+  const auto original_revision = graph_model->snapshot().revision;
+  auto drag_down = flexUI::Event::mouse_down(gx + 95.0F, gy + 56.0F);
+  if (!host.application().dispatch_event(drag_down) || !drag_down.handled ||
+      host.application().box().capturing_element() != graph) {
+    return fail("graph move down", "node did not capture its drag");
+  }
+  auto drag_move = flexUI::Event::mouse_move(gx + 127.0F, gy + 70.0F);
+  if (!host.application().dispatch_event(drag_move) || !drag_move.handled ||
+      !graph_model->has_preview() ||
+      graph_model->snapshot().revision != original_revision ||
+      graph_model->snapshot().nodes.front().x != 55.0) {
+    return fail("graph preview", "drag changed committed geometry before MouseUp");
+  }
+  auto drag_up = flexUI::Event::mouse_up(gx + 127.0F, gy + 70.0F);
+  if (!host.application().dispatch_event(drag_up) || !drag_up.handled ||
+      host.application().box().capturing_element() != nullptr ||
+      graph_model->snapshot().nodes.front().x != 87.0 ||
+      graph_model->snapshot().revision != original_revision + 1) {
+    return fail("graph commit", "drag did not commit exactly one versioned node edit");
+  }
+  auto undo = flexUI::Event::key_down(flexUI::KeyCode::Z,
+                                     static_cast<int>(flexUI::KeyMod::Control));
+  auto redo = flexUI::Event::key_down(flexUI::KeyCode::Y,
+                                     static_cast<int>(flexUI::KeyMod::Control));
+  if (!host.application().dispatch_event(undo) || !undo.handled ||
+      graph_model->snapshot().nodes.front().x != 55.0 ||
+      !host.application().dispatch_event(redo) || !redo.handled ||
+      graph_model->snapshot().nodes.front().x != 87.0 ||
+      graph_model->snapshot().routes.size() != 1) {
+    return fail("graph Undo/Redo", "committed route and node history did not replay");
+  }
+
+  auto cancel_down = flexUI::Event::mouse_down(gx + 120.0F, gy + 70.0F);
+  auto cancel_move = flexUI::Event::mouse_move(gx + 145.0F, gy + 76.0F);
+  if (!host.application().dispatch_event(cancel_down) ||
+      !host.application().dispatch_event(cancel_move) ||
+      !graph_model->has_preview()) {
+    return fail("graph cancel setup", "active drag preview not created");
+  }
+  auto escape = flexUI::Event::key_down(flexUI::KeyCode::Escape);
+  if (!host.application().dispatch_event(escape) || !escape.handled ||
+      graph_model->has_preview() ||
+      host.application().box().capturing_element() != nullptr ||
+      graph_model->snapshot().nodes.front().x != 87.0) {
+    return fail("graph Escape", "cancel did not restore immutable committed geometry");
+  }
+  pumped = host.pump_once(0.0);
+  if (!pumped) return fail("native graph repaint", pumped.error.message);
 
   auto *save = host.application().box().get_by_id("save");
   if (save == nullptr) {
@@ -270,8 +350,19 @@ int main(int argc, char **argv) {
   }
 
   auto timeline_model = std::make_shared<flexui_demo::TimelineState>();
+  auto graph_model = std::make_shared<charts::ui::GraphEditDocument>();
+  charts::ui::GraphEditSnapshot initial_graph;
+  initial_graph.nodes = {{"beta", 440.0, 36.0, 120.0, 72.0, false},
+                         {"alpha", 55.0, 36.0, 125.0, 72.0, false}};
+  initial_graph.ports = {
+      {"sink", "beta", stun::graphlayout::Side::West, 0.0, 36.0, false},
+      {"source", "alpha", stun::graphlayout::Side::East, 125.0, 36.0, true}};
+  if (const auto status = graph_model->initialize(std::move(initial_graph)); !status) {
+    return fail("graph source", status.message);
+  }
   auto built = flexUI::GCanvasPluginWindowHost::create(
-      window_config(smoke), application_builder(std::move(sources), timeline_model),
+      window_config(smoke),
+      application_builder(std::move(sources), timeline_model, graph_model),
       std::move(plugins),
       capability_manifest(), kShutdownTimeout);
   if (!built) {
@@ -279,7 +370,7 @@ int main(int argc, char **argv) {
   }
 
   if (smoke) {
-    return run_smoke(*built.host, timeline_model);
+    return run_smoke(*built.host, timeline_model, graph_model);
   }
   const auto ran = built.host->run();
   return ran ? EXIT_SUCCESS : fail("desktop loop", ran.error.message);
