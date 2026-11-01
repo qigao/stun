@@ -336,6 +336,19 @@ GraphEditStatus GraphEditDocument::validate_and_route(
     GraphRouteUpdateStats &stats) {
   stats = {};
   if (!next.groups.empty()) {
+    // Normalize stable ID ordering in the persisted document as well as the
+    // transient solver view; input permutations cannot affect Undo replay.
+    const auto by_id = [](const auto &a, const auto &b) {
+      return a.id < b.id;
+    };
+    std::sort(next.nodes.begin(), next.nodes.end(), by_id);
+    std::sort(next.ports.begin(), next.ports.end(), by_id);
+    std::sort(next.edges.begin(), next.edges.end(), by_id);
+    std::sort(next.groups.begin(), next.groups.end(), by_id);
+    for (auto &group : next.groups) {
+      std::sort(group.member_node_ids.begin(), group.member_node_ids.end());
+      std::sort(group.proxy_ports.begin(), group.proxy_ports.end(), by_id);
+    }
     GraphEditSnapshot visible;
     const auto projected = project_visible_graph(next, visible);
     if (!projected) return projected;
