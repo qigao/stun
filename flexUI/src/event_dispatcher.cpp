@@ -558,6 +558,13 @@ void EventDispatcher::set_focus(Element *elem) {
     if (!consumed) {
       notify_framework_event(e, focused_);
     }
+    // A FocusOut callback may release a native canvas' pointer-capture
+    // request. Reconcile the HOST capture immediately rather than leaving
+    // a retired interaction as the next mouse event's target.
+    if (capturing_ == focused_ &&
+        (!focused_->widget || !focused_->widget->wants_mouse_capture())) {
+      capturing_ = nullptr;
+    }
   }
 
   focused_ = elem;

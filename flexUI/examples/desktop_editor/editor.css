@@ -46,7 +46,7 @@
 
 #document {
   width: 832px;
-  height: 200px;
+  height: 36px;
   padding: 16px;
   background-color: #111827;
   color: #e5e7eb;
@@ -54,6 +54,15 @@
   border-width: 1px;
   border-radius: 10px;
   font-size: 16px;
+}
+
+#graph {
+  width: 832px;
+  height: 160px;
+  background-color: #172033;
+  border-color: #334155;
+  border-width: 1px;
+  border-radius: 8px;
 }
 
 #timeline {

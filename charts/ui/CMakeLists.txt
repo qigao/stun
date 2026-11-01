@@ -3,6 +3,8 @@ add_library(chart_ui STATIC
     src/infographic_frame.cpp
     src/dotgraph_frame.cpp
     src/flex_node_plot_widget.cpp
+    src/graph_edit_document.cpp
+    src/graph_canvas_widget.cpp
 )
 
 # XML remains the authoring asset; the native SDK embeds its bytes at configure
@@ -36,7 +38,9 @@ target_include_directories(chart_ui
 )
 # The adapter includes <flex.h>, whose public DSL headers depend on the
 # generated flex_parser_gen.h exported by the Flex::Compiler target.
-target_link_libraries(chart_ui PUBLIC flexUI flex)
+add_library(Charts::UI ALIAS chart_ui)
+target_link_libraries(chart_ui PUBLIC flexUI flex Stun::GraphCore
+    PRIVATE Stun::GraphOrthogonal Stun::GraphPortBindings)
 target_compile_features(chart_ui PUBLIC cxx_std_17)
 set_target_properties(chart_ui PROPERTIES FOLDER "Modules/Charts/UI")
 

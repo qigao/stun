@@ -256,7 +256,7 @@ jobs:
         run: |
           set -euo pipefail
           cmake --build build/stun-gui --target \
-            flexui_desktop_editor stun_ui_core_test stun_markdown_adapter_test \
+            flexui_desktop_editor chart_ui_test stun_ui_core_test stun_markdown_adapter_test \
             stun_markdown_tango_candidate_test test_markdown_widget --parallel 2
 
       - name: Qualify one Markdown grammar and real C11 Tango Widget consumers
@@ -267,9 +267,9 @@ jobs:
           export LD_LIBRARY_PATH="$SALTS_ROOT/lib:$SALTS_UTILS_ROOT/lib:$CHTTP_ROOT/lib:$TURBOSCRIPT_ROOT/lib:${LD_LIBRARY_PATH:-}"
           ctest --test-dir build/stun-gui --no-tests=error \
             --output-on-failure --timeout 120 \
-            -R '^(stun_ui_core_test|stun_markdown_adapter_test|stun_markdown_tango_candidate_test|test_markdown_widget)$'
+            -R '^(ChartUiTest|stun_ui_core_test|stun_markdown_adapter_test|stun_markdown_tango_candidate_test|test_markdown_widget)$'
 
-      - name: Qualify native timeline drag/snap and real visible Save states
+      - name: Qualify native timeline and GraphCanvas drag/connect/undo plus visible Save states
         shell: bash
         run: |
           set -euo pipefail
@@ -277,7 +277,8 @@ jobs:
           # Drive the actual built desktop editor: this GUI runtime builds
           # the production executable but does not register its optional
           # test_flexui_desktop_editor_smoke CTest target.
-          # --smoke verifies pointer capture, drag/snap, repaint and service.
+          # --smoke verifies one Box capture path for Timeline and GraphCanvas,
+          # committed route geometry, Undo/Redo, paint, and real service.
           xvfb-run -a -s '-screen 0 1280x900x24 -nolisten tcp' \
             build/stun-gui/bin/flexui_desktop_editor --smoke
           xvfb-run -a -s '-screen 0 1280x900x24 -nolisten tcp' \
