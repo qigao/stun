@@ -1375,6 +1375,250 @@ GraphEditSnapshot sibling_group_fixture() {
 // M2h: nested Ungroup is a single application-owned graph edit, not a
 // document reimport. The canonical GraphLayout still validates the same
 // original topology and measured named boundaries before Undo publication.
+// M2i: multi-node selection is view-local only; GroupId authoring edits the
+// ONE logical GraphEditDocument and never infers a hidden route proxy.
+spec("GraphCanvas M2i measured multi-selection group authoring") {
+  it("groups two original leaves as one native Undo transaction") {
+    GraphEditDocument doc;
+    check_true(static_cast<bool>(doc.initialize(example())));
+    const auto baseline = doc.snapshot();
+    check_equal(baseline.groups.size(), 0U);
+    check_equal(baseline.nodes.size(), 2U);
+    check_equal(baseline.edges.size(), 1U);
+    const auto grouped = doc.group_nodes("my-group", {"beta", "alpha"});
+    check_true(static_cast<bool>(grouped));
+    if (!grouped) return;
+    check_equal(doc.undo_count(), 1U);
+    check_equal(doc.snapshot().revision, baseline.revision + 1);
+    check_equal(doc.snapshot().groups.size(), 1U);
+    const auto *group = group_by_id(doc, "my-group");
+    check_not_null(group);
+    if (!group) return;
+    check_equal(group->x, 39.0);
+    check_equal(group->y, 20.0);
+    check_equal(group->width, 537.0);
+    check_equal(group->height, 104.0);
+    check_equal(group->parent_group_id, "");
+    check_false(group->collapsed);
+    check_equal(group->member_node_ids.size(), 2U);
+    check_equal(group->member_node_ids[0], "alpha");
+    check_equal(group->member_node_ids[1], "beta");
+    check_equal(group->proxy_ports.size(), 0U); // No inferred boundary ports
+    check_equal(doc.snapshot().nodes.size(), baseline.nodes.size());
+    check_equal(doc.snapshot().ports.size(), baseline.ports.size());
+    check_equal(doc.snapshot().edges.size(), baseline.edges.size());
+    check_equal(doc.snapshot().routes.size(), baseline.routes.size());
+    check_equal(doc.snapshot().edges.front().source_port, "source");
+    check_equal(node_by_id(doc, "alpha")->x, 55.0);
+    check_equal(node_by_id(doc, "beta")->x, 440.0);
+    check_true(route_points_identical(
+        doc.snapshot().routes[0], baseline.routes[0]));
+
+    // The original edge is internal, so this particular measured group can
+    // collapse safely even with zero boundary bindings. Original IDs remain.
+    check_true(static_cast<bool>(doc.set_group_collapsed("my-group", true)));
+    GraphEditSnapshot visible;
+    check_true(static_cast<bool>(doc.visible_snapshot(visible)));
+    check_equal(visible.nodes.size(), 1U);
+    check_equal(visible.edges.size(), 0U);
+    check_equal(doc.snapshot().edges.size(), 1U);
+    check_true(static_cast<bool>(doc.undo()));
+    check_false(group_by_id(doc, "my-group")->collapsed);
+    check_true(static_cast<bool>(doc.undo()));
+    check_equal(doc.snapshot().groups.size(), 0U);
+    check_equal(doc.snapshot().routes.size(), baseline.routes.size());
+    check_true(route_points_identical(
+        doc.snapshot().routes[0], baseline.routes[0]));
+    check_equal(doc.undo_count(), 0U);
+    check_true(static_cast<bool>(doc.redo()));
+    check_equal(doc.snapshot().groups.size(), 1U);
+    check_equal(group_by_id(doc, "my-group")->member_node_ids.size(), 2U);
+    check_true(static_cast<bool>(doc.redo()));
+    check_true(group_by_id(doc, "my-group")->collapsed);
+  }
+
+  it("creates a nested group from directly owned leaves without moving geometry") {
+    GraphEditDocument doc;
+    check_true(static_cast<bool>(doc.initialize(nested_group_fixture())));
+    const auto original = doc.snapshot();
+    const auto grouped = doc.group_nodes("pair", {"b", "a"}, 8.0);
+    check_true(static_cast<bool>(grouped));
+    if (!grouped) return;
+    const auto *pair = group_by_id(doc, "pair");
+    check_not_null(pair);
+    if (!pair) return;
+    check_equal(pair->parent_group_id, "inner");
+    check_equal(pair->x, 2.0);
+    check_equal(pair->y, 17.0);
+    check_equal(pair->width, 154.0);
+    check_equal(pair->height, 52.0);
+    check_equal(group_by_id(doc, "inner")->member_node_ids.size(), 0U);
+    check_equal(group_by_id(doc, "inner")->proxy_ports.size(), 1U);
+    check_equal(group_by_id(doc, "inner")->proxy_ports[0].original_port_id, "b-out");
+    charts::ui::GraphEditNode world;
+    check_true(static_cast<bool>(doc.group_world_rect("pair", world)));
+    check_equal(world.x, 72.0);
+    check_equal(world.y, 87.0);
+    check_equal(node_by_id(doc, "a")->x, 80.0);
+    check_equal(node_by_id(doc, "b")->x, 170.0);
+    check_equal(doc.snapshot().routes.size(), original.routes.size());
+    for (std::size_t i = 0; i < original.routes.size(); ++i)
+      check_true(route_points_identical(
+          doc.snapshot().routes[i], original.routes[i]));
+    // bc crosses the new group boundary. A collapse WITHOUT authored
+    // measured b-out boundary MUST fail rather than guessing a port.
+    const auto rejected = doc.set_group_collapsed("pair", true);
+    check_false(static_cast<bool>(rejected));
+    check(rejected.error == GraphEditError::InvalidInput);
+    check_equal(doc.undo_count(), 1U);
+    check_equal(doc.snapshot().revision, original.revision + 1);
+    check_false(group_by_id(doc, "pair")->collapsed);
+    check_true(static_cast<bool>(doc.undo()));
+    check_null(group_by_id(doc, "pair"));
+    check_equal(group_by_id(doc, "inner")->member_node_ids.size(), 2U);
+    check_equal(doc.snapshot().routes.size(), original.routes.size());
+  }
+
+  it("rejects mixed original parent ownership, duplicate selection and overflow") {
+    GraphEditDocument doc;
+    check_true(static_cast<bool>(doc.initialize(nested_group_fixture())));
+    const auto baseline = doc.snapshot();
+    auto status = doc.group_nodes("mixed", {"a", "c"});
+    check_false(static_cast<bool>(status));
+    check(status.error == GraphEditError::InvalidInput);
+    status = doc.group_nodes("duplicates", {"a", "a"});
+    check_false(static_cast<bool>(status));
+    check(status.error == GraphEditError::InvalidInput);
+    status = doc.group_nodes("missing", {"a", "phantom"});
+    check_false(static_cast<bool>(status));
+    check(status.error == GraphEditError::MissingNode);
+    status = doc.group_nodes("single", {"a"});
+    check_false(static_cast<bool>(status));
+    check(status.error == GraphEditError::InvalidInput);
+    status = doc.group_nodes("bad", {"a", "b"}, -1.0);
+    check_false(static_cast<bool>(status));
+    check(status.error == GraphEditError::InvalidGeometry);
+    status = doc.group_nodes("bad", {"a", "b"},
+                             std::numeric_limits<double>::infinity());
+    check_false(static_cast<bool>(status));
+    check(status.error == GraphEditError::InvalidGeometry);
+    check_equal(doc.snapshot().revision, baseline.revision);
+    check_equal(doc.snapshot().groups.size(), baseline.groups.size());
+    check_equal(doc.undo_count(), 0U);
+    for (std::size_t i = 0; i < baseline.routes.size(); ++i)
+      check_true(route_points_identical(
+          doc.snapshot().routes[i], baseline.routes[i]));
+
+    check_true(static_cast<bool>(doc.begin_move("a")));
+    status = doc.group_nodes("busy", {"a", "b"});
+    check_false(static_cast<bool>(status));
+    check(status.error == GraphEditError::Busy);
+    doc.cancel_move();
+    check_true(static_cast<bool>(doc.set_group_collapsed("inner", true)));
+    const auto revision = doc.snapshot().revision;
+    status = doc.group_nodes("hidden", {"a", "b"});
+    check_false(static_cast<bool>(status));
+    check(status.error == GraphEditError::InvalidInput);
+    check_equal(doc.snapshot().revision, revision);
+  }
+
+  it("uses true Shift-click on two mounted original nodes and Ctrl+G / Ungroup") {
+    auto doc = std::make_shared<GraphEditDocument>();
+    check_true(static_cast<bool>(doc->initialize(example())));
+    auto registry = flexUI::WidgetRegistry::builtins();
+    check_false(static_cast<bool>(
+        charts::ui::register_graph_canvas_widget(registry, doc)));
+    auto compiled = flexUI::compile_ui_xml(
+        "<ui name=\"GraphMultiSelect\"><main id=\"root\">"
+        "<native-graph id=\"graph\" /></main></ui>");
+    check_true(static_cast<bool>(compiled));
+    if (!compiled) return;
+    flexUI::Box box(nullptr);
+    check_true(static_cast<bool>(flexUI::UiDocumentInstantiator::instantiate(
+        box, *compiled.program, registry)));
+    auto *root = box.get_by_id("root");
+    auto *graph = box.get_by_id("graph");
+    check_not_null(root); check_not_null(graph);
+    if (!root || !graph) return;
+    root->set_layout_bounds(0, 0, 832, 160);
+    graph->set_layout_bounds(0, 0, 832, 160);
+    box.update();
+    const auto baseline_owned = box.owned_element_count();
+    const auto baseline_revision = doc->snapshot().revision;
+    flexUI::Element *stable_alpha = nullptr;
+    for (auto *raw : graph->children()) {
+      auto *part = static_cast<flexUI::Element *>(raw);
+      const auto *name = part->attribute("part");
+      if (name && *name == "node:alpha") stable_alpha = part;
+    }
+    check_not_null(stable_alpha);
+    if (!stable_alpha) return;
+
+    auto down = flexUI::Event::mouse_down(85, 56);
+    auto up = flexUI::Event::mouse_up(85, 56);
+    box.dispatch_event(down);
+    box.dispatch_event(up);
+    check_true(up.handled);
+    auto shifted = flexUI::Event::mouse_down(480, 56);
+    shifted.mods = static_cast<int>(flexUI::KeyMod::Shift);
+    box.dispatch_event(shifted);
+    box.update();
+    check_true(shifted.handled);
+    check_null(box.capturing_element());
+    check_equal(*stable_alpha->attribute("data-selected"), "true");
+    check_equal(doc->snapshot().revision, baseline_revision);
+    auto *beta_part = static_cast<flexUI::Element *>(graph->children()[1]);
+    check_equal(*beta_part->attribute("data-selected"), "true");
+
+    auto create = flexUI::Event::key_down(
+        flexUI::KeyCode::G, static_cast<int>(flexUI::KeyMod::Control));
+    box.dispatch_event(create);
+    check_true(create.handled);
+    box.update();
+    check_equal(doc->snapshot().groups.size(), 1U);
+    check_equal(doc->undo_count(), 1U);
+    check_equal(doc->snapshot().nodes.size(), 2U);
+    check_equal(doc->snapshot().edges.size(), 1U);
+    check_equal(graph->child_count(), 5U);
+    check_equal(box.owned_element_count(), baseline_owned + 1U);
+    check(stable_alpha->parent_elem() == graph);
+    check_equal(*stable_alpha->attribute("data-selected"), "false");
+    const auto group_id = doc->snapshot().groups[0].id;
+    check_equal(group_id, "selection-" + std::to_string(baseline_revision));
+    check_equal(doc->snapshot().groups[0].member_node_ids.size(), 2U);
+    check_equal(doc->snapshot().groups[0].proxy_ports.size(), 0U);
+
+    auto ungroup = flexUI::Event::key_down(
+        flexUI::KeyCode::G,
+        static_cast<int>(flexUI::KeyMod::Control) |
+        static_cast<int>(flexUI::KeyMod::Shift));
+    box.dispatch_event(ungroup);
+    check_true(ungroup.handled);
+    box.update();
+    check_equal(doc->snapshot().groups.size(), 0U);
+    check_equal(doc->undo_count(), 2U);
+    check_equal(graph->child_count(), 4U);
+    check_equal(box.owned_element_count(), baseline_owned);
+    check(stable_alpha->parent_elem() == graph);
+
+    auto undo = flexUI::Event::key_down(
+        flexUI::KeyCode::Z, static_cast<int>(flexUI::KeyMod::Control));
+    box.dispatch_event(undo);
+    box.update();
+    check_true(undo.handled);
+    check_equal(doc->snapshot().groups.size(), 1U);
+    check_equal(graph->child_count(), 5U);
+    auto redo = flexUI::Event::key_down(
+        flexUI::KeyCode::Y, static_cast<int>(flexUI::KeyMod::Control));
+    box.dispatch_event(redo);
+    box.update();
+    check_true(redo.handled);
+    check_equal(doc->snapshot().groups.size(), 0U);
+    check_equal(graph->child_count(), 4U);
+    check(stable_alpha->parent_elem() == graph);
+  }
+}
+
 spec("GraphCanvas M2h nested Ungroup preserves world transforms and history") {
   it("reparents a middle group to its grandparent without moving a leaf") {
     GraphEditDocument doc;
