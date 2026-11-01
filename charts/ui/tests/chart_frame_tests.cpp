@@ -1474,7 +1474,7 @@ spec("GraphCanvas M2j explicit measured group boundary port editing") {
     check_false(static_cast<bool>(status));
     check(status.error == GraphEditError::InvalidInput);
     status = doc.upsert_group_boundary_port(
-        "left-group", {"wrong", "left-out", gl::Side::West, 180.0, 50.0});
+        "left-group", {"left-group-out", "left-out", gl::Side::West, 180.0, 50.0});
     check_false(static_cast<bool>(status));
     check(status.error == GraphEditError::InvalidGeometry);
     status = doc.upsert_group_boundary_port(
