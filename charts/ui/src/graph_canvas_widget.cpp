@@ -6,6 +6,7 @@
 #include <flexUI/render_command.h>
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <cmath>
 #include <cstdint>
@@ -29,7 +30,7 @@ constexpr double kDragStartThresholdPx = 4.0;
 constexpr std::size_t kMaxSemanticParts = 1024;
 std::atomic<std::uint64_t> next_graph_mount_generation{1};
 
-enum class GestureMode { Idle, ArmedNode, MoveNode, ArmedGroup, MoveGroup, Connect, Pan };
+enum class GestureMode { Idle, ArmedNode, MoveNode, ArmedGroup, MoveGroup, Connect, BindBoundary, Pan };
 
 struct Interaction {
   std::weak_ptr<GraphEditDocument> document;
@@ -44,6 +45,7 @@ struct Interaction {
   std::vector<std::string> selected_nodes; // Stable multi-selection, never Element*.
   std::string selected_group;
   std::string source_port;
+  std::string boundary_source_port; // User-picked original PortId.
   std::string status_message;
   double press_x = 0.0;
   double press_y = 0.0;
@@ -138,6 +140,58 @@ std::optional<GraphEditPort> hit_port(const GraphEditDocument &model,
   return std::nullopt;
 }
 
+// A user explicitly releases on one measured side of the selected group.
+// Reject interior release, outside release and ambiguous corners. Only the
+// tangential coordinate comes from the pointer; the perpendicular coordinate
+// snaps to that exact side within the bounded CSS-pixel hit tolerance.
+bool measure_group_border(const GraphEditNode &world, double wx, double wy,
+                          double tolerance, stun::graphlayout::Side &side,
+                          double &local_x, double &local_y) {
+  if (!std::isfinite(wx) || !std::isfinite(wy) ||
+      !std::isfinite(tolerance) || tolerance <= 0.0 ||
+      !std::isfinite(world.x) || !std::isfinite(world.y) ||
+      !std::isfinite(world.width) || !std::isfinite(world.height))
+    return false;
+  using Side = stun::graphlayout::Side;
+  struct Edge {
+    Side side;
+    double distance;
+    double x;
+    double y;
+    bool valid;
+  };
+  const double lx = wx - world.x, ly = wy - world.y;
+  const std::array<Edge, 4> candidates{{
+      {Side::West, std::abs(lx), 0.0, ly,
+       ly >= 0.0 && ly <= world.height},
+      {Side::East, std::abs(lx - world.width), world.width, ly,
+       ly >= 0.0 && ly <= world.height},
+      {Side::North, std::abs(ly), lx, 0.0,
+       lx >= 0.0 && lx <= world.width},
+      {Side::South, std::abs(ly - world.height), lx, world.height,
+       lx >= 0.0 && lx <= world.width},
+  }};
+  const Edge *chosen = nullptr;
+  for (const auto &candidate : candidates) {
+    if (!candidate.valid || candidate.distance > tolerance) continue;
+    if (!chosen || candidate.distance < chosen->distance) {
+      chosen = &candidate;
+    }
+  }
+  if (!chosen) return false;
+  // A pointer placed exactly on a corner gives no unambiguous side. Require
+  // an explicit location away from that tie rather than fabricate intent.
+  for (const auto &candidate : candidates)
+    if (&candidate != chosen && candidate.valid &&
+        candidate.distance <= tolerance &&
+        std::abs(candidate.distance - chosen->distance) < 1.0e-6)
+      return false;
+  side = chosen->side;
+  local_x = chosen->x;
+  local_y = chosen->y;
+  return true;
+}
+
 void build_semantic_parts(flexUI::NativeCanvasWidget &widget,
                           flexUI::Element &host, const GraphEditDocument &model,
                           Interaction &state) {
@@ -153,7 +207,8 @@ void build_semantic_parts(flexUI::NativeCanvasWidget &widget,
 
   host.set_attribute("role", "region");
   host.set_attribute("aria-label", "Interactive graph editor");
-  host.set_attribute("aria-keyshortcuts", "Control+Z Control+Y Control+G Control+Shift+G Shift+Click ArrowUp ArrowDown ArrowLeft ArrowRight Delete Backspace");
+  host.set_attribute("aria-keyshortcuts", "Control+Z Control+Y Control+G Control+Shift+G Shift+Click Control+Alt+Drag ArrowUp ArrowDown ArrowLeft ArrowRight Delete Backspace");
+  host.set_attribute("data-boundary-authoring", "explicit-measured");
   host.set_attribute("data-selection", "single-or-multiple");
   host.set_attribute("data-slot", "graph-canvas");
   host.set_attribute("data-routing", state.routing_state);
@@ -445,9 +500,12 @@ void paint_canvas(const GraphEditDocument &model, const Interaction &interaction
                          Paint::solid(Color{0.15F, 0.22F, 0.29F, 1.0F}), 1.0F);
   }
 
-  if (interaction.mode == GestureMode::Connect) {
+  if (interaction.mode == GestureMode::Connect ||
+      interaction.mode == GestureMode::BindBoundary) {
+    const auto &selected_port = interaction.mode == GestureMode::BindBoundary
+        ? interaction.boundary_source_port : interaction.source_port;
     for (const auto &port : snapshot.ports) {
-      if (port.id != interaction.source_port) continue;
+      if (port.id != selected_port) continue;
       double x, y;
       if (port_anchor(model, snapshot, port, interaction, x, y)) {
         commands.draw_line(static_cast<float>(x), static_cast<float>(y),
@@ -490,6 +548,7 @@ void cancel(Interaction &state, GraphEditDocument &document,
       state.mode == GestureMode::MoveGroup) document.cancel_move();
   state.mode = GestureMode::Idle;
   state.source_port.clear();
+  state.boundary_source_port.clear();
   widget.release_pointer_capture();
   element.mark_paint_dirty();
 }
@@ -693,6 +752,34 @@ bool handle_input(Interaction &state, GraphEditDocument &model,
       element.mark_paint_dirty();
       return true;
     }
+    // Ctrl+Alt drag begins at one VISIBLE ORIGINAL port, then ends on
+    // an explicitly measured side of the currently selected expanded group.
+    // No inferred nearest PortId or hidden semantic Element is ever bound.
+    const int boundary_mods = static_cast<int>(flexUI::KeyMod::Control) |
+                              static_cast<int>(flexUI::KeyMod::Alt);
+    if ((event.mods & boundary_mods) == boundary_mods &&
+        !state.selected_group.empty()) {
+      auto original = hit_port(model, state, x, y, true);
+      if (!original) original = hit_port(model, state, x, y, false);
+      if (original) {
+        const auto found = std::find_if(model.snapshot().ports.begin(),
+                                        model.snapshot().ports.end(),
+            [&](const GraphEditPort &port) {
+              return port.id == original->id;
+            });
+        if (found != model.snapshot().ports.end()) {
+          state.boundary_source_port = original->id;
+          state.mode = GestureMode::BindBoundary;
+          state.status_message = "Release original port on selected group boundary";
+          widget.request_pointer_capture();
+          element.mark_paint_dirty();
+          return true;
+        }
+      }
+      state.status_message = "Select an original measured port inside the group";
+      element.mark_paint_dirty();
+      return true;
+    }
     if (const auto source = hit_port(model, state, x, y, true)) {
       state.source_port = source->id;
       state.mode = GestureMode::Connect;
@@ -843,6 +930,59 @@ bool handle_input(Interaction &state, GraphEditDocument &model,
         state.status_message = status ? "" : status.message;
       } else {
         state.status_message = "Group was retired";
+      }
+    } else if (matching && state.mode == GestureMode::BindBoundary) {
+      GraphEditNode measured;
+      double wx = 0.0, wy = 0.0, px = 0.0, py = 0.0;
+      stun::graphlayout::Side side = stun::graphlayout::Side::Auto;
+      const auto group_status =
+          model.group_world_rect(state.selected_group, measured);
+      if (!group_status || !model.group_is_visible(state.selected_group) ||
+          !state.view.to_world(x, y, wx, wy) ||
+          !measure_group_border(measured, wx, wy, 8.0 / state.view.zoom,
+                                side, px, py)) {
+        state.status_message = group_status ? 
+            "Release on an unambiguous measured group border" :
+            group_status.message;
+      } else {
+        // Reposition an existing binding using the SAME immutable PortId;
+        // only a new binding receives a fresh bounded stable ID.
+        std::string proxy_id;
+        const auto &snapshot = model.snapshot();
+        const auto group = std::find_if(
+            snapshot.groups.begin(), snapshot.groups.end(),
+            [&](const GraphEditGroup &g) {
+              return g.id == state.selected_group;
+            });
+        if (group != snapshot.groups.end())
+          for (const auto &existing : group->proxy_ports)
+            if (existing.original_port_id == state.boundary_source_port)
+              proxy_id = existing.id;
+        if (proxy_id.empty()) {
+          const auto prefix = "boundary-" +
+              std::to_string(snapshot.revision);
+          for (std::size_t attempt = 0; attempt <= snapshot.ports.size() +
+                                                    snapshot.groups.size(); ++attempt) {
+            const auto candidate = attempt == 0 ? prefix :
+                prefix + "-" + std::to_string(attempt);
+            bool used = std::any_of(snapshot.ports.begin(), snapshot.ports.end(),
+                [&](const GraphEditPort &port) { return port.id == candidate; });
+            for (const auto &g : snapshot.groups)
+              for (const auto &binding : g.proxy_ports)
+                if (binding.id == candidate) used = true;
+            if (!used) { proxy_id = candidate; break; }
+          }
+        }
+        if (proxy_id.empty()) {
+          state.status_message = "Measured proxy PortId budget exhausted";
+        } else {
+          const GraphEditGroupProxyPort binding{
+              proxy_id, state.boundary_source_port, side, px, py};
+          const auto result = model.upsert_group_boundary_port(
+              state.selected_group, binding);
+          state.status_message = result ? "Group boundary measured" :
+                                           result.message;
+        }
       }
     } else if (matching && state.mode == GestureMode::Connect) {
       const auto target = hit_port(model, state, x, y, false);
