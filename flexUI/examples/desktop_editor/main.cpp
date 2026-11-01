@@ -1085,6 +1085,149 @@ int run_ungroup_smoke(
   return EXIT_SUCCESS;
 }
 
+// M2i: real OpenGL/PluginHost/Box multi-selection, no mock graph runtime.
+// Shift+Click selects ORIGINAL NodeIds. Ctrl+G creates one measured group
+// without synthesizing external boundary ports, and Undo/Redo remain native.
+int run_group_selection_smoke(
+    flexUI::GCanvasPluginWindowHost &host,
+    const std::shared_ptr<charts::ui::GraphEditDocument> &model) {
+  auto pumped = host.pump_once(0.0);
+  if (!pumped) return fail("selection first frame", pumped.error.message);
+  auto &box = host.application().box();
+  auto *graph = box.get_by_id("graph");
+  if (!graph || !graph->widget || graph->child_count() != 4 ||
+      model->snapshot().edges.size() != 1)
+    return fail("selection mount", "original connected graph is not mounted");
+  const auto find_part = [&](std::string_view name) -> flexUI::Element * {
+    for (auto *raw : graph->children()) {
+      auto *part = static_cast<flexUI::Element *>(raw);
+      const auto *key = part->attribute("part");
+      if (key && *key == name) return part;
+    }
+    return nullptr;
+  };
+  auto *alpha = find_part("node:alpha");
+  auto *beta = find_part("node:beta");
+  if (!alpha || !beta)
+    return fail("selection parts", "original stable node semantic parts missing");
+  const float gx = graph->absolute_x(), gy = graph->absolute_y();
+  const auto base_owned = box.owned_element_count();
+  const auto base_revision = model->snapshot().revision;
+  const auto original_edge = model->snapshot().edges.front();
+  const auto original_route = model->snapshot().routes.front();
+
+  auto down = flexUI::Event::mouse_down(gx + 85.0F, gy + 56.0F);
+  auto up = flexUI::Event::mouse_up(gx + 85.0F, gy + 56.0F);
+  if (!host.application().dispatch_event(down) || !down.handled ||
+      !host.application().dispatch_event(up) || !up.handled)
+    return fail("selection click", "first Box node was not selected");
+  auto second = flexUI::Event::mouse_down(gx + 480.0F, gy + 56.0F);
+  second.mods = static_cast<int>(flexUI::KeyMod::Shift);
+  auto second_up = flexUI::Event::mouse_up(gx + 480.0F, gy + 56.0F);
+  second_up.mods = second.mods;
+  if (!host.application().dispatch_event(second) || !second.handled ||
+      !host.application().dispatch_event(second_up))
+    return fail("selection Shift+Click", "second original NodeId not admitted");
+  box.update();
+  if (!alpha->attribute("data-selected") ||
+      *alpha->attribute("data-selected") != "true" ||
+      !beta->attribute("data-selected") ||
+      *beta->attribute("data-selected") != "true" ||
+      model->snapshot().revision != base_revision ||
+      box.capturing_element() != nullptr)
+    return fail("selection state", "multi-selection mutated graph or lost UI IDs");
+
+  auto create = flexUI::Event::key_down(
+      flexUI::KeyCode::G, static_cast<int>(flexUI::KeyMod::Control));
+  if (!host.application().dispatch_event(create) || !create.handled ||
+      model->snapshot().groups.size() != 1 ||
+      model->snapshot().nodes.size() != 2 ||
+      model->snapshot().edges.size() != 1 ||
+      model->snapshot().edges[0].id != original_edge.id ||
+      model->snapshot().edges[0].source_port != original_edge.source_port ||
+      model->undo_count() != 1 ||
+      model->snapshot().revision != base_revision + 1)
+    return fail("selection create", "Ctrl+G did not publish one compound Undo");
+  const auto group = model->snapshot().groups.front();
+  if (group.member_node_ids.size() != 2 ||
+      group.proxy_ports.size() != 0 ||
+      group.x != 39.0 || group.y != 20.0 ||
+      group.width != 537.0 || group.height != 104.0)
+    return fail("selection measured group", "group geometry was not measured from two nodes");
+  box.update();
+  if (graph->child_count() != 5 ||
+      box.owned_element_count() != base_owned + 1 ||
+      find_part("node:alpha") != alpha ||
+      find_part("node:beta") != beta ||
+      !find_part("node:group@" + group.id))
+    return fail("selection semantic group", "Box did not create one stable proxy");
+
+  // Both original leaves are internal to the new group. Collapse only hides
+  // the visual route; the original edge and its measured endpoints survive.
+  auto group_down = flexUI::Event::mouse_down(gx + 60.0F, gy + 30.0F);
+  auto group_up = flexUI::Event::mouse_up(gx + 60.0F, gy + 30.0F);
+  if (!host.application().dispatch_event(group_down) || !group_down.handled ||
+      !host.application().dispatch_event(group_up) || !group_up.handled ||
+      !model->snapshot().groups[0].collapsed ||
+      model->snapshot().routes.size() != 0 ||
+      model->snapshot().edges.size() != 1)
+    return fail("selection collapse", "internal logical edge was not preserved");
+
+  const int shortcut_mods = static_cast<int>(flexUI::KeyMod::Control) |
+                            static_cast<int>(flexUI::KeyMod::Shift);
+  auto ungroup = flexUI::Event::key_down(flexUI::KeyCode::G, shortcut_mods);
+  if (!host.application().dispatch_event(ungroup) || !ungroup.handled ||
+      !model->snapshot().groups.empty() ||
+      model->snapshot().routes.size() != 1 ||
+      model->snapshot().edges.front().id != original_edge.id ||
+      model->undo_count() != 3)
+    return fail("selection Ungroup", "one original group was not retired");
+  box.update();
+  if (graph->child_count() != 4 ||
+      box.owned_element_count() != base_owned ||
+      find_part("node:alpha") != alpha ||
+      find_part("node:beta") != beta)
+    return fail("selection retire", "Box lost stable originals or leaked proxy");
+  if (model->snapshot().routes[0].edge_id != original_route.edge_id ||
+      model->snapshot().routes[0].points.size() != original_route.points.size())
+    return fail("selection original route", "Ungroup changed logical topology");
+
+  auto undo = flexUI::Event::key_down(
+      flexUI::KeyCode::Z, static_cast<int>(flexUI::KeyMod::Control));
+  auto redo = flexUI::Event::key_down(
+      flexUI::KeyCode::Y, static_cast<int>(flexUI::KeyMod::Control));
+  if (!host.application().dispatch_event(undo) || !undo.handled)
+    return fail("selection Undo", "Ctrl+Z did not restore collapsed group");
+  box.update();
+  if (model->snapshot().groups.size() != 1 ||
+      !model->snapshot().groups[0].collapsed ||
+      graph->child_count() != 5)
+    return fail("selection Undo state", "original group hierarchy lost");
+  if (!host.application().dispatch_event(redo) || !redo.handled)
+    return fail("selection Redo", "Ctrl+Y did not reapply Ungroup");
+  box.update();
+  if (model->snapshot().groups.size() != 0 ||
+      graph->child_count() != 4 ||
+      box.owned_element_count() != base_owned)
+    return fail("selection Redo owner", "Box failed to reclaim proxy again");
+
+  box.invalidate();
+  pumped = host.pump_once(0.0);
+  if (!pumped) return fail("selection repaint", pumped.error.message);
+  auto *save = box.get_by_id("save");
+  if (!save) return fail("selection Save", "real Save service missing");
+  const auto clicked = dispatch_save_click(host.application(), *save);
+  if (!clicked) return fail("selection Save click", clicked.error.message);
+  std::string error;
+  if (!pump_until_saved(host, *save, error))
+    return fail("selection Save service", error);
+  const auto stopped = host.shutdown(kShutdownTimeout);
+  if (!stopped) return fail("selection shutdown", stopped.error.message);
+  std::cout << "FlexUI desktop editor selection smoke passed: "
+            << save->text() << '\n';
+  return EXIT_SUCCESS;
+}
+
 } // namespace
 
 int main(int argc, char **argv) {
@@ -1096,6 +1239,7 @@ int main(int argc, char **argv) {
   bool topology_smoke = false;
   bool delete_smoke = false;
   bool ungroup_smoke = false;
+  bool selection_smoke = false;
   if (argc == 2 && std::string_view(argv[1]) == "--smoke") {
     smoke = true;
   } else if (argc == 2 && std::string_view(argv[1]) == "--smoke-async") {
@@ -1119,9 +1263,12 @@ int main(int argc, char **argv) {
   } else if (argc == 2 && std::string_view(argv[1]) == "--smoke-ungroup") {
     smoke = true;
     ungroup_smoke = true;
+  } else if (argc == 2 && std::string_view(argv[1]) == "--smoke-selection") {
+    smoke = true;
+    selection_smoke = true;
   } else if (argc != 1) {
     return fail("arguments",
-                "usage: flexui_desktop_editor [--smoke|--smoke-async|--smoke-group|--smoke-hierarchy|--smoke-semantic|--smoke-topology|--smoke-delete|--smoke-ungroup]");
+                "usage: flexui_desktop_editor [--smoke|--smoke-async|--smoke-group|--smoke-hierarchy|--smoke-semantic|--smoke-topology|--smoke-delete|--smoke-ungroup|--smoke-selection]");
   }
 
   std::error_code path_error;
@@ -1151,7 +1298,7 @@ int main(int argc, char **argv) {
   initial_graph.ports = {
       {"sink", "beta", stun::graphlayout::Side::West, 0.0, 36.0, false},
       {"source", "alpha", stun::graphlayout::Side::East, 125.0, 36.0, true}};
-  if (delete_smoke)
+  if (delete_smoke || selection_smoke)
     initial_graph.edges.push_back({"edge-1", "source", "sink"});
   if (group_smoke) {
     charts::ui::GraphEditGroup group;
@@ -1217,6 +1364,8 @@ int main(int argc, char **argv) {
     return fail("runtime composition", built.error.message);
   }
 
+  if (selection_smoke)
+    return run_group_selection_smoke(*built.host, graph_model);
   if (ungroup_smoke) return run_ungroup_smoke(*built.host, graph_model);
   if (delete_smoke) return run_delete_smoke(*built.host, graph_model);
   if (topology_smoke) return run_topology_smoke(*built.host, graph_model);

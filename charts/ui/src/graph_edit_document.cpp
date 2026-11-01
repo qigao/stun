@@ -1108,6 +1108,116 @@ GraphEditStatus GraphEditDocument::add_group(GraphEditGroup group) {
   return publish(std::move(candidate));
 }
 
+GraphEditStatus GraphEditDocument::group_nodes(
+    std::string group_id, std::vector<std::string> node_ids, double padding) {
+  if (move_) return reject(GraphEditError::Busy,
+                            "cannot group selected nodes during active drag");
+  if (!valid_id(group_id) || !valid_id("group@" + group_id))
+    return reject(GraphEditError::InvalidInput, "invalid stable GroupId");
+  if (!std::isfinite(padding) || padding < 0.0 || padding > 1024.0)
+    return reject(GraphEditError::InvalidGeometry,
+                  "group padding is outside finite measured bounds");
+  if (node_ids.size() < 2)
+    return reject(GraphEditError::InvalidInput,
+                  "group requires at least two original nodes");
+  if (node_ids.size() > 256)
+    return reject(GraphEditError::CapacityExceeded,
+                  "selection exceeds native node budget");
+
+  std::sort(node_ids.begin(), node_ids.end());
+  if (std::adjacent_find(node_ids.begin(), node_ids.end()) != node_ids.end())
+    return reject(GraphEditError::InvalidInput,
+                  "duplicate original NodeId in group selection");
+  if (find_group(committed_, group_id))
+    return reject(GraphEditError::InvalidInput,
+                  "GroupId already exists in the document");
+
+  std::string parent_id;
+  bool first = true;
+  double left = std::numeric_limits<double>::infinity();
+  double top = std::numeric_limits<double>::infinity();
+  double right = -std::numeric_limits<double>::infinity();
+  double bottom = -std::numeric_limits<double>::infinity();
+  for (const auto &id : node_ids) {
+    const auto found = std::find_if(
+        committed_.nodes.begin(), committed_.nodes.end(),
+        [&](const GraphEditNode &node) { return node.id == id; });
+    if (found == committed_.nodes.end())
+      return reject(GraphEditError::MissingNode,
+                    "selected stable NodeId no longer exists");
+    const auto *owner = direct_owner(committed_, id);
+    const std::string current_parent = owner ? owner->id : "";
+    if (first) {
+      parent_id = current_parent;
+      first = false;
+    } else if (current_parent != parent_id) {
+      return reject(GraphEditError::InvalidInput,
+                    "selected original nodes have different direct owners");
+    }
+    if (owner &&
+        (owner->collapsed || !group_ancestors_expanded(committed_, owner->id)))
+      return reject(GraphEditError::InvalidInput,
+                    "cannot author a group inside a collapsed ancestor");
+    left = std::min(left, found->x);
+    top = std::min(top, found->y);
+    right = std::max(right, found->x + found->width);
+    bottom = std::max(bottom, found->y + found->height);
+  }
+
+  // Geometry is measured from the ORIGINAL leaf rectangles (not a renderer
+  // hit-test AABB or a synthetic GraphLayout proxy). Parent-relative x/y
+  // keep the original world geometry unchanged under nested grouping.
+  GraphEditNode bbox{"group@" + group_id, left - padding, top - padding,
+                     right - left + 2.0 * padding,
+                     bottom - top + 2.0 * padding, true};
+  if (!finite_geometry(bbox))
+    return reject(GraphEditError::InvalidGeometry,
+                  "measured selection rectangle exceeds native bounds");
+  GraphEditGroup group;
+  group.id = std::move(group_id);
+  group.parent_group_id = parent_id;
+  group.x = bbox.x;
+  group.y = bbox.y;
+  group.width = bbox.width;
+  group.height = bbox.height;
+  group.member_node_ids = std::move(node_ids);
+  // Never silently invent a group-boundary PortId. An external edge remains
+  // connected while the group is expanded; a later collapse must fail until
+  // every crossing original PortId has an explicitly authored boundary.
+  if (!parent_id.empty()) {
+    double parent_x = 0.0, parent_y = 0.0;
+    if (!world_origin(committed_, parent_id, parent_x, parent_y))
+      return reject(GraphEditError::InvalidGeometry,
+                    "selected direct owner has invalid world origin");
+    group.x -= parent_x;
+    group.y -= parent_y;
+    if (!std::isfinite(group.x) || !std::isfinite(group.y))
+      return reject(GraphEditError::InvalidGeometry,
+                    "nonfinite nested group local origin");
+  }
+
+  GraphEditSnapshot candidate = committed_;
+  if (!parent_id.empty()) {
+    const auto parent = std::find_if(candidate.groups.begin(),
+                                    candidate.groups.end(),
+        [&](const GraphEditGroup &existing) { return existing.id == parent_id; });
+    if (parent == candidate.groups.end())
+      return reject(GraphEditError::InvalidInput,
+                    "selected group owner was retired");
+    const std::set<std::string> selected(
+        group.member_node_ids.begin(), group.member_node_ids.end());
+    parent->member_node_ids.erase(
+        std::remove_if(parent->member_node_ids.begin(),
+                       parent->member_node_ids.end(),
+                       [&](const std::string &id) { return selected.count(id) != 0; }),
+        parent->member_node_ids.end());
+  }
+  candidate.groups.push_back(std::move(group));
+  // ONE native GraphOrthogonal validation/atomic Undo entry. Failure leaves
+  // both original parent membership and every route-index intact.
+  return publish(std::move(candidate));
+}
+
 GraphEditStatus GraphEditDocument::remove_group(std::string_view group_id) {
   if (move_) return reject(GraphEditError::Busy, "cannot ungroup during drag");
   GraphEditSnapshot candidate = committed_;

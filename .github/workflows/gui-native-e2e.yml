@@ -325,6 +325,11 @@ jobs:
           # Undo/Redo, safe semantic part retirement and the genuine Save.
           xvfb-run -a -s '-screen 0 1280x900x24 -nolisten tcp' \
             build/stun-gui/bin/flexui_desktop_editor --smoke-ungroup
+          # M2i: actual linked GraphCanvas Shift-click multi-select, Ctrl+G
+          # measured GroupId creation, collapse and Ungroup with original
+          # routes, physical Box parts, Undo/Redo and the native Save service.
+          xvfb-run -a -s '-screen 0 1280x900x24 -nolisten tcp' \
+            build/stun-gui/bin/flexui_desktop_editor --smoke-selection
           xvfb-run -a -s '-screen 0 1280x900x24 -nolisten tcp' \
             /usr/bin/python3 .github/scripts/gui_native_suite.py \
               --exe build/stun-gui/bin/flexui_desktop_editor \

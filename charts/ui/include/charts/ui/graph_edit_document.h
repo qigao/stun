@@ -178,6 +178,15 @@ public:
   GraphEditStatus add_port(GraphEditPort port);
   GraphEditStatus remove_port(std::string_view port_id);
   GraphEditStatus add_group(GraphEditGroup group);
+  // M2i: group at least two measured ORIGINAL leaves that currently share
+  // exactly one direct group owner (or are all root leaves). Existing parents
+  // retain their explicit proxy bindings to descendant original PortIds.
+  // A group's expanded rectangle is computed from leaf world geometry with
+  // bounded world padding; no boundary PortId is invented. Collapsing a
+  // crossing edge still requires separately authored measured proxy ports.
+  GraphEditStatus group_nodes(std::string group_id,
+                              std::vector<std::string> node_ids,
+                              double padding = 16.0);
   // Ungroup one nested group atomically. Direct child groups are reparented
   // with world-space geometry preserved; direct original leaves inherit the
   // parent, or become ungrouped at root. One full native-route validation

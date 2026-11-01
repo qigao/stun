@@ -40,7 +40,8 @@ struct Interaction {
   bool routing_pending = false;
   std::string routing_state = "idle";
   GestureMode mode = GestureMode::Idle;
-  std::string selected_node;
+  std::string selected_node; // Active original NodeId for single-node gestures.
+  std::vector<std::string> selected_nodes; // Stable multi-selection, never Element*.
   std::string selected_group;
   std::string source_port;
   std::string status_message;
@@ -152,7 +153,8 @@ void build_semantic_parts(flexUI::NativeCanvasWidget &widget,
 
   host.set_attribute("role", "region");
   host.set_attribute("aria-label", "Interactive graph editor");
-  host.set_attribute("aria-keyshortcuts", "Control+Z Control+Y Control+Shift+G ArrowUp ArrowDown ArrowLeft ArrowRight Delete Backspace");
+  host.set_attribute("aria-keyshortcuts", "Control+Z Control+Y Control+G Control+Shift+G Shift+Click ArrowUp ArrowDown ArrowLeft ArrowRight Delete Backspace");
+  host.set_attribute("data-selection", "single-or-multiple");
   host.set_attribute("data-slot", "graph-canvas");
   host.set_attribute("data-routing", state.routing_state);
 
@@ -166,6 +168,7 @@ void build_semantic_parts(flexUI::NativeCanvasWidget &widget,
     part->set_attribute("data-slot", "graph-node");
     part->set_attribute("data-node-id", node.id);
     part->set_attribute("aria-current", "false");
+    part->set_attribute("data-selected", "false");
     part->set_attribute("data-state", "idle");
   }
 
@@ -258,6 +261,10 @@ void sync_semantic_parts(const GraphEditDocument &model,
       update_bounds(*part, x, y, w, h);
       set_attr(*part, "aria-hidden", "false");
       set_attr(*part, "data-node-id", id);
+      set_attr(*part, "data-selected",
+               std::find(state.selected_nodes.begin(),
+                         state.selected_nodes.end(), id) !=
+                   state.selected_nodes.end() ? "true" : "false");
       set_attr(*part, "aria-current",
                state.selected_node == id ? "true" : "false");
       set_attr(*part, "data-state",
@@ -311,8 +318,8 @@ desired_graph_semantics(const GraphEditDocument &model) {
     desired.push_back({"node:" + node.id, "graph-node",
         {{"role", "group"}, {"aria-label", "Graph node " + node.id},
          {"data-slot", "graph-node"}, {"data-node-id", node.id},
-         {"aria-current", "false"}, {"data-state", "idle"},
-         {"aria-hidden", "true"}}});
+         {"aria-current", "false"}, {"data-selected", "false"},
+         {"data-state", "idle"}, {"aria-hidden", "true"}}});
   }
   for (const auto &port : snapshot.ports) {
     desired.push_back({"port:" + port.id, "graph-port",
@@ -521,6 +528,41 @@ bool handle_input(Interaction &state, GraphEditDocument &model,
       if (result) {
         state.selected_group.clear();
         state.selected_node.clear();
+        state.selected_nodes.clear();
+      }
+      state.status_message = result ? "" : result.message;
+      element.mark_paint_dirty();
+      return true;
+    }
+    if (state.mode == GestureMode::Idle &&
+        (event.mods & static_cast<int>(flexUI::KeyMod::Control)) &&
+        !(event.mods & static_cast<int>(flexUI::KeyMod::Shift)) &&
+        event.key == KeyCode::G) {
+      if (state.selected_nodes.size() < 2) return false;
+      // Stable bounded group identity for this one authoring transaction.
+      // The document remains authoritative and rejects collisions/capacity.
+      const auto &snapshot = model.snapshot();
+      const std::string prefix =
+          "selection-" + std::to_string(snapshot.revision);
+      std::string group_id;
+      for (std::size_t attempt = 0; attempt <= snapshot.groups.size(); ++attempt) {
+        const std::string candidate = attempt == 0 ? prefix :
+            prefix + "-" + std::to_string(attempt);
+        const bool exists = std::any_of(snapshot.groups.begin(),
+                                       snapshot.groups.end(),
+            [&](const GraphEditGroup &group) { return group.id == candidate; });
+        if (!exists) { group_id = candidate; break; }
+      }
+      if (group_id.empty()) {
+        state.status_message = "No stable GroupId available";
+        element.mark_paint_dirty();
+        return true;
+      }
+      const auto result = model.group_nodes(group_id, state.selected_nodes);
+      if (result) {
+        state.selected_nodes.clear();
+        state.selected_node.clear();
+        state.selected_group = group_id;
       }
       state.status_message = result ? "" : result.message;
       element.mark_paint_dirty();
@@ -531,6 +573,13 @@ bool handle_input(Interaction &state, GraphEditDocument &model,
       if (event.key == KeyCode::Z) result = model.undo();
       else if (event.key == KeyCode::Y) result = model.redo();
       else return false;
+      if (result) {
+        // Undo/Redo can retire a selected NodeId/GroupId. No stale UI
+        // selection outlives the document revision it was derived from.
+        state.selected_node.clear();
+        state.selected_nodes.clear();
+        state.selected_group.clear();
+      }
       state.status_message = result ? "" : result.message;
       element.mark_paint_dirty();
       return true;
@@ -541,9 +590,15 @@ bool handle_input(Interaction &state, GraphEditDocument &model,
       // and collapsed group proxy mappings are validated and retired as
       // one snapshot; a locked node fails without losing its selection.
       if (event.key == KeyCode::Delete || event.key == KeyCode::Backspace) {
+        if (state.selected_nodes.size() > 1) {
+          state.status_message = "Multiple deletion requires a distinct transaction";
+          element.mark_paint_dirty();
+          return true;
+        }
         const auto result = model.remove_node(state.selected_node);
         if (result) {
           state.selected_node.clear();
+          state.selected_nodes.clear();
           state.selected_group.clear();
         }
         state.status_message = result ? "" : result.message;
@@ -630,6 +685,7 @@ bool handle_input(Interaction &state, GraphEditDocument &model,
       // A click toggles collapse on MouseUp. A >4px drag translates the
       // entire local subtree using the existing one-document transaction.
       state.selected_node.clear();
+      state.selected_nodes.clear();
       state.selected_group = std::move(header_group);
       state.mode = GestureMode::ArmedGroup;
       state.status_message.clear();
@@ -647,6 +703,7 @@ bool handle_input(Interaction &state, GraphEditDocument &model,
     if (const auto node = hit_node(model, state, x, y)) {
       if (is_group_proxy(model, node->id)) {
         state.selected_node.clear();
+        state.selected_nodes.clear();
         state.selected_group = node->id.substr(6);
         state.mode = GestureMode::ArmedGroup;
         state.status_message.clear();
@@ -654,8 +711,31 @@ bool handle_input(Interaction &state, GraphEditDocument &model,
         element.mark_paint_dirty();
         return true;
       }
-      state.selected_node = node->id;
       state.selected_group.clear(); // A node click supersedes prior group selection.
+      if (event.mods & static_cast<int>(flexUI::KeyMod::Shift)) {
+        // Shift+Click is selection-only, never an implicit drag. A multi-
+        // selection is a short list of stable original NodeIds, not UI parts.
+        const auto found = std::find(state.selected_nodes.begin(),
+                                     state.selected_nodes.end(), node->id);
+        if (found == state.selected_nodes.end()) {
+          if (state.selected_nodes.size() >= 256) {
+            state.status_message = "Selection exceeds native graph budget";
+          } else {
+            state.selected_nodes.push_back(node->id);
+            state.selected_node = node->id;
+            state.status_message.clear();
+          }
+        } else {
+          state.selected_nodes.erase(found);
+          state.selected_node = state.selected_nodes.empty() ? "" :
+                                state.selected_nodes.back();
+          state.status_message.clear();
+        }
+        element.mark_paint_dirty();
+        return true;
+      }
+      state.selected_node = node->id;
+      state.selected_nodes.assign(1, node->id);
       if (!node->locked) {
         // Reserve capture for the gesture, but do NOT begin a document
         // transaction until the pointer moves beyond the CSS-pixel threshold.
@@ -670,6 +750,7 @@ bool handle_input(Interaction &state, GraphEditDocument &model,
       return true;
     }
     state.selected_node.clear();
+    state.selected_nodes.clear();
     state.selected_group.clear();
     element.mark_paint_dirty();
     return true;
