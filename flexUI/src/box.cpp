@@ -1489,8 +1489,12 @@ BoxWidgetPartError Box::reconcile_widget_parts(
       static constexpr const char *handlers[] = {
           "data-flexui-on-click", "data-flexui-on-mouse_move",
           "data-flexui-on-mouse_down", "data-flexui-on-mouse_up",
-          "data-flexui-on-key_down", "data-flexui-on-key_up",
-          "data-flexui-on-focus_in", "data-flexui-on-focus_out"};
+          "data-flexui-on-mouse_wheel", "data-flexui-on-key_down",
+          "data-flexui-on-key_up", "data-flexui-on-text_input",
+          "data-flexui-on-focus_in", "data-flexui-on-focus_out",
+          "data-flexui-on-composition_start",
+          "data-flexui-on-composition_update",
+          "data-flexui-on-composition_end"};
       for (const char *handler : handlers)
         if (part->has_attribute(handler))
           return BoxWidgetPartError::BorrowedPart;
