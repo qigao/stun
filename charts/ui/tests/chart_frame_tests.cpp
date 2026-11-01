@@ -11,6 +11,7 @@
 #include <iostream>
 #include <limits>
 #include <memory>
+#include <thread>
 
 #include <flexUI/box.h>
 #include <flexUI/computed_style.h>
@@ -1153,6 +1154,127 @@ spec("GraphCanvas M1b immutable native graph worker and revision gate") {
     check_equal(model.undo_count(), 0U);
     check_true(static_cast<bool>(model.begin_move("alpha")));
     model.cancel_move();
+  }
+}
+
+spec("GraphCanvas M1c optional mounted async owner-frame causality") {
+  it("keeps MouseUp uncommitted, then applies the exact result on the Box frame") {
+    auto model = std::make_shared<GraphEditDocument>();
+    check_true(static_cast<bool>(model->initialize(example())));
+    auto registry = flexUI::WidgetRegistry::builtins();
+    check_false(static_cast<bool>(
+        charts::ui::register_graph_canvas_widget(
+            registry, model, charts::ui::GraphCanvasRoutingMode::AsyncCommit)));
+    auto compiled = flexUI::compile_ui_xml(
+        "<ui name=\"GraphAsync\"><main id=\"root\">"
+        "<native-graph id=\"graph\" /></main></ui>");
+    check_true(static_cast<bool>(compiled));
+    if (!compiled) return;
+    flexUI::Box box(nullptr);
+    auto mounted = flexUI::UiDocumentInstantiator::instantiate(
+        box, *compiled.program, registry);
+    check_true(static_cast<bool>(mounted));
+    if (!mounted) return;
+    auto *root = box.get_by_id("root");
+    auto *graph = box.get_by_id("graph");
+    check_not_null(root);
+    check_not_null(graph);
+    if (!root || !graph) return;
+    root->set_layout_bounds(0, 0, 832, 160);
+    graph->set_layout_bounds(0, 0, 832, 160);
+    check_equal(*graph->attribute("data-routing"), "idle");
+    const auto old_revision = model->snapshot().revision;
+    auto down = flexUI::Event::mouse_down(85, 56);
+    auto move = flexUI::Event::mouse_move(117, 70);
+    auto up = flexUI::Event::mouse_up(117, 70);
+    box.dispatch_event(down);
+    box.dispatch_event(move);
+    check_true(model->has_preview());
+    box.dispatch_event(up);
+    check_true(up.handled);
+    check_null(box.capturing_element());
+    check_false(model->has_preview());
+    check_equal(model->snapshot().revision, old_revision);
+    check_equal(node_by_id(*model, "alpha")->x, 55.0);
+    check_equal(*graph->attribute("data-routing"), "pending");
+
+    // Real Box owner-thread frames, not calls directly into the graph worker.
+    for (int i = 0; i < 256 && model->snapshot().revision == old_revision; ++i) {
+      box.update_time(1.0f);
+      std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    check_equal(model->snapshot().revision, old_revision + 1);
+    check_equal(node_by_id(*model, "alpha")->x, 87.0);
+    check_equal(model->snapshot().routes.size(), 1U);
+    check_equal(model->undo_count(), 1U);
+    check_equal(*graph->attribute("data-routing"), "committed");
+    flexUI::RenderCommandList commands(flex::RendererCapabilities{});
+    auto *native = dynamic_cast<flexUI::NativeCanvasWidget *>(graph->widget);
+    check_not_null(native);
+    if (native) {
+      native->emit_render_commands(*graph, commands);
+      check_true(commands.commands().size() > 6U);
+    }
+
+    // The next edit may be canceled while the background A* is running.
+    auto down2 = flexUI::Event::mouse_down(110, 70);
+    auto move2 = flexUI::Event::mouse_move(135, 85);
+    auto up2 = flexUI::Event::mouse_up(135, 85);
+    box.dispatch_event(down2);
+    box.dispatch_event(move2);
+    box.dispatch_event(up2);
+    check_true(up2.handled);
+    check_equal(model->snapshot().revision, old_revision + 1);
+    auto escape = flexUI::Event::key_down(flexUI::KeyCode::Escape);
+    box.dispatch_event(escape);
+    check_true(escape.handled);
+    check_equal(*graph->attribute("data-routing"), "canceled");
+    for (int i = 0; i < 256; ++i) {
+      box.update_time(1.0f);
+      std::this_thread::sleep_for(std::chrono::milliseconds(1));
+      if (*graph->attribute("data-routing") == "canceled") break;
+    }
+    check_equal(model->snapshot().revision, old_revision + 1);
+    check_equal(node_by_id(*model, "alpha")->x, 87.0);
+    check_equal(model->undo_count(), 1U);
+  }
+
+  it("retiring a mounted pending async Widget joins without publishing") {
+    auto model = std::make_shared<GraphEditDocument>();
+    check_true(static_cast<bool>(model->initialize(example())));
+    const auto baseline = model->snapshot();
+    {
+      auto registry = flexUI::WidgetRegistry::builtins();
+      check_false(static_cast<bool>(
+          charts::ui::register_graph_canvas_widget(
+              registry, model, charts::ui::GraphCanvasRoutingMode::AsyncCommit)));
+      const auto compiled = flexUI::compile_ui_xml(
+          "<ui name=\"GraphAsyncRetire\"><main id=\"root\">"
+          "<native-graph id=\"graph\" /></main></ui>");
+      check_true(static_cast<bool>(compiled));
+      if (!compiled) return;
+      flexUI::Box box(nullptr);
+      check_true(static_cast<bool>(flexUI::UiDocumentInstantiator::instantiate(
+          box, *compiled.program, registry)));
+      auto *root = box.get_by_id("root");
+      auto *graph = box.get_by_id("graph");
+      if (!root || !graph) return;
+      root->set_layout_bounds(0, 0, 832, 160);
+      graph->set_layout_bounds(0, 0, 832, 160);
+      auto down = flexUI::Event::mouse_down(85, 56);
+      auto move = flexUI::Event::mouse_move(117, 70);
+      auto up = flexUI::Event::mouse_up(117, 70);
+      box.dispatch_event(down);
+      box.dispatch_event(move);
+      box.dispatch_event(up);
+      check_equal(*graph->attribute("data-routing"), "pending");
+      // The only owner here is the mounted Widget. No Box->update_time frame
+      // has accepted a result, even if the A* future already completed.
+    }
+    check_equal(model->snapshot().revision, baseline.revision);
+    check_equal(node_by_id(*model, "alpha")->x, 55.0);
+    check_equal(model->snapshot().routes.size(), baseline.routes.size());
+    check_equal(model->undo_count(), 0U);
   }
 }
 

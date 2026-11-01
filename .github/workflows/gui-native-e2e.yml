@@ -289,6 +289,11 @@ jobs:
           # committed route geometry, Undo/Redo, paint, and real service.
           xvfb-run -a -s '-screen 0 1280x900x24 -nolisten tcp' \
             build/stun-gui/bin/flexui_desktop_editor --smoke
+          # Same genuine native host/PluginHost/Box/GraphCanvas sources.
+          # This opt-in mode exercises owner-frame async publication with
+          # Continuous host pumping, not an alternative rendering engine.
+          xvfb-run -a -s '-screen 0 1280x900x24 -nolisten tcp' \
+            build/stun-gui/bin/flexui_desktop_editor --smoke-async
           xvfb-run -a -s '-screen 0 1280x900x24 -nolisten tcp' \
             /usr/bin/python3 .github/scripts/gui_native_suite.py \
               --exe build/stun-gui/bin/flexui_desktop_editor \
