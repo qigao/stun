@@ -572,6 +572,11 @@ GraphEditStatus GraphRouteWorker::submit_move(
       std::abs(dx) > 1.0e6 || std::abs(dy) > 1.0e6)
     return reject(GraphEditError::InvalidGeometry, "invalid worker move displacement");
 
+  // Replacing a finished task revokes any result that was polled but not
+  // yet published by the document owner. A stale handoff never remains
+  // acceptable merely because the future was already consumed.
+  if (cancellation_) cancellation_->store(true, std::memory_order_release);
+
   // These are the ONLY values captured by the worker. It cannot reach the
   // live document, a Box subtree, Widget, Element or render resource.
   GraphEditSnapshot baseline = owner.committed_;
@@ -652,7 +657,8 @@ std::optional<GraphEditDocument::PreparedMove> GraphRouteWorker::poll() {
       cancellation_->load(std::memory_order_acquire))
     completed.status_ = reject(GraphEditError::Conflict,
                                "graph worker canceled before result publication");
-  cancellation_.reset();
+  // Keep the cancellation token until the next submission or worker
+  // retirement. Even AFTER poll(), cancel() must revoke the prepared result.
   return std::optional<GraphEditDocument::PreparedMove>{std::move(completed)};
 }
 

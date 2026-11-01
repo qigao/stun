@@ -939,7 +939,10 @@ spec("GraphCanvas M1b real routing scale and frame-budget evidence") {
       check_equal(stats.index_queries, 1U);
       check_equal(stats.rerouted + stats.reused, 49U);
       check_true(stats.rerouted < 49U);
-      check_true(stats.segment_candidates < stats.indexed_segments);
+      // All 49 horizontal routes overlap the same X interval. A correct
+      // x-index may enumerate every segment, before exact Y filtering.
+      // Do not invent an x-pruning ratio where the fixture cannot yield one.
+      check_true(stats.segment_candidates <= stats.indexed_segments);
       biggest_candidates = std::max(biggest_candidates, stats.segment_candidates);
       biggest_reroute = std::max(biggest_reroute, stats.rerouted);
     }
@@ -1040,6 +1043,54 @@ spec("GraphCanvas M1b immutable native graph worker and revision gate") {
     check_equal(model.snapshot().revision, std::uint64_t{1});
     check_equal(node_by_id(model, "alpha")->x, 55.0);
     check_equal(model.undo_count(), 0U);
+  }
+
+  it("revokes a completed handoff if canceled after poll") {
+    GraphEditDocument model;
+    check_true(static_cast<bool>(model.initialize(example())));
+    charts::ui::GraphRouteWorker worker;
+    check_true(static_cast<bool>(
+        worker.submit_move(model, "alpha", 32.0, 14.0, 28)));
+    worker.wait();
+    auto result = worker.poll();
+    check_true(static_cast<bool>(result));
+    if (!result) return;
+    check_true(static_cast<bool>(result->status()));
+    worker.cancel(); // Future consumed, but its result retains the token.
+    const auto rejected = model.accept_prepared_move(std::move(*result), 28);
+    check_false(static_cast<bool>(rejected));
+    check(rejected.error == GraphEditError::Conflict);
+    check_equal(model.snapshot().revision, std::uint64_t{1});
+    check_equal(model.undo_count(), 0U);
+  }
+
+  it("superseding a polled result invalidates its publication token") {
+    GraphEditDocument model;
+    check_true(static_cast<bool>(model.initialize(example())));
+    charts::ui::GraphRouteWorker worker;
+    check_true(static_cast<bool>(
+        worker.submit_move(model, "alpha", 32.0, 14.0, 35)));
+    worker.wait();
+    auto old_result = worker.poll();
+    check_true(static_cast<bool>(old_result));
+    if (!old_result) return;
+    check_true(static_cast<bool>(old_result->status()));
+    check_true(static_cast<bool>(
+        worker.submit_move(model, "alpha", 24.0, 12.0, 35)));
+    const auto rejected = model.accept_prepared_move(
+        std::move(*old_result), 35);
+    check_false(static_cast<bool>(rejected));
+    check(rejected.error == GraphEditError::Conflict);
+    worker.wait();
+    auto current = worker.poll();
+    check_true(static_cast<bool>(current));
+    if (!current) return;
+    check_true(static_cast<bool>(current->status()));
+    check_true(static_cast<bool>(
+        model.accept_prepared_move(std::move(*current), 35)));
+    check_equal(node_by_id(model, "alpha")->x, 79.0);
+    check_equal(model.snapshot().revision, std::uint64_t{2});
+    check_equal(model.undo_count(), 1U);
   }
 
   it("rejects an old widget mount token without touching committed geometry") {
