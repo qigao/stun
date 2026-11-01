@@ -306,6 +306,11 @@ jobs:
           # Reuse this workflow and its existing compiled native application.
           xvfb-run -a -s '-screen 0 1280x900x24 -nolisten tcp' \
             build/stun-gui/bin/flexui_desktop_editor --smoke-hierarchy
+          # M2e linked Widget lifetime proof: post-mount node+port insertion,
+          # borrowed focus refusal, physical retirement, repeated group proxy
+          # add/remove, stable siblings and real document Save. No new target.
+          xvfb-run -a -s '-screen 0 1280x900x24 -nolisten tcp' \
+            build/stun-gui/bin/flexui_desktop_editor --smoke-semantic
           xvfb-run -a -s '-screen 0 1280x900x24 -nolisten tcp' \
             /usr/bin/python3 .github/scripts/gui_native_suite.py \
               --exe build/stun-gui/bin/flexui_desktop_editor \

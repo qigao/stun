@@ -13,6 +13,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <iostream>
+#include <nlohmann/json.hpp>
 #include <new>
 #include <memory>
 #include <stdexcept>
@@ -621,6 +622,122 @@ int run_hierarchy_smoke(
   return EXIT_SUCCESS;
 }
 
+// Qualify post-mount semantic leaf reconciliation against the ACTUAL
+// linked OpenGL/PluginHost/Box desktop application, not a mock consumer.
+int run_semantic_smoke(
+    flexUI::GCanvasPluginWindowHost &host,
+    const std::shared_ptr<charts::ui::GraphEditDocument> &model) {
+  auto pumped = host.pump_once(0.0);
+  if (!pumped) return fail("semantic first frame", pumped.error.message);
+  auto &box = host.application().box();
+  auto *graph = box.get_by_id("graph");
+  if (!graph || !graph->widget || graph->child_count() != 4)
+    return fail("semantic initial host", "real mounted graph lacks original parts");
+
+  const auto count = box.owned_element_count();
+  const auto find_part = [&](std::string_view key) -> flexUI::Element * {
+    for (auto *raw : graph->children()) {
+      auto *part = static_cast<flexUI::Element *>(raw);
+      const auto *name = part->attribute("part");
+      if (name && *name == key) return part;
+    }
+    return nullptr;
+  };
+  auto *alpha = find_part("node:alpha");
+  if (!alpha) return fail("semantic base", "stable alpha part is missing");
+
+  // A real document Save/Reopen only owns logical IDs; the host semantic
+  // tree is a derived Box-owned projection, never serialized as pointers.
+  std::string original;
+  if (!model->save_json(original))
+    return fail("semantic source", "logical v1 graph JSON unavailable");
+  auto extended = nlohmann::json::parse(original);
+  extended["nodes"].push_back({{"id", "gamma"}, {"x", 740.0},
+      {"y", 38.0}, {"width", 80.0}, {"height", 64.0},
+      {"locked", false}});
+  extended["ports"].push_back({{"id", "gamma-output"},
+      {"node", "gamma"}, {"side", "east"}, {"x", 80.0},
+      {"y", 32.0}, {"output", true}});
+  const auto expanded = extended.dump();
+
+  if (!model->load_json(expanded))
+    return fail("semantic add", "new original node/port was not accepted");
+  box.update(); // The exact Box owner safe boundary performs reconciliation.
+  box.invalidate();
+  pumped = host.pump_once(0.0);
+  if (!pumped || box.owned_element_count() != count + 2 ||
+      graph->child_count() != 6 || !find_part("node:gamma") ||
+      !find_part("port:gamma-output") || find_part("node:alpha") != alpha ||
+      box.last_widget_part_error() != flexUI::BoxWidgetPartError::None)
+    return fail("semantic add host", "native Box did not mount two new owned parts");
+
+  // A borrowed/focused part must NOT be destroyed while still addressable.
+  auto *gamma = find_part("node:gamma");
+  box.set_focus(gamma);
+  if (!model->load_json(original))
+    return fail("semantic remove source", "cannot restore original graph");
+  box.update();
+  if (box.last_widget_part_error() != flexUI::BoxWidgetPartError::BorrowedPart ||
+      box.owned_element_count() != count + 2 ||
+      box.focused_element() != gamma || gamma->parent_elem() != graph)
+    return fail("semantic focus lease", "borrowed group part was incorrectly freed");
+
+  box.set_focus(nullptr);
+  box.update();
+  box.invalidate();
+  pumped = host.pump_once(0.0);
+  if (!pumped || box.owned_element_count() != count ||
+      graph->child_count() != 4 || find_part("node:gamma") ||
+      find_part("port:gamma-output") ||
+      find_part("node:alpha") != alpha ||
+      box.last_widget_part_error() != flexUI::BoxWidgetPartError::None)
+    return fail("semantic physical retire", "Box failed to reclaim old parts");
+
+  // One GroupId and its named proxy PortId are created and deleted repeatedly
+  // AFTER the XML widget was mounted. Reusing the same stable key must never
+  // grow the Box-owned Element arena.
+  for (int i = 0; i < 6; ++i) {
+    charts::ui::GraphEditGroup group;
+    group.id = "pack";
+    group.x = 40; group.y = 24; group.width = 170; group.height = 130;
+    group.member_node_ids = {"alpha"};
+    group.proxy_ports.push_back(
+        {"pack-out", "source", stun::graphlayout::Side::East, 170, 48});
+    if (!model->add_group(std::move(group)))
+      return fail("semantic group source", "measured group was rejected");
+    box.update();
+    if (graph->child_count() != 6 ||
+        box.owned_element_count() != count + 2 ||
+        !find_part("node:group@pack") || !find_part("port:pack-out") ||
+        find_part("node:alpha") != alpha)
+      return fail("semantic group insert", "group proxy missing on owner Box");
+    if (!model->remove_group("pack"))
+      return fail("semantic group remove", "logical group could not be removed");
+    box.update();
+    if (graph->child_count() != 4 || box.owned_element_count() != count ||
+        find_part("node:group@pack") || find_part("port:pack-out") ||
+        find_part("node:alpha") != alpha)
+      return fail("semantic group retire", "repeated group proxy leaked");
+  }
+  box.invalidate();
+  pumped = host.pump_once(0.0);
+  if (!pumped) return fail("semantic final frame", pumped.error.message);
+
+  // Service ownership and Save must continue to work after dynamic changes.
+  auto *save = box.get_by_id("save");
+  if (!save) return fail("semantic Save lookup", "real Save action is absent");
+  const auto clicked = dispatch_save_click(host.application(), *save);
+  if (!clicked) return fail("semantic Save click", clicked.error.message);
+  std::string error;
+  if (!pump_until_saved(host, *save, error))
+    return fail("semantic Save service", error);
+  const auto stopped = host.shutdown(kShutdownTimeout);
+  if (!stopped) return fail("semantic host shutdown", stopped.error.message);
+  std::cout << "FlexUI desktop editor semantic smoke passed: "
+            << save->text() << '\n';
+  return EXIT_SUCCESS;
+}
+
 } // namespace
 
 int main(int argc, char **argv) {
@@ -628,6 +745,7 @@ int main(int argc, char **argv) {
   bool async_routing = false;
   bool group_smoke = false;
   bool hierarchy_smoke = false;
+  bool semantic_smoke = false;
   if (argc == 2 && std::string_view(argv[1]) == "--smoke") {
     smoke = true;
   } else if (argc == 2 && std::string_view(argv[1]) == "--smoke-async") {
@@ -639,9 +757,12 @@ int main(int argc, char **argv) {
   } else if (argc == 2 && std::string_view(argv[1]) == "--smoke-hierarchy") {
     smoke = true;
     hierarchy_smoke = true;
+  } else if (argc == 2 && std::string_view(argv[1]) == "--smoke-semantic") {
+    smoke = true;
+    semantic_smoke = true;
   } else if (argc != 1) {
     return fail("arguments",
-                "usage: flexui_desktop_editor [--smoke|--smoke-async|--smoke-group|--smoke-hierarchy]");
+                "usage: flexui_desktop_editor [--smoke|--smoke-async|--smoke-group|--smoke-hierarchy|--smoke-semantic]");
   }
 
   std::error_code path_error;
@@ -735,6 +856,7 @@ int main(int argc, char **argv) {
     return fail("runtime composition", built.error.message);
   }
 
+  if (semantic_smoke) return run_semantic_smoke(*built.host, graph_model);
   if (hierarchy_smoke) return run_hierarchy_smoke(*built.host, graph_model);
   if (smoke) {
     return run_smoke(*built.host, timeline_model, graph_model,
