@@ -16,6 +16,7 @@
 #include "transition.h"
 #include "ui_handle.h"
 #include "view_pipeline.h"
+#include "widget.h"
 #include <cstdint>
 #include <flex/runtime/renderer.h>
 #include <functional>
@@ -62,6 +63,19 @@ struct BoxSubtreeBorrowSnapshot {
   explicit operator bool() const noexcept {
     return error == BoxSubtreeBorrowErrorCode::None;
   }
+};
+
+// Linked-widget-only semantic leaf lifecycle result. This does NOT authorize
+// compiled component unmount or dynamic native PluginHost Widget DLL code.
+enum class BoxWidgetPartError {
+  None,
+  WrongThread,
+  Busy,
+  InvalidHost,
+  InvalidSpec,
+  BorrowedPart,
+  CapacityExceeded,
+  AllocationFailed,
 };
 
 class Renderer;
@@ -202,6 +216,9 @@ public:
 
   // Diagnostics only; includes the Box-owned widget projections.
   std::size_t owned_element_count() const noexcept { return elements_.size(); }
+  BoxWidgetPartError last_widget_part_error() const noexcept {
+    return widget_part_error_;
+  }
   // Diagnostic count of pointer-keyed CSS baseline objects retained in Box.
   std::size_t cached_style_element_count() const noexcept {
     return style_engine_.tracked_element_count();
@@ -320,6 +337,12 @@ private:
   // Failed validation leaves all elements allocated.
   bool retire_detached_elements(const std::vector<Element*> &elements) noexcept;
   Element *create_widget_part(Element &host, const std::string &tag, const std::string &part_name);
+  // All dynamic semantic leaves are owned by this ONE Box. Reconcile only
+  // at an owner-thread boundary after event/frame/layout traversal, with an
+  // explicit bounded part set. Does not retire a compiled XML subtree.
+  BoxWidgetPartError reconcile_widget_parts(
+      Widget &widget, const std::vector<WidgetSemanticPart> &desired) noexcept;
+  void refresh_dynamic_widget_parts() noexcept;
   void compute_styles(Element *elem, bool parent_recomputed = false);
   bool has_view_root() const override;
   bool needs_style_stage() const override;
@@ -349,6 +372,8 @@ private:
   // Layout/render and widget-frame traversal borrow Element* across
   // callback boundaries; retirement must wait until those walks finish.
   std::size_t borrowed_tree_depth_ = 0;
+  bool refreshing_widget_parts_ = false;
+  BoxWidgetPartError widget_part_error_ = BoxWidgetPartError::None;
 
   // 元素树
   Element *root_ = nullptr;
