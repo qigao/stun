@@ -949,6 +949,142 @@ int run_delete_smoke(
   return EXIT_SUCCESS;
 }
 
+// M2h: the exact same production OpenGL/PluginHost/Box application
+// exercises genuine nested Ungroup, keyboard selection, full Undo/Redo,
+// physical semantic retirement and a real native document Save.
+int run_ungroup_smoke(
+    flexUI::GCanvasPluginWindowHost &host,
+    const std::shared_ptr<charts::ui::GraphEditDocument> &model) {
+  auto pumped = host.pump_once(0.0);
+  if (!pumped) return fail("ungroup initial frame", pumped.error.message);
+  auto &box = host.application().box();
+  auto *graph = box.get_by_id("graph");
+  if (!graph || !graph->widget || graph->child_count() != 16 ||
+      model->snapshot().nodes.size() != 4 ||
+      model->snapshot().edges.size() != 3 ||
+      model->snapshot().groups.size() != 3)
+    return fail("ungroup mount", "three-level source was not mounted");
+  const auto *shortcuts = graph->attribute("aria-keyshortcuts");
+  if (!shortcuts || shortcuts->find("Control+Shift+G") == std::string::npos)
+    return fail("ungroup shortcuts", "native Widget metadata is incomplete");
+  const auto part = [&](std::string_view key) -> flexUI::Element * {
+    for (auto *raw : graph->children()) {
+      auto *element = static_cast<flexUI::Element *>(raw);
+      const auto *name = element->attribute("part");
+      if (name && *name == key) return element;
+    }
+    return nullptr;
+  };
+  const auto group = [&](std::string_view id)
+      -> const charts::ui::GraphEditGroup * {
+    for (const auto &g : model->snapshot().groups)
+      if (g.id == id) return &g;
+    return nullptr;
+  };
+  auto *inner_semantic = part("node:group@inner");
+  if (!inner_semantic || !part("node:group@middle") ||
+      !part("port:middle-out"))
+    return fail("ungroup group parts", "group semantic identity is missing");
+  const auto owned_before = box.owned_element_count();
+  const auto first_revision = model->snapshot().revision;
+  const float gx = graph->absolute_x(), gy = graph->absolute_y();
+
+  // A click on the middle header selects its stable GroupId and collapses it.
+  // Ctrl+Shift+G must then remove the selected group, without deleting its
+  // nested inner group, moving any original leaf, or rewriting any EdgeId.
+  auto click_down = flexUI::Event::mouse_down(gx + 80.0F, gy + 58.0F);
+  auto click_up = flexUI::Event::mouse_up(gx + 80.0F, gy + 58.0F);
+  if (!host.application().dispatch_event(click_down) || !click_down.handled ||
+      box.capturing_element() != graph ||
+      !host.application().dispatch_event(click_up) || !click_up.handled ||
+      box.capturing_element() != nullptr ||
+      !group("middle") || !group("middle")->collapsed ||
+      model->snapshot().revision != first_revision + 1 ||
+      model->snapshot().routes.size() != 2)
+    return fail("ungroup selection", "middle header did not capture and collapse");
+  const int mods = static_cast<int>(flexUI::KeyMod::Control) |
+                   static_cast<int>(flexUI::KeyMod::Shift);
+  auto shortcut = flexUI::Event::key_down(flexUI::KeyCode::G, mods);
+  if (!host.application().dispatch_event(shortcut) || !shortcut.handled ||
+      group("middle") != nullptr ||
+      !group("inner") || !group("outer") ||
+      group("inner")->parent_group_id != "outer" ||
+      group("inner")->x != 50.0 || group("inner")->y != 50.0 ||
+      model->snapshot().revision != first_revision + 2 ||
+      model->snapshot().nodes.size() != 4 ||
+      model->snapshot().ports.size() != 6 ||
+      model->snapshot().edges.size() != 3 ||
+      model->snapshot().routes.size() != 3)
+    return fail("ungroup keyboard", "one native group transaction failed");
+  box.update();
+  box.invalidate();
+  pumped = host.pump_once(0.0);
+  if (!pumped || box.owned_element_count() != owned_before - 2 ||
+      graph->child_count() != 14 ||
+      part("node:group@inner") != inner_semantic ||
+      part("node:group@middle") || part("port:middle-out"))
+    return fail("ungroup physical parts", "Box did not reclaim only middle group leaves");
+  charts::ui::GraphEditNode inner_world;
+  if (!model->group_world_rect("inner", inner_world) ||
+      inner_world.x != 70.0 || inner_world.y != 70.0)
+    return fail("ungroup world geometry", "inner GroupId moved unexpectedly");
+
+  auto undo = flexUI::Event::key_down(
+      flexUI::KeyCode::Z, static_cast<int>(flexUI::KeyMod::Control));
+  if (!host.application().dispatch_event(undo) || !undo.handled)
+    return fail("ungroup Undo keyboard", "Ctrl-Z was not consumed");
+  box.update();
+  if (!group("middle") || !group("middle")->collapsed ||
+      group("inner")->parent_group_id != "middle" ||
+      group("inner")->x != 20.0 ||
+      model->snapshot().routes.size() != 2 ||
+      graph->child_count() != 16 ||
+      box.owned_element_count() != owned_before ||
+      part("node:group@inner") != inner_semantic)
+    return fail("ungroup Undo", "hierarchy or Box leaves were not restored");
+
+  auto redo = flexUI::Event::key_down(
+      flexUI::KeyCode::Y, static_cast<int>(flexUI::KeyMod::Control));
+  if (!host.application().dispatch_event(redo) || !redo.handled)
+    return fail("ungroup Redo keyboard", "Ctrl-Y was not consumed");
+  box.update();
+  if (group("middle") || group("inner")->parent_group_id != "outer" ||
+      model->snapshot().routes.size() != 3 ||
+      box.owned_element_count() != owned_before - 2)
+    return fail("ungroup Redo", "single recorded transaction was not replayed");
+
+  // Removing a root parent additionally promotes the remaining child group
+  // to world coordinates, while c is left completely ungrouped.
+  if (!model->remove_group("outer"))
+    return fail("ungroup root source", "root Ungroup was rejected");
+  box.update();
+  if (group("outer") || !group("inner") ||
+      group("inner")->parent_group_id != "" ||
+      group("inner")->x != 70.0 || group("inner")->y != 70.0 ||
+      model->snapshot().edges.size() != 3 ||
+      model->snapshot().routes.size() != 3 ||
+      graph->child_count() != 12 ||
+      box.owned_element_count() != owned_before - 4 ||
+      part("node:group@inner") != inner_semantic)
+    return fail("ungroup root promotion", "world-origin promotion was not atomic");
+
+  box.invalidate();
+  pumped = host.pump_once(0.0);
+  if (!pumped) return fail("ungroup final frame", pumped.error.message);
+  auto *save = box.get_by_id("save");
+  if (!save) return fail("ungroup Save lookup", "real service action missing");
+  const auto clicked = dispatch_save_click(host.application(), *save);
+  if (!clicked) return fail("ungroup Save click", clicked.error.message);
+  std::string error;
+  if (!pump_until_saved(host, *save, error))
+    return fail("ungroup Save service", error);
+  const auto stopped = host.shutdown(kShutdownTimeout);
+  if (!stopped) return fail("ungroup shutdown", stopped.error.message);
+  std::cout << "FlexUI desktop editor nested Ungroup smoke passed: "
+            << save->text() << '\n';
+  return EXIT_SUCCESS;
+}
+
 } // namespace
 
 int main(int argc, char **argv) {
@@ -959,6 +1095,7 @@ int main(int argc, char **argv) {
   bool semantic_smoke = false;
   bool topology_smoke = false;
   bool delete_smoke = false;
+  bool ungroup_smoke = false;
   if (argc == 2 && std::string_view(argv[1]) == "--smoke") {
     smoke = true;
   } else if (argc == 2 && std::string_view(argv[1]) == "--smoke-async") {
@@ -979,9 +1116,12 @@ int main(int argc, char **argv) {
   } else if (argc == 2 && std::string_view(argv[1]) == "--smoke-delete") {
     smoke = true;
     delete_smoke = true;
+  } else if (argc == 2 && std::string_view(argv[1]) == "--smoke-ungroup") {
+    smoke = true;
+    ungroup_smoke = true;
   } else if (argc != 1) {
     return fail("arguments",
-                "usage: flexui_desktop_editor [--smoke|--smoke-async|--smoke-group|--smoke-hierarchy|--smoke-semantic|--smoke-topology|--smoke-delete]");
+                "usage: flexui_desktop_editor [--smoke|--smoke-async|--smoke-group|--smoke-hierarchy|--smoke-semantic|--smoke-topology|--smoke-delete|--smoke-ungroup]");
   }
 
   std::error_code path_error;
@@ -1023,7 +1163,7 @@ int main(int argc, char **argv) {
         {"pack-out", "source", stun::graphlayout::Side::East, 170.0, 48.0});
     initial_graph.groups.push_back(std::move(group));
   }
-  if (hierarchy_smoke) {
+  if (hierarchy_smoke || ungroup_smoke) {
     // All original leaf nodes/ports remain world-space; nested groups are
     // parent-local. These are the SAME bounded C++ source types that the
     // existing ChartUiTest uses, not a parallel smoke-only graph runtime.
@@ -1077,6 +1217,7 @@ int main(int argc, char **argv) {
     return fail("runtime composition", built.error.message);
   }
 
+  if (ungroup_smoke) return run_ungroup_smoke(*built.host, graph_model);
   if (delete_smoke) return run_delete_smoke(*built.host, graph_model);
   if (topology_smoke) return run_topology_smoke(*built.host, graph_model);
   if (semantic_smoke) return run_semantic_smoke(*built.host, graph_model);
