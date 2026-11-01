@@ -7,6 +7,8 @@
 #include <flexUI/ui_document.h>
 #include <flexUI/ui_xml.h>
 #include <algorithm>
+#include <chrono>
+#include <iostream>
 #include <limits>
 #include <memory>
 
@@ -887,6 +889,79 @@ spec("GraphCanvas M1a uses conservative bounded incremental orthogonal routing")
     check_equal(model.last_route_update().obstacle_invalidated, 0U);
     check_equal(node_by_id(model, "beta")->x, 440.0);
     check_false(model.last_route_update().full_rebuild);
+  }
+}
+
+spec("GraphCanvas M1b real routing scale and frame-budget evidence") {
+  it("measures the actual 100-node / 49-edge native commit, not a mock layout") {
+    GraphEditSnapshot source;
+    for (int i = 0; i < 49; ++i) {
+      const auto label = std::to_string(i);
+      const double y = static_cast<double>(i) * 70.0;
+      source.nodes.push_back({"s-" + label, 20.0, y, 80.0, 36.0, false});
+      source.nodes.push_back({"t-" + label, 400.0, y, 80.0, 36.0, false});
+      source.ports.push_back({"o-" + label, "s-" + label,
+                              gl::Side::East, 80.0, 18.0, true});
+      source.ports.push_back({"i-" + label, "t-" + label,
+                              gl::Side::West, 0.0, 18.0, false});
+      source.edges.push_back({"e-" + label, "o-" + label, "i-" + label});
+    }
+    const double affected_row = 25.0 * 70.0;
+    // Existing blocker is clear of route #25 and its neighbor #26.
+    // Moving it 44 world units upward blocks route #25 only.
+    source.nodes.push_back({"blocker", 230.0, affected_row + 38.0,
+                             40.0, 24.0, false});
+    source.nodes.push_back({"parked", 1200.0, 4000.0, 40.0, 24.0, false});
+    GraphEditDocument model;
+    const auto setup_start = std::chrono::steady_clock::now();
+    check_true(static_cast<bool>(model.initialize(std::move(source))));
+    const auto setup_us = std::chrono::duration_cast<std::chrono::microseconds>(
+        std::chrono::steady_clock::now() - setup_start).count();
+    check_equal(model.snapshot().nodes.size(), 100U);
+    check_equal(model.snapshot().routes.size(), 49U);
+    check_true(model.last_route_update().indexed_segments >= 49U);
+
+    std::vector<std::int64_t> samples_us;
+    samples_us.reserve(8);
+    std::size_t biggest_candidates = 0;
+    std::size_t biggest_reroute = 0;
+    for (int repetition = 0; repetition < 8; ++repetition) {
+      const double delta = (repetition % 2 == 0) ? -44.0 : 44.0;
+      const auto began = std::chrono::steady_clock::now();
+      check_true(static_cast<bool>(model.begin_move("blocker")));
+      check_true(static_cast<bool>(model.preview_move(0.0, delta)));
+      check_true(static_cast<bool>(model.commit_move()));
+      const auto elapsed = std::chrono::duration_cast<std::chrono::microseconds>(
+          std::chrono::steady_clock::now() - began).count();
+      samples_us.push_back(elapsed);
+      const auto &stats = model.last_route_update();
+      check_equal(stats.total_routes, 49U);
+      check_equal(stats.index_queries, 1U);
+      check_equal(stats.rerouted + stats.reused, 49U);
+      check_true(stats.rerouted < 49U);
+      check_true(stats.segment_candidates < stats.indexed_segments);
+      biggest_candidates = std::max(biggest_candidates, stats.segment_candidates);
+      biggest_reroute = std::max(biggest_reroute, stats.rerouted);
+    }
+
+    std::sort(samples_us.begin(), samples_us.end());
+    const auto p50 = samples_us[3];
+    const auto p95 = samples_us[7];
+    check_true(p50 >= 0 && p95 >= p50);
+    check_equal(model.snapshot().revision, std::uint64_t{9});
+    check_equal(node_by_id(model, "blocker")->y, affected_row + 38.0);
+    // Measured on the actual CI host: report, never assert a fabricated
+    // platform-independent latency SLA or invent 500/1000-node performance.
+    std::cout << "GRAPH_CANVAS_M1B_MEASURE"
+              << " nodes=100 routes=49"
+              << " samples=8"
+              << " initial_full_routing_us=" << setup_us
+              << " edit_commit_p50_us=" << p50
+              << " edit_commit_p95_us=" << p95
+              << " max_dirty_routes=" << biggest_reroute
+              << " max_index_candidates=" << biggest_candidates
+              << " indexed_segments=" << model.last_route_update().indexed_segments
+              << std::endl;
   }
 }
 
