@@ -6,6 +6,11 @@ They are not widgets, docking, rendering or UI layout systems. These algorithms
 build independently of Salts, FlexUI, Cairo and OpenGL. Stun no longer bundles
 or builds Adaptagrams; all chart layout consumers use the native modules.
 
+Interactive node editing belongs to the separate [FlexUI GraphCanvas design](../../flexUI/docs/GRAPH_CANVAS_INTERACTIVE_LAYOUT.md)
+([#378](https://github.com/qigao/stun/issues/378)). It uses these exact
+renderer-neutral algorithm modules via a versioned edit adapter; it does **not**
+expand this kernel's scope into UI, widgets, capture or document Undo/Redo.
+
 ## Scope: Adaptagrams-like layout algorithms only (2026-10-10)
 
 This development branch is intentionally limited to independently implemented
