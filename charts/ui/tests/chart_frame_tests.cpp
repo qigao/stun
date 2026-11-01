@@ -914,4 +914,34 @@ spec("GraphCanvas M0 uses real FlexUI Box-owned XML and EventDispatcher") {
     check_true(static_cast<bool>(document->begin_move("alpha")));
     document->cancel_move();
   }
+
+  it("rejects over-budget semantic parts before publishing a mounted graph") {
+    auto document = std::make_shared<GraphEditDocument>();
+    auto source = example(false);
+    // GraphLayout accepts measured ports independently, but Box's existing
+    // subtree borrower inspector caps each Widget at 1024 owned parts.
+    for (int i = 0; i < 1023; ++i) {
+      source.ports.push_back({"extra-" + std::to_string(i),
+                               "alpha", gl::Side::East, 125.0, 36.0, true});
+    }
+    check_true(static_cast<bool>(document->initialize(std::move(source))));
+    check_true(document->snapshot().nodes.size() +
+               document->snapshot().ports.size() > 1024U);
+    auto registry = flexUI::WidgetRegistry::builtins();
+    check_false(static_cast<bool>(
+        charts::ui::register_graph_canvas_widget(registry, document)));
+    auto compiled = flexUI::compile_ui_xml(
+        "<ui name=\"OverCapacity\"><main id=\"root\">"
+        "<native-graph id=\"graph\" /></main></ui>");
+    check_true(static_cast<bool>(compiled));
+    if (!compiled) return;
+    flexUI::Box box(nullptr);
+    const auto build = flexUI::UiDocumentInstantiator::instantiate(
+        box, *compiled.program, registry);
+    check_false(static_cast<bool>(build));
+    check(build.error.code == flexUI::UiDocumentErrorCode::BuildFailed);
+    check_null(box.root());
+    check_null(box.get_by_id("graph"));
+    check_equal(document->snapshot().revision, std::uint64_t{1});
+  }
 }

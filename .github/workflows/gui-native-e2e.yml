@@ -15,6 +15,15 @@ on:
       - '.github/scripts/restore-flexui-tango-sdk.py'
       - '.github/scripts/tests/test_restore_flexui_tango_sdk.py'
       - 'flexUI/examples/desktop_editor/**'
+      # Real desktop editor links this GraphCanvas implementation directly.
+      # Source-only changes must still requalify physical mouse/keyboard,
+      # semantic Box ownership, and the native visible screenshot.
+      - 'charts/ui/src/graph_canvas_widget.cpp'
+      - 'charts/ui/src/graph_edit_document.cpp'
+      - 'charts/ui/include/charts/ui/graph_canvas_widget.h'
+      - 'charts/ui/include/charts/ui/graph_edit_document.h'
+      - 'charts/ui/tests/chart_frame_tests.cpp'
+      - 'flexUI/include/flexUI/native_canvas_widget.h'
       - 'shared/markdown/**'
   workflow_dispatch:
 
