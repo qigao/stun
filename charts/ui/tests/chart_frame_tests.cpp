@@ -939,6 +939,385 @@ spec("GraphCanvas M2a stable group proxy and atomic history") {
   }
 }
 
+// M2c: one logical graph with a three-level parent-local hierarchy.
+// Full document coordinates for original leaf nodes stay world-space, while
+// "middle" and "inner" group origins are relative to their parent groups.
+namespace {
+GraphEditSnapshot nested_group_fixture() {
+  GraphEditSnapshot data;
+  data.nodes = {{"a", 80, 95, 48, 36, false},
+                {"b", 170, 95, 48, 36, false},
+                {"c", 340, 95, 48, 36, false},
+                {"d", 560, 95, 48, 36, false}};
+  data.ports = {
+      {"a-out", "a", gl::Side::East, 48, 18, true},
+      {"b-in", "b", gl::Side::West, 0, 18, false},
+      {"b-out", "b", gl::Side::East, 48, 18, true},
+      {"c-in", "c", gl::Side::West, 0, 18, false},
+      {"c-out", "c", gl::Side::East, 48, 18, true},
+      {"d-in", "d", gl::Side::West, 0, 18, false}};
+  data.edges = {{"ab", "a-out", "b-in"},
+                {"bc", "b-out", "c-in"},
+                {"cd", "c-out", "d-in"}};
+
+  charts::ui::GraphEditGroup outer;
+  outer.id = "outer";
+  outer.x = 20; outer.y = 20; outer.width = 420; outer.height = 240;
+  outer.member_node_ids = {"c"};
+  outer.proxy_ports.push_back(
+      {"outer-out", "c-out", gl::Side::East, 420, 93});
+
+  charts::ui::GraphEditGroup middle;
+  middle.id = "middle";
+  middle.parent_group_id = "outer";
+  middle.x = 30; middle.y = 30; middle.width = 270; middle.height = 180;
+  middle.proxy_ports.push_back(
+      {"middle-out", "b-out", gl::Side::East, 270, 63});
+
+  charts::ui::GraphEditGroup inner;
+  inner.id = "inner";
+  inner.parent_group_id = "middle";
+  inner.x = 20; inner.y = 20; inner.width = 200; inner.height = 115;
+  inner.member_node_ids = {"a", "b"};
+  inner.proxy_ports.push_back(
+      {"inner-out", "b-out", gl::Side::East, 200, 43});
+  data.groups = {outer, middle, inner};
+  return data;
+}
+
+const charts::ui::GraphEditGroup *group_by_id(
+    const GraphEditDocument &doc, std::string_view id) {
+  for (const auto &group : doc.snapshot().groups)
+    if (group.id == id) return &group;
+  return nullptr;
+}
+} // namespace
+
+spec("GraphCanvas M2c nested hierarchy, local origins and outermost proxy") {
+  it("projects three levels and chooses precisely one outermost collapsed proxy") {
+    GraphEditDocument doc;
+    check_true(static_cast<bool>(doc.initialize(nested_group_fixture())));
+    GraphEditSnapshot flat;
+    check_true(static_cast<bool>(doc.visible_snapshot(flat)));
+    check_equal(flat.nodes.size(), 4U);
+    check_equal(flat.edges.size(), 3U);
+    check_equal(doc.snapshot().nodes.size(), 4U);
+    check_equal(doc.snapshot().ports.size(), 6U);
+    check_equal(doc.snapshot().edges.size(), 3U);
+    check_equal(doc.snapshot().routes.size(), 3U);
+
+    charts::ui::GraphEditNode world;
+    check_true(static_cast<bool>(doc.group_world_rect("outer", world)));
+    check_equal(world.x, 20.0); check_equal(world.y, 20.0);
+    check_true(static_cast<bool>(doc.group_world_rect("middle", world)));
+    check_equal(world.x, 50.0); check_equal(world.y, 50.0);
+    check_true(static_cast<bool>(doc.group_world_rect("inner", world)));
+    check_equal(world.x, 70.0); check_equal(world.y, 70.0);
+
+    const auto baseline = doc.snapshot();
+    check_true(static_cast<bool>(doc.set_group_collapsed("inner", true)));
+    GraphEditSnapshot inner_view;
+    check_true(static_cast<bool>(doc.visible_snapshot(inner_view)));
+    check_equal(inner_view.nodes.size(), 3U); // inner proxy + c + d
+    check_equal(inner_view.edges.size(), 2U); // ab internal, bc/cd visible
+    check_equal(inner_view.edges[0].id, "bc");
+    check_equal(inner_view.edges[0].source_port, "inner-out");
+    check_equal(inner_view.edges[1].id, "cd");
+    check_equal(doc.snapshot().edges[1].source_port, "b-out");
+    check_within(doc.snapshot().routes[0].points.front().x, 270.0, 1e-6);
+    check_false(doc.group_is_visible("inner") == false);
+    check_equal(doc.snapshot().nodes.size(), 4U);
+
+    check_true(static_cast<bool>(doc.set_group_collapsed("middle", true)));
+    GraphEditSnapshot middle_view;
+    check_true(static_cast<bool>(doc.visible_snapshot(middle_view)));
+    check_equal(middle_view.nodes.size(), 3U);
+    check_equal(middle_view.edges.size(), 2U);
+    check_equal(middle_view.edges[0].source_port, "middle-out");
+    check_within(doc.snapshot().routes[0].points.front().x, 320.0, 1e-6);
+    check_false(doc.group_is_visible("inner"));
+
+    check_true(static_cast<bool>(doc.set_group_collapsed("outer", true)));
+    GraphEditSnapshot outer_view;
+    check_true(static_cast<bool>(doc.visible_snapshot(outer_view)));
+    check_equal(outer_view.nodes.size(), 2U); // outer + d only
+    check_equal(outer_view.edges.size(), 1U);
+    check_equal(outer_view.edges[0].id, "cd");
+    check_equal(outer_view.edges[0].source_port, "outer-out");
+    check_equal(outer_view.edges[0].target_port, "d-in");
+    check_equal(doc.snapshot().routes.size(), 1U);
+    check_within(doc.snapshot().routes[0].points.front().x, 440.0, 1e-6);
+    check_false(doc.group_is_visible("middle"));
+    check_false(doc.group_is_visible("inner"));
+    check_equal(doc.snapshot().edges.size(), 3U);
+    check_equal(doc.snapshot().edges[2].source_port, "c-out");
+
+    check_true(static_cast<bool>(doc.undo()));
+    check_equal(doc.snapshot().routes.size(), 2U);
+    check_equal(doc.snapshot().routes[0].edge_id, "bc");
+    check_true(static_cast<bool>(doc.undo()));
+    check_within(doc.snapshot().routes[0].points.front().x, 270.0, 1e-6);
+    check_true(static_cast<bool>(doc.undo()));
+    check_equal(doc.snapshot().routes.size(), baseline.routes.size());
+    for (std::size_t i = 0; i < baseline.routes.size(); ++i)
+      check_true(route_points_identical(
+          doc.snapshot().routes[i], baseline.routes[i]));
+    check_equal(doc.snapshot().nodes.size(), baseline.nodes.size());
+    check_true(static_cast<bool>(doc.redo()));
+    check_true(static_cast<bool>(doc.redo()));
+    check_true(static_cast<bool>(doc.redo()));
+    check_equal(doc.snapshot().routes.size(), 1U);
+  }
+
+  it("normalizes shuffled hierarchy without reindexing original endpoints") {
+    auto original = nested_group_fixture();
+    auto shuffled = original;
+    std::reverse(shuffled.nodes.begin(), shuffled.nodes.end());
+    std::reverse(shuffled.ports.begin(), shuffled.ports.end());
+    std::reverse(shuffled.edges.begin(), shuffled.edges.end());
+    std::reverse(shuffled.groups.begin(), shuffled.groups.end());
+    GraphEditDocument a, b;
+    check_true(static_cast<bool>(a.initialize(std::move(original))));
+    check_true(static_cast<bool>(b.initialize(std::move(shuffled))));
+    check_equal(a.snapshot().nodes.size(), b.snapshot().nodes.size());
+    check_equal(a.snapshot().groups[0].id, b.snapshot().groups[0].id);
+    for (std::size_t i = 0; i < a.snapshot().routes.size(); ++i)
+      check_true(route_points_identical(
+          a.snapshot().routes[i], b.snapshot().routes[i]));
+    for (const auto &id : {"inner", "middle", "outer"}) {
+      check_true(static_cast<bool>(a.set_group_collapsed(id, true)));
+      check_true(static_cast<bool>(b.set_group_collapsed(id, true)));
+      check_equal(a.snapshot().routes.size(), b.snapshot().routes.size());
+      for (std::size_t i = 0; i < a.snapshot().routes.size(); ++i)
+        check_true(route_points_identical(
+            a.snapshot().routes[i], b.snapshot().routes[i]));
+    }
+  }
+
+  it("moves a parent and then a child while preserving child-local coordinates") {
+    GraphEditDocument doc;
+    check_true(static_cast<bool>(doc.initialize(nested_group_fixture())));
+    const auto original = doc.snapshot();
+    check_true(static_cast<bool>(doc.begin_group_move("outer")));
+    check_true(static_cast<bool>(doc.preview_move(20, 10)));
+    double x = 0.0, y = 0.0;
+    check_true(doc.preview_position("group@inner", x, y));
+    check_equal(x, 90.0); check_equal(y, 80.0);
+    check_true(doc.preview_position("a", x, y));
+    check_equal(x, 100.0); check_equal(y, 105.0);
+    check_equal(node_by_id(doc, "a")->x, 80.0);
+    check_equal(doc.snapshot().revision, original.revision);
+    check_true(static_cast<bool>(doc.commit_move()));
+    const auto *outer = group_by_id(doc, "outer");
+    const auto *middle = group_by_id(doc, "middle");
+    const auto *inner = group_by_id(doc, "inner");
+    check_not_null(outer); check_not_null(middle); check_not_null(inner);
+    if (!outer || !middle || !inner) return;
+    check_equal(outer->x, 40.0); check_equal(outer->y, 30.0);
+    check_equal(middle->x, 30.0); check_equal(middle->y, 30.0);
+    check_equal(inner->x, 20.0); check_equal(inner->y, 20.0);
+    check_equal(node_by_id(doc, "a")->x, 100.0);
+    check_equal(node_by_id(doc, "b")->x, 190.0);
+    check_equal(node_by_id(doc, "c")->x, 360.0);
+    check_equal(node_by_id(doc, "d")->x, 560.0);
+    charts::ui::GraphEditNode resolved;
+    check_true(static_cast<bool>(doc.group_world_rect("inner", resolved)));
+    check_equal(resolved.x, 90.0); check_equal(resolved.y, 80.0);
+    check_equal(doc.undo_count(), 1U);
+
+    check_true(static_cast<bool>(doc.begin_group_move("inner")));
+    check_true(static_cast<bool>(doc.preview_move(10, 0)));
+    check_true(static_cast<bool>(doc.commit_move()));
+    inner = group_by_id(doc, "inner");
+    if (!inner) return;
+    check_equal(inner->x, 30.0); // local, not world 100
+    check_equal(inner->y, 20.0);
+    check_equal(node_by_id(doc, "a")->x, 110.0);
+    check_equal(node_by_id(doc, "b")->x, 200.0);
+    check_equal(node_by_id(doc, "c")->x, 360.0);
+    check_equal(doc.undo_count(), 2U);
+    check_true(static_cast<bool>(doc.undo()));
+    check_equal(node_by_id(doc, "a")->x, 100.0);
+    check_equal(group_by_id(doc, "inner")->x, 20.0);
+    check_true(static_cast<bool>(doc.undo()));
+    check_equal(node_by_id(doc, "a")->x, 80.0);
+    check_equal(group_by_id(doc, "outer")->x, 20.0);
+    for (std::size_t i = 0; i < original.routes.size(); ++i)
+      check_true(route_points_identical(
+          doc.snapshot().routes[i], original.routes[i]));
+    check_true(static_cast<bool>(doc.redo()));
+    check_true(static_cast<bool>(doc.redo()));
+    check_equal(node_by_id(doc, "a")->x, 110.0);
+    check_equal(group_by_id(doc, "inner")->x, 30.0);
+  }
+
+  it("rejects orphan, cycles, duplicate members, unrelated ports and bad locals") {
+    GraphEditDocument doc;
+    check_true(static_cast<bool>(doc.initialize(nested_group_fixture())));
+    const auto baseline = doc.snapshot();
+    const auto reject_replace = [&](GraphEditSnapshot bad) {
+      const auto status = doc.initialize(std::move(bad));
+      check_false(static_cast<bool>(status));
+      check_equal(doc.snapshot().revision, baseline.revision);
+      check_equal(doc.snapshot().routes.size(), baseline.routes.size());
+      check_equal(doc.undo_count(), 0U);
+    };
+    auto bad = nested_group_fixture();
+    for (auto &g : bad.groups)
+      if (g.id == "middle") g.parent_group_id = "missing";
+    reject_replace(std::move(bad));
+    bad = nested_group_fixture();
+    for (auto &g : bad.groups)
+      if (g.id == "outer") g.parent_group_id = "inner";
+    reject_replace(std::move(bad));
+    bad = nested_group_fixture();
+    for (auto &g : bad.groups)
+      if (g.id == "middle") g.member_node_ids.push_back("a");
+    reject_replace(std::move(bad));
+    bad = nested_group_fixture();
+    for (auto &g : bad.groups)
+      if (g.id == "outer")
+        g.proxy_ports[0].original_port_id = "d-in";
+    reject_replace(std::move(bad));
+    bad = nested_group_fixture();
+    for (auto &g : bad.groups)
+      if (g.id == "inner") g.x = 1.0e6;
+    reject_replace(std::move(bad));
+
+    // An invalid *new* collapse must fail before committing or touching the
+    // old route and its exact index/history revision.
+    bad = nested_group_fixture();
+    for (auto &g : bad.groups)
+      if (g.id == "outer") g.proxy_ports.clear();
+    GraphEditDocument unbound;
+    check_true(static_cast<bool>(unbound.initialize(std::move(bad))));
+    const auto first = unbound.snapshot();
+    const auto fail = unbound.set_group_collapsed("outer", true);
+    check_false(static_cast<bool>(fail));
+    check(fail.error == GraphEditError::InvalidInput);
+    check_equal(unbound.snapshot().revision, first.revision);
+    check_equal(unbound.snapshot().routes.size(), first.routes.size());
+    check_equal(unbound.undo_count(), 0U);
+  }
+
+  it("rejects hidden descendant moves and stale worker results after ancestor collapse") {
+    GraphEditDocument doc;
+    check_true(static_cast<bool>(doc.initialize(nested_group_fixture())));
+    charts::ui::GraphRouteWorker worker;
+    check_true(static_cast<bool>(worker.submit_move(
+        doc, "c", 10.0, 0.0, 91)));
+    check_true(static_cast<bool>(doc.set_group_collapsed("outer", true)));
+    const auto revision = doc.snapshot().revision;
+    worker.wait();
+    auto stale = worker.poll();
+    check_true(static_cast<bool>(stale));
+    if (!stale) return;
+    const auto rejected = doc.accept_prepared_move(std::move(*stale), 91);
+    check_false(static_cast<bool>(rejected));
+    check(rejected.error == GraphEditError::Conflict);
+    check_equal(doc.snapshot().revision, revision);
+
+    const auto member = doc.begin_move("a");
+    check_false(static_cast<bool>(member));
+    check(member.error == GraphEditError::LockedNode);
+    const auto group = doc.begin_group_move("inner");
+    check_false(static_cast<bool>(group));
+    check(group.error == GraphEditError::LockedNode);
+    const auto async_hidden = worker.submit_move(doc, "a", 8.0, 0.0, 92);
+    check_false(static_cast<bool>(async_hidden));
+    check(async_hidden.error == GraphEditError::LockedNode);
+    check_equal(doc.snapshot().revision, revision);
+    check_equal(doc.snapshot().routes.size(), 1U);
+  }
+
+  it("uses real Box pointer capture for nested child header without moving ancestors") {
+    auto doc = std::make_shared<GraphEditDocument>();
+    check_true(static_cast<bool>(doc->initialize(nested_group_fixture())));
+    auto registry = flexUI::WidgetRegistry::builtins();
+    check_false(static_cast<bool>(
+        charts::ui::register_graph_canvas_widget(registry, doc)));
+    auto compiled = flexUI::compile_ui_xml(
+        "<ui name=\"NestedGroup\"><main id=\"root\">"
+        "<native-graph id=\"graph\" /></main></ui>");
+    check_true(static_cast<bool>(compiled));
+    if (!compiled) return;
+    flexUI::Box box(nullptr);
+    const auto mounted = flexUI::UiDocumentInstantiator::instantiate(
+        box, *compiled.program, registry);
+    check_true(static_cast<bool>(mounted));
+    if (!mounted) return;
+    auto *root = box.get_by_id("root");
+    auto *graph = box.get_by_id("graph");
+    check_not_null(root); check_not_null(graph);
+    if (!root || !graph) return;
+    root->set_layout_bounds(0, 0, 832, 290);
+    graph->set_layout_bounds(0, 0, 832, 290);
+
+    const auto revision = doc->snapshot().revision;
+    auto down = flexUI::Event::mouse_down(90, 78); // inner header y70..90
+    auto move = flexUI::Event::mouse_move(114, 86);
+    auto up = flexUI::Event::mouse_up(114, 86);
+    box.dispatch_event(down);
+    check_true(down.handled);
+    check(box.capturing_element() == graph);
+    box.dispatch_event(move);
+    check_true(doc->has_preview());
+    double x = 0.0, y = 0.0;
+    check_true(doc->preview_position("group@inner", x, y));
+    check_equal(x, 94.0); check_equal(y, 78.0);
+    check_equal(doc->snapshot().revision, revision);
+    box.dispatch_event(up);
+    check_true(up.handled);
+    check_null(box.capturing_element());
+    check_false(doc->has_preview());
+    check_equal(doc->snapshot().revision, revision + 1);
+    check_equal(group_by_id(*doc, "inner")->x, 44.0);
+    check_equal(group_by_id(*doc, "middle")->x, 30.0);
+    check_equal(group_by_id(*doc, "outer")->x, 20.0);
+    check_equal(node_by_id(*doc, "a")->x, 104.0);
+    check_equal(node_by_id(*doc, "b")->x, 194.0);
+    check_equal(node_by_id(*doc, "c")->x, 340.0);
+
+    auto collapse_down = flexUI::Event::mouse_down(110, 80);
+    auto collapse_up = flexUI::Event::mouse_up(110, 80);
+    box.dispatch_event(collapse_down);
+    box.dispatch_event(collapse_up);
+    check_true(collapse_up.handled);
+    check_true(group_by_id(*doc, "inner")->collapsed);
+    GraphEditSnapshot visible;
+    check_true(static_cast<bool>(doc->visible_snapshot(visible)));
+    check_equal(visible.edges.size(), 2U);
+    bool has_proxy = false;
+    for (auto *child : graph->children()) {
+      auto *part = static_cast<flexUI::Element *>(child);
+      const auto *name = part->attribute("part");
+      if (name && *name == "node:group@inner" &&
+          part->attribute("aria-hidden") &&
+          *part->attribute("aria-hidden") == "false")
+        has_proxy = true;
+    }
+    check_true(has_proxy);
+
+    auto outer_down = flexUI::Event::mouse_down(36, 28);
+    auto outer_up = flexUI::Event::mouse_up(36, 28);
+    box.dispatch_event(outer_down);
+    box.dispatch_event(outer_up);
+    check_true(outer_up.handled);
+    check_true(group_by_id(*doc, "outer")->collapsed);
+    check_false(doc->group_is_visible("inner"));
+    check_false(doc->group_is_visible("middle"));
+    check_equal(doc->snapshot().routes.size(), 1U);
+    check_equal(doc->undo_count(), 3U);
+    check_true(static_cast<bool>(doc->undo()));
+    check_false(group_by_id(*doc, "outer")->collapsed);
+    check_true(static_cast<bool>(doc->undo()));
+    check_false(group_by_id(*doc, "inner")->collapsed);
+    check_true(static_cast<bool>(doc->undo()));
+    check_equal(node_by_id(*doc, "a")->x, 80.0);
+    check_equal(group_by_id(*doc, "inner")->x, 20.0);
+  }
+}
+
 spec("GraphCanvas M2b compound group move and real Box gestures") {
   it("moves expanded group and every original member as ONE atomic snapshot") {
     auto data = example();
