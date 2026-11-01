@@ -281,6 +281,16 @@ void sync_semantic_parts(const GraphEditDocument &model,
       set_attr(*part, "data-port-id", it->id);
       set_attr(*part, "data-node-id", it->node_id);
       set_attr(*part, "data-direction", it->output ? "output" : "input");
+      // Original-port metadata can change under a successful JSON reload
+      // while the stable PortId retains the same Box-owned Element.
+      bool proxy = false;
+      for (const auto &group : model.snapshot().groups)
+        for (const auto &boundary : group.proxy_ports)
+          if (boundary.id == it->id) proxy = true;
+      set_attr(*part, "aria-label",
+               proxy ? "Group boundary " + it->id :
+               (it->output ? "Output " : "Input ") + it->id +
+                   " on graph node " + it->node_id);
     }
   }
   set_attr(host, "data-routing", state.routing_state);
