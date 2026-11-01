@@ -1228,6 +1228,149 @@ int run_group_selection_smoke(
   return EXIT_SUCCESS;
 }
 
+// M2j: the real linked OpenGL/PluginHost/Box editor measures a group
+// boundary from the user's pointer release, never a fabricated PortId/route.
+int run_boundary_smoke(
+    flexUI::GCanvasPluginWindowHost &host,
+    const std::shared_ptr<charts::ui::GraphEditDocument> &model) {
+  auto pumped = host.pump_once(0.0);
+  if (!pumped) return fail("boundary initial frame", pumped.error.message);
+  auto &box = host.application().box();
+  auto *graph = box.get_by_id("graph");
+  if (!graph || !graph->widget || graph->child_count() != 5 ||
+      model->snapshot().edges.size() != 1 ||
+      model->snapshot().groups.size() != 1 ||
+      !model->snapshot().groups[0].proxy_ports.empty())
+    return fail("boundary source", "unbound original group not mounted");
+  const auto group = [&]() -> const charts::ui::GraphEditGroup & {
+    return model->snapshot().groups.front();
+  };
+  const auto find_part = [&](std::string_view key) -> flexUI::Element * {
+    for (auto *raw : graph->children()) {
+      auto *part = static_cast<flexUI::Element *>(raw);
+      const auto *name = part->attribute("part");
+      if (name && *name == key) return part;
+    }
+    return nullptr;
+  };
+  auto *alpha = find_part("node:alpha");
+  if (!alpha) return fail("boundary stable leaf", "original node not mounted");
+  const auto baseline_owned = box.owned_element_count();
+  const auto original_revision = model->snapshot().revision;
+  const float gx = graph->absolute_x(), gy = graph->absolute_y();
+  const auto click_header = [&]() -> bool {
+    auto down = flexUI::Event::mouse_down(gx + 60.0F, gy + 30.0F);
+    auto up = flexUI::Event::mouse_up(gx + 60.0F, gy + 30.0F);
+    return host.application().dispatch_event(down) && down.handled &&
+           host.application().dispatch_event(up) && up.handled;
+  };
+
+  // Collapse without an explicit original source boundary is invalid.
+  // The pointer click still selects the stable GroupId for authoring.
+  if (!click_header() || group().collapsed ||
+      model->snapshot().revision != original_revision ||
+      model->undo_count() != 0)
+    return fail("boundary missing binding", "unmeasured collapse silently committed");
+
+  const int mods = static_cast<int>(flexUI::KeyMod::Control) |
+                   static_cast<int>(flexUI::KeyMod::Alt);
+  const auto author = [&](float end_x, float end_y) -> bool {
+    auto down = flexUI::Event::mouse_down(gx + 180.0F, gy + 72.0F);
+    down.mods = mods;
+    auto move = flexUI::Event::mouse_move(gx + end_x, gy + end_y);
+    move.mods = mods;
+    auto up = flexUI::Event::mouse_up(gx + end_x, gy + end_y);
+    up.mods = mods;
+    if (!host.application().dispatch_event(down) || !down.handled ||
+        box.capturing_element() != graph ||
+        !host.application().dispatch_event(move) || !move.handled ||
+        !host.application().dispatch_event(up) || !up.handled ||
+        box.capturing_element() != nullptr)
+      return false;
+    return true;
+  };
+  if (!author(210.0F, 72.0F) ||
+      group().proxy_ports.size() != 1 ||
+      group().proxy_ports[0].original_port_id != "source" ||
+      group().proxy_ports[0].side != stun::graphlayout::Side::East ||
+      group().proxy_ports[0].local_x != 170.0 ||
+      group().proxy_ports[0].local_y != 48.0 ||
+      model->undo_count() != 1 ||
+      model->snapshot().edges[0].source_port != "source" ||
+      model->snapshot().revision != original_revision + 1)
+    return fail("boundary measurement", "user-directed native port not committed");
+  const auto stable_proxy = group().proxy_ports[0].id;
+  box.update();
+  box.invalidate();
+  pumped = host.pump_once(0.0);
+  if (!pumped || graph->child_count() != 6 ||
+      box.owned_element_count() != baseline_owned + 1 ||
+      find_part("node:alpha") != alpha ||
+      !find_part("port:" + stable_proxy))
+    return fail("boundary semantic owner", "new measured Box port was not published");
+
+  // Releasing INSIDE the group does not change the measured attachment,
+  // even if the original PortId and selected GroupId remain valid.
+  const auto before_invalid = model->snapshot().revision;
+  if (!author(145.0F, 72.0F) ||
+      model->snapshot().revision != before_invalid ||
+      model->undo_count() != 1 ||
+      group().proxy_ports[0].id != stable_proxy ||
+      group().proxy_ports[0].local_x != 170.0)
+    return fail("boundary invalid interior", "port was inferred from interior release");
+
+  if (!click_header() || !group().collapsed ||
+      model->snapshot().routes.size() != 1 ||
+      model->snapshot().routes[0].points.front().x != 210.0 ||
+      model->snapshot().edges[0].source_port != "source" ||
+      model->undo_count() != 2)
+    return fail("boundary native collapse", "real measured proxy was not routed");
+  charts::ui::GraphEditSnapshot visible;
+  if (!model->visible_snapshot(visible) ||
+      visible.edges.size() != 1 ||
+      visible.edges[0].source_port != stable_proxy)
+    return fail("boundary visible mapping", "logical source port was overwritten");
+
+  auto undo = flexUI::Event::key_down(
+      flexUI::KeyCode::Z, static_cast<int>(flexUI::KeyMod::Control));
+  auto redo = flexUI::Event::key_down(
+      flexUI::KeyCode::Y, static_cast<int>(flexUI::KeyMod::Control));
+  if (!host.application().dispatch_event(undo) || !undo.handled ||
+      group().collapsed ||
+      !host.application().dispatch_event(undo) || !undo.handled ||
+      !group().proxy_ports.empty())
+    return fail("boundary Undo", "cannot restore unbound expanded group");
+  box.update();
+  if (graph->child_count() != 5 ||
+      box.owned_element_count() != baseline_owned)
+    return fail("boundary port retirement", "removed proxy semantic leaf leaked");
+  if (!host.application().dispatch_event(redo) || !redo.handled ||
+      group().proxy_ports.size() != 1 ||
+      group().proxy_ports[0].id != stable_proxy ||
+      !host.application().dispatch_event(redo) || !redo.handled ||
+      !group().collapsed)
+    return fail("boundary Redo", "stable boundary PortId not restored");
+  box.update();
+  if (graph->child_count() != 6 ||
+      box.owned_element_count() != baseline_owned + 1 ||
+      !find_part("port:" + stable_proxy) ||
+      find_part("node:alpha") != alpha)
+    return fail("boundary Redo semantics", "one Box ownership was lost");
+
+  auto *save = box.get_by_id("save");
+  if (!save) return fail("boundary Save lookup", "real Save action missing");
+  const auto clicked = dispatch_save_click(host.application(), *save);
+  if (!clicked) return fail("boundary Save click", clicked.error.message);
+  std::string error;
+  if (!pump_until_saved(host, *save, error))
+    return fail("boundary Save service", error);
+  const auto stopped = host.shutdown(kShutdownTimeout);
+  if (!stopped) return fail("boundary shutdown", stopped.error.message);
+  std::cout << "FlexUI desktop editor boundary smoke passed: "
+            << save->text() << '\n';
+  return EXIT_SUCCESS;
+}
+
 } // namespace
 
 int main(int argc, char **argv) {
@@ -1240,6 +1383,7 @@ int main(int argc, char **argv) {
   bool delete_smoke = false;
   bool ungroup_smoke = false;
   bool selection_smoke = false;
+  bool boundary_smoke = false;
   if (argc == 2 && std::string_view(argv[1]) == "--smoke") {
     smoke = true;
   } else if (argc == 2 && std::string_view(argv[1]) == "--smoke-async") {
@@ -1266,9 +1410,12 @@ int main(int argc, char **argv) {
   } else if (argc == 2 && std::string_view(argv[1]) == "--smoke-selection") {
     smoke = true;
     selection_smoke = true;
+  } else if (argc == 2 && std::string_view(argv[1]) == "--smoke-boundary") {
+    smoke = true;
+    boundary_smoke = true;
   } else if (argc != 1) {
     return fail("arguments",
-                "usage: flexui_desktop_editor [--smoke|--smoke-async|--smoke-group|--smoke-hierarchy|--smoke-semantic|--smoke-topology|--smoke-delete|--smoke-ungroup|--smoke-selection]");
+                "usage: flexui_desktop_editor [--smoke|--smoke-async|--smoke-group|--smoke-hierarchy|--smoke-semantic|--smoke-topology|--smoke-delete|--smoke-ungroup|--smoke-selection|--smoke-boundary]");
   }
 
   std::error_code path_error;
@@ -1298,16 +1445,17 @@ int main(int argc, char **argv) {
   initial_graph.ports = {
       {"sink", "beta", stun::graphlayout::Side::West, 0.0, 36.0, false},
       {"source", "alpha", stun::graphlayout::Side::East, 125.0, 36.0, true}};
-  if (delete_smoke || selection_smoke)
+  if (delete_smoke || selection_smoke || boundary_smoke)
     initial_graph.edges.push_back({"edge-1", "source", "sink"});
-  if (group_smoke) {
+  if (group_smoke || boundary_smoke) {
     charts::ui::GraphEditGroup group;
     group.id = "pack";
     group.x = 40.0; group.y = 24.0;
     group.width = 170.0; group.height = 130.0;
     group.member_node_ids = {"alpha"};
-    group.proxy_ports.push_back(
-        {"pack-out", "source", stun::graphlayout::Side::East, 170.0, 48.0});
+    if (group_smoke)
+      group.proxy_ports.push_back(
+          {"pack-out", "source", stun::graphlayout::Side::East, 170.0, 48.0});
     initial_graph.groups.push_back(std::move(group));
   }
   if (hierarchy_smoke || ungroup_smoke) {
@@ -1364,6 +1512,8 @@ int main(int argc, char **argv) {
     return fail("runtime composition", built.error.message);
   }
 
+  if (boundary_smoke)
+    return run_boundary_smoke(*built.host, graph_model);
   if (selection_smoke)
     return run_group_selection_smoke(*built.host, graph_model);
   if (ungroup_smoke) return run_ungroup_smoke(*built.host, graph_model);
