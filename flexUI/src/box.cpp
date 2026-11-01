@@ -1434,7 +1434,7 @@ BoxWidgetPartError Box::reconcile_widget_parts(
     std::unordered_set<Element *> retained;
     retained.reserve(desired.size());
     for (const auto &spec : desired) {
-      if (!safe_name(spec.name, 128) || !safe_tag(spec.tag) ||
+      if (!safe_name(spec.name, 192) || !safe_tag(spec.tag) ||
           spec.attributes.size() > 16)
         return BoxWidgetPartError::InvalidSpec;
       std::unordered_set<std::string> attribute_names;
