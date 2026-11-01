@@ -812,11 +812,16 @@ spec("GraphCanvas M2a stable group proxy and atomic history") {
     check_equal(doc.undo_count(), 0U);
     check_equal(doc.redo_count(), 0U);
 
+    group.id = "invalid-proxy";
     group.proxy_ports.push_back(
         {"source", "source", gl::Side::East, 170.0, 48.0});
-    const auto collision = doc.add_group(group);
+    auto bad = example();
+    bad.groups.push_back(group);
+    GraphEditDocument collision_doc;
+    const auto collision = collision_doc.initialize(std::move(bad));
     check_false(static_cast<bool>(collision));
     check(collision.error == GraphEditError::InvalidInput);
+    check_equal(collision_doc.snapshot().revision, std::uint64_t{0});
     check_equal(doc.snapshot().revision, prior.revision);
   }
 
