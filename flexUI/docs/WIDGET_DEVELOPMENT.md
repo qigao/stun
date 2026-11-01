@@ -15,6 +15,13 @@ The Element tree is the only style and layout tree. A visual part that users
 need to select, inspect, size, color, or animate must be a widget-owned Element.
 Do not mirror those parts in a private Group/Shape tree.
 
+For an interactive Node/Graph Editor, follow the separate
+[GraphCanvas and incremental GraphLayout design](GRAPH_CANVAS_INTERACTIVE_LAYOUT.md)
+([#378](https://github.com/qigao/stun/issues/378)). It retains one Box
+input/render/semantic owner, uses the existing pure GraphLayout algorithms and
+keeps the authoritative graph document outside the Element tree. The document
+is a design proposal, not an implemented GraphCanvas API.
+
 ## Core Concepts
 
 ### Tailwind classes and C++/MIR bindings
