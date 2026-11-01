@@ -704,6 +704,79 @@ spec("GraphCanvas M0 application-owned graph editing") {
 // M2a group tests reuse the production native GraphOrthogonal adapter and
 // existing TinyTest target. No fake router, second graph model or test project.
 spec("GraphCanvas M2a stable group proxy and atomic history") {
+  it("hides internal subgraph edges but preserves two external group endpoints") {
+    GraphEditSnapshot input;
+    input.nodes = {{"left", 30, 80, 80, 50, false},
+                   {"middle", 180, 80, 80, 50, false},
+                   {"outside", 420, 80, 80, 50, false}};
+    input.ports = {{"left-out", "left", gl::Side::East, 80, 25, true},
+                   {"mid-in", "middle", gl::Side::West, 0, 25, false},
+                   {"mid-out", "middle", gl::Side::East, 80, 25, true},
+                   {"outside-in", "outside", gl::Side::West, 0, 25, false}};
+    input.edges = {{"internal", "left-out", "mid-in"},
+                   {"external", "mid-out", "outside-in"}};
+    charts::ui::GraphEditGroup left_group;
+    left_group.id = "cluster";
+    left_group.x = 20;
+    left_group.y = 60;
+    left_group.width = 290;
+    left_group.height = 90;
+    left_group.member_node_ids = {"left", "middle"};
+    left_group.proxy_ports.push_back(
+        {"cluster-out", "mid-out", gl::Side::East, 290, 45});
+    charts::ui::GraphEditGroup right_group;
+    right_group.id = "output";
+    right_group.x = 400;
+    right_group.y = 60;
+    right_group.width = 120;
+    right_group.height = 90;
+    right_group.member_node_ids = {"outside"};
+    right_group.proxy_ports.push_back(
+        {"output-in", "outside-in", gl::Side::West, 0, 45});
+    input.groups = {left_group, right_group};
+
+    GraphEditDocument doc;
+    check_true(static_cast<bool>(doc.initialize(std::move(input))));
+    check_equal(doc.snapshot().edges.size(), 2U);
+    check_equal(doc.snapshot().routes.size(), 2U);
+    const auto *internal_before = route_by_id(doc.snapshot(), "internal");
+    check_not_null(internal_before);
+    if (!internal_before) return;
+    const auto saved_internal = *internal_before;
+
+    check_true(static_cast<bool>(doc.set_group_collapsed("cluster", true)));
+    check_equal(doc.snapshot().edges.size(), 2U);
+    check_equal(doc.snapshot().routes.size(), 1U);
+    check_null(route_by_id(doc.snapshot(), "internal"));
+    check_not_null(route_by_id(doc.snapshot(), "external"));
+    GraphEditSnapshot one_proxy;
+    check_true(static_cast<bool>(doc.visible_snapshot(one_proxy)));
+    check_equal(one_proxy.nodes.size(), 2U);
+    check_equal(one_proxy.edges.size(), 1U);
+    check_equal(one_proxy.edges[0].source_port, "cluster-out");
+    check_equal(one_proxy.edges[0].target_port, "outside-in");
+
+    check_true(static_cast<bool>(doc.set_group_collapsed("output", true)));
+    GraphEditSnapshot two_proxies;
+    check_true(static_cast<bool>(doc.visible_snapshot(two_proxies)));
+    check_equal(two_proxies.nodes.size(), 2U);
+    check_equal(two_proxies.edges.size(), 1U);
+    check_equal(two_proxies.edges[0].source_port, "cluster-out");
+    check_equal(two_proxies.edges[0].target_port, "output-in");
+    check_equal(doc.snapshot().edges[0].source_port, "mid-out"); // Sorted stable ID.
+
+    check_true(static_cast<bool>(doc.undo()));
+    check_false(doc.snapshot().groups[1].collapsed);
+    check_true(static_cast<bool>(doc.undo()));
+    check_equal(doc.snapshot().routes.size(), 2U);
+    const auto *restored = route_by_id(doc.snapshot(), "internal");
+    check_not_null(restored);
+    if (restored)
+      check_true(route_points_identical(saved_internal, *restored));
+    check_true(static_cast<bool>(doc.redo()));
+    check_equal(doc.snapshot().routes.size(), 1U);
+  }
+
   it("projects a collapsed group without rewriting original graph identities") {
     auto graph = example();
     charts::ui::GraphEditGroup group;
