@@ -1481,6 +1481,14 @@ BoxWidgetPartError Box::reconcile_widget_parts(
     retiring.reserve(widget.parts_.size());
     for (const auto &[name, part] : widget.parts_) {
       if (retained.count(part)) continue;
+      // GraphCanvas captures the HOST while its node/port gesture is active.
+      // The borrowed semantic target may be logically hidden after a
+      // document replacement, but removing it before MouseUp/FocusOut
+      // would race the active Widget interaction owner.
+      if (events_.capturing_element() == host ||
+          events_.active_element() == host ||
+          widget.wants_mouse_capture())
+        return BoxWidgetPartError::BorrowedPart;
       if (part->is_focus() || part->is_hover() || part->is_active() ||
           part->click_callback() || bindings_.has_binding_target(part) ||
           keyed_repeater_hosts_.count(part) != 0 ||

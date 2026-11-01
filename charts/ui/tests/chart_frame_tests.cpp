@@ -1496,6 +1496,77 @@ spec("GraphCanvas M2e dynamic Box-owned semantic leaf reconciliation") {
     check_true(box.get_by_id("graph") == graph);
   }
 
+  it("defers deleting a semantic node while its GraphCanvas host has pointer capture") {
+    auto document = std::make_shared<GraphEditDocument>();
+    check_true(static_cast<bool>(document->initialize(example(false))));
+    auto registry = flexUI::WidgetRegistry::builtins();
+    check_false(static_cast<bool>(
+        charts::ui::register_graph_canvas_widget(registry, document)));
+    const auto compiled = flexUI::compile_ui_xml(
+        "<ui name=\"GraphCaptureRetirement\"><main id=\"root\">"
+        "<native-graph id=\"graph\" /></main></ui>");
+    check_true(static_cast<bool>(compiled));
+    if (!compiled) return;
+    flexUI::Box box(nullptr);
+    check_true(static_cast<bool>(flexUI::UiDocumentInstantiator::instantiate(
+        box, *compiled.program, registry)));
+    auto *root = box.get_by_id("root");
+    auto *graph = box.get_by_id("graph");
+    check_not_null(root);
+    check_not_null(graph);
+    if (!root || !graph) return;
+    root->set_layout_bounds(0, 0, 832, 160);
+    graph->set_layout_bounds(0, 0, 832, 160);
+    box.update();
+    const auto baseline = box.owned_element_count();
+    flexUI::Element *stable_beta = nullptr;
+    for (auto *raw : graph->children()) {
+      auto *part = static_cast<flexUI::Element *>(raw);
+      const auto *key = part->attribute("part");
+      if (key && *key == "node:beta") stable_beta = part;
+    }
+    check_not_null(stable_beta);
+    if (!stable_beta) return;
+
+    // An armed, subthreshold node gesture owns host capture. Even though
+    // the original graph can be atomically replaced, its semantic parts
+    // cannot be freed until that Widget interaction has retired.
+    auto down = flexUI::Event::mouse_down(85, 56);
+    box.dispatch_event(down);
+    check_true(down.handled);
+    check(box.capturing_element() == graph);
+    std::string original;
+    check_true(static_cast<bool>(document->save_json(original)));
+    auto json = nlohmann::json::parse(original);
+    auto only_beta = nlohmann::json::array();
+    for (const auto &node : json["nodes"])
+      if (node.at("id") == "beta") only_beta.push_back(node);
+    json["nodes"] = std::move(only_beta);
+    auto only_sink = nlohmann::json::array();
+    for (const auto &port : json["ports"])
+      if (port.at("id") == "sink") only_sink.push_back(port);
+    json["ports"] = std::move(only_sink);
+    check_true(static_cast<bool>(document->load_json(json.dump())));
+    box.update();
+    check(box.last_widget_part_error() ==
+          flexUI::BoxWidgetPartError::BorrowedPart);
+    check_equal(graph->child_count(), 4U);
+    check_equal(box.owned_element_count(), baseline);
+    check(box.capturing_element() == graph);
+
+    auto up = flexUI::Event::mouse_up(85, 56);
+    box.dispatch_event(up);
+    check_true(up.handled);
+    check_null(box.capturing_element());
+    box.update();
+    check(box.last_widget_part_error() ==
+          flexUI::BoxWidgetPartError::None);
+    check_equal(graph->child_count(), 2U);
+    check_equal(box.owned_element_count(), baseline - 2U);
+    check(stable_beta->parent_elem() == graph);
+    check_equal(*stable_beta->attribute("data-node-id"), "beta");
+  }
+
   it("keeps two linked canvas instances independent during group insertion") {
     auto document = std::make_shared<GraphEditDocument>();
     check_true(static_cast<bool>(document->initialize(example(false))));
