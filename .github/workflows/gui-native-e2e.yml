@@ -311,6 +311,10 @@ jobs:
           # add/remove, stable siblings and real document Save. No new target.
           xvfb-run -a -s '-screen 0 1280x900x24 -nolisten tcp' \
             build/stun-gui/bin/flexui_desktop_editor --smoke-semantic
+          # M2f: real linked native editor performs in-place Node/Port
+          # add/connect/delete and Undo/Redo with stable Box semantic leaves.
+          xvfb-run -a -s '-screen 0 1280x900x24 -nolisten tcp' \
+            build/stun-gui/bin/flexui_desktop_editor --smoke-topology
           xvfb-run -a -s '-screen 0 1280x900x24 -nolisten tcp' \
             /usr/bin/python3 .github/scripts/gui_native_suite.py \
               --exe build/stun-gui/bin/flexui_desktop_editor \
