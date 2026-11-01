@@ -10,6 +10,7 @@
 #include <cmath>
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <stdexcept>
 #include <vector>
 #include <string>
@@ -81,6 +82,13 @@ const GraphEditNode *find_node(const GraphEditSnapshot &snapshot,
   return nullptr;
 }
 
+bool is_group_proxy(const GraphEditDocument &model,
+                    std::string_view id) {
+  for (const auto &group : model.snapshot().groups)
+    if (group.collapsed && id == "group@" + group.id) return true;
+  return false;
+}
+
 bool node_rect(const GraphEditNode &node, const Interaction &interaction,
                const GraphEditDocument &document, double &x, double &y,
                double &w, double &h) {
@@ -91,17 +99,19 @@ bool node_rect(const GraphEditNode &node, const Interaction &interaction,
   return interaction.view.to_local(nx, ny, x, y);
 }
 
-const GraphEditNode *hit_node(const GraphEditDocument &model,
-                               const Interaction &interaction,
-                               double local_x, double local_y) {
-  const auto &nodes = model.snapshot().nodes;
+std::optional<GraphEditNode> hit_node(const GraphEditDocument &model,
+                                       const Interaction &interaction,
+                                       double local_x, double local_y) {
+  GraphEditSnapshot visible;
+  if (!model.visible_snapshot(visible)) return std::nullopt;
+  const auto &nodes = visible.nodes;
   for (auto i = nodes.rbegin(); i != nodes.rend(); ++i) {
     double x, y, w, h;
     if (node_rect(*i, interaction, model, x, y, w, h) &&
         local_x >= x && local_x <= x + w &&
-        local_y >= y && local_y <= y + h) return &*i;
+        local_y >= y && local_y <= y + h) return *i;
   }
-  return nullptr;
+  return std::nullopt;
 }
 
 bool port_anchor(const GraphEditDocument &document,
@@ -115,27 +125,32 @@ bool port_anchor(const GraphEditDocument &document,
       px + port.local_x, py + port.local_y, x, y);
 }
 
-const GraphEditPort *hit_port(const GraphEditDocument &model,
-                               const Interaction &interaction,
-                               double local_x, double local_y,
-                               bool output) {
-  const auto &snapshot = model.snapshot();
+std::optional<GraphEditPort> hit_port(const GraphEditDocument &model,
+                                       const Interaction &interaction,
+                                       double local_x, double local_y,
+                                       bool output) {
+  GraphEditSnapshot snapshot;
+  if (!model.visible_snapshot(snapshot)) return std::nullopt;
   for (const auto &port : snapshot.ports) {
     if (port.output != output) continue;
     double x, y;
     if (!port_anchor(model, snapshot, port, interaction, x, y)) continue;
     const double dx = local_x - x, dy = local_y - y;
     if (dx * dx + dy * dy <= kPortHitRadiusPx * kPortHitRadiusPx)
-      return &port;
+      return port;
   }
-  return nullptr;
+  return std::nullopt;
 }
 
 void build_semantic_parts(flexUI::NativeCanvasWidget &widget,
                           flexUI::Element &host, const GraphEditDocument &model,
                           Interaction &state) {
   const auto &snapshot = model.snapshot();
-  if (snapshot.nodes.size() + snapshot.ports.size() > kMaxSemanticParts) {
+  std::size_t group_parts = snapshot.groups.size();
+  for (const auto &group : snapshot.groups)
+    group_parts += group.proxy_ports.size();
+  if (snapshot.nodes.size() + snapshot.ports.size() + group_parts >
+      kMaxSemanticParts) {
     throw std::invalid_argument(
         "GraphCanvas exceeds Box's bounded Widget-owned semantic-part capacity");
   }
@@ -175,11 +190,43 @@ void build_semantic_parts(flexUI::NativeCanvasWidget &widget,
     part->set_attribute("data-direction", port.output ? "output" : "input");
     state.semantic_ports.push_back({port.id, part});
   }
+  // Predeclare existing compound proxies in this Box's single semantic tree.
+  // Runtime group insertion/removal still needs the separate scoped dynamic
+  // semantic-part reconciliation gate (#378/#375).
+  for (const auto &group : snapshot.groups) {
+    const std::string proxy = "group@" + group.id;
+    const auto name = "node:" + proxy;
+    auto *part = widget.declare_semantic_part("graph-node", name.c_str());
+    if (!part) throw std::runtime_error("could not create graph group semantic node");
+    part->set_attribute("role", "group");
+    part->set_attribute("aria-label", "Graph group " + group.id);
+    part->set_attribute("data-slot", "graph-node");
+    part->set_attribute("data-node-id", proxy);
+    part->set_attribute("aria-current", "false");
+    part->set_attribute("data-state", "idle");
+    part->set_attribute("aria-hidden", "true");
+    state.semantic_nodes.push_back({proxy, part});
+    for (const auto &bound : group.proxy_ports) {
+      const auto port_name = "port:" + bound.id;
+      auto *port_part = widget.declare_semantic_part(
+          "graph-port", port_name.c_str());
+      if (!port_part)
+        throw std::runtime_error("could not create graph proxy semantic port");
+      port_part->set_attribute("role", "group");
+      port_part->set_attribute("aria-label", "Group boundary " + bound.id);
+      port_part->set_attribute("data-slot", "graph-port");
+      port_part->set_attribute("data-port-id", bound.id);
+      port_part->set_attribute("data-node-id", proxy);
+      port_part->set_attribute("aria-hidden", "true");
+      state.semantic_ports.push_back({bound.id, port_part});
+    }
+  }
 }
 
 void sync_semantic_parts(const GraphEditDocument &model,
                          const Interaction &state, flexUI::Element &host) {
-  const auto &snapshot = model.snapshot();
+  GraphEditSnapshot snapshot;
+  if (!model.visible_snapshot(snapshot)) return;
   const auto update_bounds = [](flexUI::Element &part, double x, double y,
                                 double w, double h) {
     if (!std::isfinite(x) || !std::isfinite(y) ||
@@ -192,9 +239,20 @@ void sync_semantic_parts(const GraphEditDocument &model,
     }
   };
 
+  const auto set_visibility = [](flexUI::Element &part, bool visible) {
+    const std::string desired = visible ? "false" : "true";
+    const auto *current = part.attribute("aria-hidden");
+    if (!current || *current != desired)
+      part.set_attribute("aria-hidden", desired);
+  };
   for (const auto &slot : state.semantic_nodes) {
     const auto *node = find_node(snapshot, slot.id);
-    if (!node) continue; // Node insertion/removal is outside the M0 contract.
+    if (!node) {
+      update_bounds(*slot.element, 0.0, 0.0, 0.0, 0.0);
+      set_visibility(*slot.element, false);
+      continue;
+    }
+    set_visibility(*slot.element, true);
     double x, y, w, h;
     if (!node_rect(*node, state, model, x, y, w, h)) continue;
     update_bounds(*slot.element, x, y, w, h);
@@ -212,13 +270,19 @@ void sync_semantic_parts(const GraphEditDocument &model,
     }
   }
   for (const auto &slot : state.semantic_ports) {
+    bool found = false;
     for (const auto &port : snapshot.ports) {
       if (port.id != slot.id) continue;
+      found = true;
+      set_visibility(*slot.element, true);
       double x, y;
-      if (port_anchor(model, snapshot, port, state, x, y)) {
+      if (port_anchor(model, snapshot, port, state, x, y))
         update_bounds(*slot.element, x - 7.0, y - 7.0, 14.0, 14.0);
-      }
       break;
+    }
+    if (!found) {
+      update_bounds(*slot.element, 0.0, 0.0, 0.0, 0.0);
+      set_visibility(*slot.element, false);
     }
   }
   const auto *old_routing = host.attribute("data-routing");
@@ -253,7 +317,25 @@ void paint_canvas(const GraphEditDocument &model, const Interaction &interaction
     commands.draw_line(0.0F, static_cast<float>(y),
                        width, static_cast<float>(y), grid, 1.0F);
 
-  const auto &snapshot = model.snapshot();
+  GraphEditSnapshot snapshot;
+  if (!model.visible_snapshot(snapshot)) {
+    commands.restore();
+    return;
+  }
+  // Expanded groups are document geometry, not a second UI/Element tree.
+  for (const auto &group : model.snapshot().groups) {
+    if (group.collapsed) continue;
+    double gx, gy;
+    if (!interaction.view.to_local(group.x, group.y, gx, gy)) continue;
+    commands.draw_rect(static_cast<float>(gx), static_cast<float>(gy),
+        static_cast<float>(group.width * interaction.view.zoom),
+        static_cast<float>(group.height * interaction.view.zoom),
+        5.0F, Paint::none(),
+        Paint::solid(Color{0.37F, 0.52F, 0.66F, 1.0F}), 1.0F);
+    commands.draw_text("GROUP " + group.id + " [-]",
+        static_cast<float>(gx + 6.0), static_cast<float>(gy + 16.0),
+        "Arial", 11.0F, false, light);
+  }
   for (const auto &route : snapshot.routes) {
     for (std::size_t i = 1; i < route.points.size(); ++i) {
       double x0, y0, x1, y1;
@@ -282,7 +364,9 @@ void paint_canvas(const GraphEditDocument &model, const Interaction &interaction
     commands.draw_rect(static_cast<float>(x), static_cast<float>(y),
                        static_cast<float>(w), static_cast<float>(h), 6.0F,
                        fill, outline, selected ? 2.0F : 1.0F);
-    commands.draw_text(node.id, static_cast<float>(x + 12.0),
+    const bool proxy = is_group_proxy(model, node.id);
+    commands.draw_text(proxy ? "GROUP " + node.id.substr(6) + " [+]" : node.id,
+                       static_cast<float>(x + 12.0),
                        static_cast<float>(y + 26.0), "Arial", 12.0F, true, light);
     if (node.locked)
       commands.draw_text("LOCKED", static_cast<float>(x + 12.0),
@@ -434,14 +518,37 @@ bool handle_input(Interaction &state, GraphEditDocument &model,
       return true;
     }
     if (event.button != MouseButton::Left) return false;
-    if (const auto *source = hit_port(model, state, x, y, true)) {
+    // Expanded group header is a reversible collapse affordance. Its content
+    // geometry and all logical port identities remain untouched on failure.
+    for (const auto &group : model.snapshot().groups) {
+      if (group.collapsed) continue;
+      double gx, gy;
+      if (!state.view.to_local(group.x, group.y, gx, gy)) continue;
+      const double gw = group.width * state.view.zoom;
+      if (x >= gx + 4.0 && x <= gx + gw - 4.0 &&
+          y >= gy && y <= gy + 20.0) {
+        const auto result = model.set_group_collapsed(group.id, true);
+        state.selected_node.clear();
+        state.status_message = result ? "" : result.message;
+        element.mark_paint_dirty();
+        return true;
+      }
+    }
+    if (const auto source = hit_port(model, state, x, y, true)) {
       state.source_port = source->id;
       state.mode = GestureMode::Connect;
       widget.request_pointer_capture();
       element.mark_paint_dirty();
       return true;
     }
-    if (const auto *node = hit_node(model, state, x, y)) {
+    if (const auto node = hit_node(model, state, x, y)) {
+      if (is_group_proxy(model, node->id)) {
+        const auto result = model.set_group_collapsed(node->id.substr(6), false);
+        state.selected_node.clear();
+        state.status_message = result ? "" : result.message;
+        element.mark_paint_dirty();
+        return true;
+      }
       state.selected_node = node->id;
       if (!node->locked) {
         // Reserve capture for the gesture, but do NOT begin a document
@@ -523,7 +630,7 @@ bool handle_input(Interaction &state, GraphEditDocument &model,
         state.status_message = status ? "" : status.message;
       }
     } else if (matching && state.mode == GestureMode::Connect) {
-      const auto *target = hit_port(model, state, x, y, false);
+      const auto target = hit_port(model, state, x, y, false);
       if (target) {
         std::string edge_id;
         bool used;

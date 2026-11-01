@@ -46,6 +46,28 @@ struct GraphEditRoute {
   std::vector<stun::graphlayout::Point> points;
 };
 
+// M2a: compound identity belongs to the logical document. The routing view
+// never owns these original nodes or their edges. No nested-group transform
+// or automatic proxy-port synthesis is implemented in this first slice.
+struct GraphEditGroupProxyPort {
+  std::string id;               // Stable, globally unique visible proxy port.
+  std::string original_port_id; // Preserved endpoint of the logical edge.
+  stun::graphlayout::Side side = stun::graphlayout::Side::Auto;
+  double local_x = 0.0;
+  double local_y = 0.0;
+};
+
+struct GraphEditGroup {
+  std::string id;
+  double x = 0.0;
+  double y = 0.0;
+  double width = 0.0;
+  double height = 0.0;
+  bool collapsed = false;
+  std::vector<std::string> member_node_ids;
+  std::vector<GraphEditGroupProxyPort> proxy_ports;
+};
+
 struct GraphEditSnapshot {
   // Revision is monotone even across Undo/Redo; never restore an old revision.
   std::uint64_t revision = 0; // Legacy alias for document_revision.
@@ -57,6 +79,8 @@ struct GraphEditSnapshot {
   std::vector<GraphEditPort> ports;
   std::vector<GraphEditEdge> edges;
   std::vector<GraphEditRoute> routes;
+  // Stored even while collapsed. Internal nodes/ports/edges keep their IDs.
+  std::vector<GraphEditGroup> groups;
 };
 
 enum class GraphEditError {
@@ -70,6 +94,7 @@ enum class GraphEditError {
   CapacityExceeded,
   Conflict,
   InternalInvariant,
+  MissingGroup,
 };
 
 struct GraphEditStatus {
@@ -108,6 +133,10 @@ public:
   class PreparedMove;
   GraphEditStatus initialize(GraphEditSnapshot initial);
   const GraphEditSnapshot &snapshot() const noexcept { return committed_; }
+  // Build an ephemeral flat routing/painting view. Group proxy geometry and
+  // explicitly measured boundary ports replace hidden children; internal
+  // edges stay in the logical snapshot but disappear from the visible view.
+  GraphEditStatus visible_snapshot(GraphEditSnapshot &view) const;
   const GraphRouteUpdateStats &last_route_update() const noexcept {
     return route_stats_;
   }
@@ -121,6 +150,10 @@ public:
 
   GraphEditStatus connect(std::string source_port, std::string target_port,
                           std::string edge_id);
+  GraphEditStatus add_group(GraphEditGroup group);
+  GraphEditStatus remove_group(std::string_view group_id);
+  GraphEditStatus set_group_collapsed(std::string_view group_id,
+                                      bool collapsed);
   GraphEditStatus undo();
   GraphEditStatus redo();
 

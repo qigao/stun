@@ -701,6 +701,244 @@ spec("GraphCanvas M0 application-owned graph editing") {
   }
 }
 
+// M2a group tests reuse the production native GraphOrthogonal adapter and
+// existing TinyTest target. No fake router, second graph model or test project.
+spec("GraphCanvas M2a stable group proxy and atomic history") {
+  it("hides internal subgraph edges but preserves two external group endpoints") {
+    GraphEditSnapshot input;
+    input.nodes = {{"left", 30, 80, 80, 50, false},
+                   {"middle", 180, 80, 80, 50, false},
+                   {"outside", 420, 80, 80, 50, false}};
+    input.ports = {{"left-out", "left", gl::Side::East, 80, 25, true},
+                   {"mid-in", "middle", gl::Side::West, 0, 25, false},
+                   {"mid-out", "middle", gl::Side::East, 80, 25, true},
+                   {"outside-in", "outside", gl::Side::West, 0, 25, false}};
+    input.edges = {{"internal", "left-out", "mid-in"},
+                   {"external", "mid-out", "outside-in"}};
+    charts::ui::GraphEditGroup left_group;
+    left_group.id = "cluster";
+    left_group.x = 20;
+    left_group.y = 60;
+    left_group.width = 290;
+    left_group.height = 90;
+    left_group.member_node_ids = {"left", "middle"};
+    left_group.proxy_ports.push_back(
+        {"cluster-out", "mid-out", gl::Side::East, 290, 45});
+    charts::ui::GraphEditGroup right_group;
+    right_group.id = "output";
+    right_group.x = 400;
+    right_group.y = 60;
+    right_group.width = 120;
+    right_group.height = 90;
+    right_group.member_node_ids = {"outside"};
+    right_group.proxy_ports.push_back(
+        {"output-in", "outside-in", gl::Side::West, 0, 45});
+    input.groups = {left_group, right_group};
+
+    GraphEditDocument doc;
+    check_true(static_cast<bool>(doc.initialize(std::move(input))));
+    check_equal(doc.snapshot().edges.size(), 2U);
+    check_equal(doc.snapshot().routes.size(), 2U);
+    const auto *internal_before = route_by_id(doc.snapshot(), "internal");
+    check_not_null(internal_before);
+    if (!internal_before) return;
+    const auto saved_internal = *internal_before;
+
+    check_true(static_cast<bool>(doc.set_group_collapsed("cluster", true)));
+    check_equal(doc.snapshot().edges.size(), 2U);
+    check_equal(doc.snapshot().routes.size(), 1U);
+    check_null(route_by_id(doc.snapshot(), "internal"));
+    check_not_null(route_by_id(doc.snapshot(), "external"));
+    GraphEditSnapshot one_proxy;
+    check_true(static_cast<bool>(doc.visible_snapshot(one_proxy)));
+    check_equal(one_proxy.nodes.size(), 2U);
+    check_equal(one_proxy.edges.size(), 1U);
+    check_equal(one_proxy.edges[0].source_port, "cluster-out");
+    check_equal(one_proxy.edges[0].target_port, "outside-in");
+
+    check_true(static_cast<bool>(doc.set_group_collapsed("output", true)));
+    GraphEditSnapshot two_proxies;
+    check_true(static_cast<bool>(doc.visible_snapshot(two_proxies)));
+    check_equal(two_proxies.nodes.size(), 2U);
+    check_equal(two_proxies.edges.size(), 1U);
+    check_equal(two_proxies.edges[0].source_port, "cluster-out");
+    check_equal(two_proxies.edges[0].target_port, "output-in");
+    check_equal(doc.snapshot().edges[0].source_port, "mid-out"); // Sorted stable ID.
+
+    check_true(static_cast<bool>(doc.undo()));
+    check_false(doc.snapshot().groups[1].collapsed);
+    check_true(static_cast<bool>(doc.undo()));
+    check_equal(doc.snapshot().routes.size(), 2U);
+    const auto *restored = route_by_id(doc.snapshot(), "internal");
+    check_not_null(restored);
+    if (restored)
+      check_true(route_points_identical(saved_internal, *restored));
+    check_true(static_cast<bool>(doc.redo()));
+    check_equal(doc.snapshot().routes.size(), 1U);
+  }
+
+  it("projects a collapsed group without rewriting original graph identities") {
+    auto graph = example();
+    charts::ui::GraphEditGroup group;
+    group.id = "pack";
+    group.x = 40.0;
+    group.y = 24.0;
+    group.width = 170.0;
+    group.height = 130.0;
+    group.member_node_ids = {"alpha"};
+    group.proxy_ports.push_back(
+        {"pack-out", "source", gl::Side::East, 170.0, 48.0});
+    graph.groups.push_back(group);
+    GraphEditDocument doc;
+    check_true(static_cast<bool>(doc.initialize(std::move(graph))));
+    const auto original_route = doc.snapshot().routes.front();
+    check_within(original_route.points.front().x, 180.0, 0.0001);
+
+    const auto first_revision = doc.snapshot().revision;
+    check_true(static_cast<bool>(doc.set_group_collapsed("pack", true)));
+    check_equal(doc.snapshot().revision, first_revision + 1);
+    check_equal(doc.snapshot().groups.size(), 1U);
+    check_true(doc.snapshot().groups.front().collapsed);
+    check_equal(doc.snapshot().nodes.size(), 2U);
+    check_equal(doc.snapshot().edges[0].source_port, "source");
+    check_equal(doc.snapshot().ports.size(), 2U);
+    check_equal(doc.snapshot().routes[0].edge_id, "edge-1");
+    check_within(doc.snapshot().routes[0].points.front().x, 210.0, 0.0001);
+    GraphEditSnapshot view;
+    check_true(static_cast<bool>(doc.visible_snapshot(view)));
+    check_equal(view.nodes.size(), 2U);
+    check_equal(view.edges.size(), 1U);
+    check_equal(view.nodes[0].id, "beta"); // View is not a stored second graph.
+    check_equal(view.edges[0].source_port, "pack-out");
+    bool proxy_found = false;
+    for (const auto &node : view.nodes)
+      proxy_found = proxy_found || node.id == "group@pack";
+    check_true(proxy_found);
+
+    const auto locked = doc.begin_move("alpha");
+    check_false(static_cast<bool>(locked));
+    check(locked.error == GraphEditError::LockedNode);
+    const auto no_op_revision = doc.snapshot().revision;
+    check_true(static_cast<bool>(doc.set_group_collapsed("pack", true)));
+    check_equal(doc.snapshot().revision, no_op_revision);
+    check_true(static_cast<bool>(doc.undo()));
+    check_false(doc.snapshot().groups.front().collapsed);
+    check_equal(doc.snapshot().routes[0].points.front().x,
+                original_route.points.front().x);
+    check_true(static_cast<bool>(doc.redo()));
+    check_true(doc.snapshot().groups.front().collapsed);
+    check_within(doc.snapshot().routes[0].points.front().x, 210.0, 0.0001);
+    check_equal(doc.snapshot().document_revision, doc.snapshot().revision);
+    check_equal(doc.snapshot().geometry_revision, doc.snapshot().revision);
+  }
+
+  it("adds and removes a group as one reversible document transaction") {
+    GraphEditDocument doc;
+    check_true(static_cast<bool>(doc.initialize(example())));
+    charts::ui::GraphEditGroup group;
+    group.id = "stable";
+    group.x = 40.0;
+    group.y = 24.0;
+    group.width = 170.0;
+    group.height = 130.0;
+    group.member_node_ids = {"alpha"};
+    group.proxy_ports.push_back(
+        {"stable-out", "source", gl::Side::East, 170.0, 48.0});
+    check_true(static_cast<bool>(doc.add_group(group)));
+    check_equal(doc.snapshot().groups.front().id, "stable");
+    check_true(static_cast<bool>(doc.set_group_collapsed("stable", true)));
+    check_equal(doc.snapshot().groups.front().proxy_ports[0].id, "stable-out");
+    check_true(static_cast<bool>(doc.remove_group("stable")));
+    check_true(doc.snapshot().groups.empty());
+    check_equal(doc.snapshot().edges[0].source_port, "source");
+    check_true(static_cast<bool>(doc.undo()));
+    check_true(doc.snapshot().groups.front().collapsed);
+    check_true(static_cast<bool>(doc.undo()));
+    check_false(doc.snapshot().groups.front().collapsed);
+    check_true(static_cast<bool>(doc.undo()));
+    check_true(doc.snapshot().groups.empty());
+    check_true(static_cast<bool>(doc.redo()));
+    check_equal(doc.snapshot().groups.front().id, "stable");
+  }
+
+  it("rejects missing boundary mappings without publishing partial geometry") {
+    GraphEditDocument doc;
+    auto graph = example();
+    charts::ui::GraphEditGroup group;
+    group.id = "unbound";
+    group.x = 40.0;
+    group.y = 24.0;
+    group.width = 170.0;
+    group.height = 130.0;
+    group.member_node_ids = {"alpha"};
+    graph.groups.push_back(group);
+    check_true(static_cast<bool>(doc.initialize(std::move(graph))));
+    const auto prior = doc.snapshot();
+    const auto status = doc.set_group_collapsed("unbound", true);
+    check_false(static_cast<bool>(status));
+    check(status.error == GraphEditError::InvalidInput);
+    check_equal(doc.snapshot().revision, prior.revision);
+    check_false(doc.snapshot().groups.front().collapsed);
+    check_equal(doc.snapshot().routes.size(), prior.routes.size());
+    check_true(route_points_identical(
+        doc.snapshot().routes.front(), prior.routes.front()));
+    check_equal(doc.undo_count(), 0U);
+    check_equal(doc.redo_count(), 0U);
+
+    group.id = "invalid-proxy";
+    group.proxy_ports.push_back(
+        {"source", "source", gl::Side::East, 170.0, 48.0});
+    auto bad = example();
+    bad.groups.push_back(group);
+    GraphEditDocument collision_doc;
+    const auto collision = collision_doc.initialize(std::move(bad));
+    check_false(static_cast<bool>(collision));
+    check(collision.error == GraphEditError::InvalidInput);
+    check_equal(collision_doc.snapshot().revision, std::uint64_t{0});
+
+    group.proxy_ports.clear();
+    group.proxy_ports.push_back(
+        {"bad-anchor", "source", gl::Side::East, 160.0, 48.0});
+    bad = example();
+    bad.groups.push_back(group);
+    const auto geometry = collision_doc.initialize(std::move(bad));
+    check_false(static_cast<bool>(geometry));
+    check(geometry.error == GraphEditError::InvalidGeometry);
+    check_equal(collision_doc.snapshot().revision, std::uint64_t{0});
+    check_equal(doc.snapshot().revision, prior.revision);
+  }
+
+  it("refuses a prepared worker result after a group revision overtakes it") {
+    GraphEditDocument doc;
+    auto graph = example();
+    charts::ui::GraphEditGroup group;
+    group.id = "async";
+    group.x = 40.0;
+    group.y = 24.0;
+    group.width = 170.0;
+    group.height = 130.0;
+    group.member_node_ids = {"alpha"};
+    group.proxy_ports.push_back(
+        {"async-out", "source", gl::Side::East, 170.0, 48.0});
+    graph.groups.push_back(group);
+    check_true(static_cast<bool>(doc.initialize(std::move(graph))));
+    charts::ui::GraphRouteWorker worker;
+    check_true(static_cast<bool>(
+        worker.submit_move(doc, "beta", 24.0, 0.0, 71)));
+    check_true(static_cast<bool>(doc.set_group_collapsed("async", true)));
+    const auto revision = doc.snapshot().revision;
+    worker.wait();
+    auto prepared = worker.poll();
+    check_true(static_cast<bool>(prepared));
+    if (!prepared) return;
+    const auto rejected = doc.accept_prepared_move(std::move(*prepared), 71);
+    check_false(static_cast<bool>(rejected));
+    check(rejected.error == GraphEditError::Conflict);
+    check_equal(doc.snapshot().revision, revision);
+    check_true(doc.snapshot().groups.front().collapsed);
+  }
+}
+
 spec("GraphCanvas M1a uses conservative bounded incremental orthogonal routing") {
   it("reroutes an UNRELATED path when a moved obstacle sweeps its clearance envelope") {
     GraphEditDocument model;

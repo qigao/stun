@@ -69,6 +69,9 @@ SweptObstacle swept_clearance(const GraphEditNode &old_node,
 
 bool same_route_schema(const GraphEditSnapshot &a,
                        const GraphEditSnapshot &b) noexcept {
+  // A compound-proxy route must never be reused as an original-node route.
+  // M2a conservatively fully routes every group-containing transaction.
+  if (!a.groups.empty() || !b.groups.empty()) return false;
   // Dynamic node/port insertion and dimension/port changes are NOT M1a.
   // Rebuild all on such changes; do not reuse routes with stale anchors.
   if (a.nodes.size() != b.nodes.size() ||
@@ -94,6 +97,195 @@ GraphEditError routing_error(gl::RouteError error) {
   case gl::RouteError::InternalInvariant: return GraphEditError::InternalInvariant;
   default: return GraphEditError::InvalidGeometry;
   }
+}
+
+
+GraphEditStatus project_visible_graph(const GraphEditSnapshot &source,
+                                      GraphEditSnapshot &view) {
+  // M2a is one flat, disjoint group layer. Complex/nested group geometry is
+  // rejected instead of silently losing logical graph identity.
+  if (source.nodes.size() > 256 || source.edges.size() > 1024 ||
+      source.ports.size() > 4096 || source.groups.size() > 256)
+    return reject(GraphEditError::CapacityExceeded,
+                  "compound document exceeds native graph budget");
+
+  std::map<std::string, const GraphEditNode *> nodes;
+  gl::Layout original_layout;
+  for (const auto &node : source.nodes) {
+    if (!valid_id(node.id) || !finite_geometry(node) ||
+        !nodes.emplace(node.id, &node).second)
+      return reject(GraphEditError::InvalidInput,
+                    "compound document has invalid or duplicate node");
+    original_layout.nodes.push_back(
+        {node.x, node.y, node.width, node.height, 0, 0});
+  }
+  // Hidden children must also be valid when expanded. Never persist a group
+  // whose original geometry cannot be restored deterministically.
+  for (std::size_t i = 0; i < source.nodes.size(); ++i)
+    for (std::size_t j = i + 1; j < source.nodes.size(); ++j)
+      if (overlap(source.nodes[i], source.nodes[j]))
+        return reject(GraphEditError::InvalidGeometry,
+                      "original group member rectangles overlap");
+
+  std::map<std::string, std::size_t> node_indices;
+  for (std::size_t i = 0; i < source.nodes.size(); ++i)
+    node_indices.emplace(source.nodes[i].id, i);
+
+  std::map<std::string, const GraphEditPort *> ports;
+  std::vector<gl::MeasuredNamedPort> original_measurements;
+  for (const auto &port : source.ports) {
+    const auto n = node_indices.find(port.node_id);
+    if (!valid_id(port.id) || n == node_indices.end() ||
+        !ports.emplace(port.id, &port).second)
+      return reject(GraphEditError::InvalidInput,
+                    "compound document has duplicate or orphan port");
+    if (!std::isfinite(port.local_x) || !std::isfinite(port.local_y))
+      return reject(GraphEditError::InvalidGeometry,
+                    "nonfinite original port measurement");
+    original_measurements.push_back(
+        {n->second, port.id, port.side, {port.local_x, port.local_y}});
+  }
+  gl::NamedPortBindings original_bindings;
+  const auto originals = gl::bind_named_ports(
+      original_layout, original_measurements, original_bindings);
+  if (!originals)
+    return reject(GraphEditError::InvalidGeometry,
+                  "invalid original measured port: " + originals.message);
+
+  std::set<std::string> edge_ids;
+  for (const auto &edge : source.edges) {
+    const auto a = ports.find(edge.source_port);
+    const auto b = ports.find(edge.target_port);
+    if (!valid_id(edge.id) || !edge_ids.insert(edge.id).second ||
+        a == ports.end() || b == ports.end() ||
+        !a->second->output || b->second->output)
+      return reject(GraphEditError::InvalidInput,
+                    "invalid original logical edge or endpoint");
+  }
+
+  std::set<std::string> group_ids;
+  std::map<std::string, std::string> membership;
+  std::map<std::string, std::string> hidden_members;
+  std::map<std::string, std::string> proxy_for_original;
+  std::set<std::string> all_proxy_ids;
+  for (const auto &group : source.groups) {
+    const std::string proxy_node = "group@" + group.id;
+    GraphEditNode measured;
+    measured.id = proxy_node;
+    measured.x = group.x;
+    measured.y = group.y;
+    measured.width = group.width;
+    measured.height = group.height;
+    measured.locked = true;
+    if (!valid_id(group.id) || !valid_id(proxy_node) ||
+        !group_ids.insert(group.id).second ||
+        nodes.count(proxy_node) || !finite_geometry(measured) ||
+        group.member_node_ids.empty())
+      return reject(GraphEditError::InvalidInput,
+                    "duplicate, empty, or invalid measured group");
+
+    for (const auto &id : group.member_node_ids) {
+      if (nodes.find(id) == nodes.end() ||
+          !membership.emplace(id, group.id).second)
+        return reject(GraphEditError::InvalidInput,
+                      "missing or multiply owned group member");
+      if (group.collapsed) hidden_members.emplace(id, proxy_node);
+    }
+
+    // Validate boundary geometry even while expanded. The native named-port
+    // binder is the single source of truth for physical side/position rules;
+    // merely storing finite (x,y) must not defer a bad measurement until a
+    // later collapse, nor invent a boundary anchor in the UI layer.
+    if (!group.proxy_ports.empty()) {
+      gl::Layout proxy_layout;
+      proxy_layout.nodes.push_back(
+          {group.x, group.y, group.width, group.height, 0, 0});
+      std::vector<gl::MeasuredNamedPort> measurements;
+      for (const auto &binding : group.proxy_ports)
+        measurements.push_back({0, binding.id, binding.side,
+                                {binding.local_x, binding.local_y}});
+      gl::NamedPortBindings checked;
+      const auto bound = gl::bind_named_ports(
+          proxy_layout, measurements, checked);
+      if (!bound)
+        return reject(GraphEditError::InvalidGeometry,
+                      "invalid measured group boundary: " + bound.message);
+    }
+
+    std::set<std::string> local_bindings;
+    for (const auto &binding : group.proxy_ports) {
+      const auto original = ports.find(binding.original_port_id);
+      if (!valid_id(binding.id) || original == ports.end() ||
+          !all_proxy_ids.insert(binding.id).second ||
+          ports.count(binding.id) || !std::isfinite(binding.local_x) ||
+          !std::isfinite(binding.local_y) ||
+          !local_bindings.insert(binding.original_port_id).second)
+        return reject(GraphEditError::InvalidInput,
+                      "invalid or duplicate group boundary port binding");
+    }
+  }
+
+  // Validate ownership after all groups have been read. Group order cannot
+  // change membership acceptance, group ports, or the final solver order.
+  for (const auto &group : source.groups) {
+    for (const auto &binding : group.proxy_ports) {
+      const auto original = ports.find(binding.original_port_id);
+      const auto member = membership.find(original->second->node_id);
+      if (member == membership.end() || member->second != group.id)
+        return reject(GraphEditError::InvalidInput,
+                      "proxy port does not belong to its group");
+      if (group.collapsed)
+        proxy_for_original.emplace(binding.original_port_id, binding.id);
+    }
+  }
+
+  view = {};
+  view.revision = source.revision;
+  view.document_revision = source.document_revision;
+  view.geometry_revision = source.geometry_revision;
+  view.routes = source.routes;
+  for (const auto &node : source.nodes)
+    if (!hidden_members.count(node.id)) view.nodes.push_back(node);
+  for (const auto &port : source.ports)
+    if (!hidden_members.count(port.node_id)) view.ports.push_back(port);
+  for (const auto &group : source.groups) {
+    if (!group.collapsed) continue;
+    const std::string id = "group@" + group.id;
+    view.nodes.push_back({id, group.x, group.y, group.width,
+                          group.height, true});
+    for (const auto &binding : group.proxy_ports) {
+      const auto *original = ports.at(binding.original_port_id);
+      view.ports.push_back({binding.id, id, binding.side,
+                            binding.local_x, binding.local_y,
+                            original->output});
+    }
+  }
+  for (const auto &edge : source.edges) {
+    const auto *from = ports.at(edge.source_port);
+    const auto *to = ports.at(edge.target_port);
+    const auto ga = hidden_members.find(from->node_id);
+    const auto gb = hidden_members.find(to->node_id);
+    if (ga != hidden_members.end() && gb != hidden_members.end() &&
+        ga->second == gb->second)
+      continue; // Internal topology remains in source, never in the view.
+    GraphEditEdge visible_edge = edge;
+    if (ga != hidden_members.end()) {
+      const auto bound = proxy_for_original.find(edge.source_port);
+      if (bound == proxy_for_original.end())
+        return reject(GraphEditError::InvalidInput,
+                      "missing explicit outgoing group boundary binding");
+      visible_edge.source_port = bound->second;
+    }
+    if (gb != hidden_members.end()) {
+      const auto bound = proxy_for_original.find(edge.target_port);
+      if (bound == proxy_for_original.end())
+        return reject(GraphEditError::InvalidInput,
+                      "missing explicit incoming group boundary binding");
+      visible_edge.target_port = bound->second;
+    }
+    view.edges.push_back(std::move(visible_edge));
+  }
+  return {};
 }
 
 } // namespace
@@ -163,6 +355,31 @@ GraphEditStatus GraphEditDocument::validate_and_route(
     const std::vector<IndexedRouteSegment> *previous_index_y,
     GraphRouteUpdateStats &stats) {
   stats = {};
+  if (!next.groups.empty()) {
+    // Normalize stable ID ordering in the persisted document as well as the
+    // transient solver view; input permutations cannot affect Undo replay.
+    const auto by_id = [](const auto &a, const auto &b) {
+      return a.id < b.id;
+    };
+    std::sort(next.nodes.begin(), next.nodes.end(), by_id);
+    std::sort(next.ports.begin(), next.ports.end(), by_id);
+    std::sort(next.edges.begin(), next.edges.end(), by_id);
+    std::sort(next.groups.begin(), next.groups.end(), by_id);
+    for (auto &group : next.groups) {
+      std::sort(group.member_node_ids.begin(), group.member_node_ids.end());
+      std::sort(group.proxy_ports.begin(), group.proxy_ports.end(), by_id);
+    }
+    GraphEditSnapshot visible;
+    const auto projected = project_visible_graph(next, visible);
+    if (!projected) return projected;
+    // The sole native GraphLayout receives one flat, measured view. M2a does
+    // not try to reuse old routes across a compound-proxy transition.
+    const auto routed = validate_and_route(
+        visible, nullptr, nullptr, nullptr, stats);
+    if (!routed) return routed;
+    next.routes = std::move(visible.routes);
+    return {};
+  }
   // The existing geometric router's bounds remain hard constraints, even if
   // the caller could draw a larger graph without routing any connectors.
   if (next.nodes.size() > 256 || next.edges.size() > 1024 ||
@@ -422,6 +639,13 @@ GraphEditStatus GraphEditDocument::initialize(GraphEditSnapshot initial) {
 
 GraphEditStatus GraphEditDocument::begin_move(std::string_view id) {
   if (move_) return reject(GraphEditError::Busy, "another gesture is active");
+  for (const auto &group : committed_.groups)
+    if (group.collapsed &&
+        std::find(group.member_node_ids.begin(),
+                  group.member_node_ids.end(), std::string(id)) !=
+            group.member_node_ids.end())
+      return reject(GraphEditError::LockedNode,
+                    "node is hidden behind a collapsed group proxy");
   for (const auto &node : committed_.nodes) {
     if (node.id == id) {
       if (node.locked) return reject(GraphEditError::LockedNode, "node is locked");
@@ -505,10 +729,59 @@ GraphEditStatus GraphEditDocument::connect(std::string source_port,
                                             std::string target_port,
                                             std::string edge_id) {
   if (move_) return reject(GraphEditError::Busy, "cannot connect during node drag");
+  // UI may pass a visible proxy port. Persist only the original stable port
+  // IDs, never an ephemeral collapsed-view edge endpoint.
+  for (const auto &group : committed_.groups) {
+    if (!group.collapsed) continue;
+    for (const auto &binding : group.proxy_ports) {
+      if (source_port == binding.id) source_port = binding.original_port_id;
+      if (target_port == binding.id) target_port = binding.original_port_id;
+    }
+  }
   GraphEditSnapshot candidate = committed_;
   candidate.edges.push_back(
       {std::move(edge_id), std::move(source_port), std::move(target_port)});
   return publish(std::move(candidate));
+}
+
+GraphEditStatus GraphEditDocument::visible_snapshot(
+    GraphEditSnapshot &view) const {
+  if (committed_.groups.empty()) {
+    view = committed_;
+    return {};
+  }
+  return project_visible_graph(committed_, view);
+}
+
+GraphEditStatus GraphEditDocument::add_group(GraphEditGroup group) {
+  if (move_) return reject(GraphEditError::Busy, "cannot group during drag");
+  GraphEditSnapshot candidate = committed_;
+  candidate.groups.push_back(std::move(group));
+  return publish(std::move(candidate));
+}
+
+GraphEditStatus GraphEditDocument::remove_group(std::string_view group_id) {
+  if (move_) return reject(GraphEditError::Busy, "cannot ungroup during drag");
+  GraphEditSnapshot candidate = committed_;
+  const auto it = std::find_if(candidate.groups.begin(), candidate.groups.end(),
+      [&](const GraphEditGroup &group) { return group.id == group_id; });
+  if (it == candidate.groups.end())
+    return reject(GraphEditError::MissingGroup, "unknown stable group ID");
+  candidate.groups.erase(it);
+  return publish(std::move(candidate));
+}
+
+GraphEditStatus GraphEditDocument::set_group_collapsed(
+    std::string_view group_id, bool collapsed) {
+  if (move_) return reject(GraphEditError::Busy, "cannot collapse during drag");
+  GraphEditSnapshot candidate = committed_;
+  for (auto &group : candidate.groups) {
+    if (group.id != group_id) continue;
+    if (group.collapsed == collapsed) return {}; // No-op, no history entry.
+    group.collapsed = collapsed;
+    return publish(std::move(candidate));
+  }
+  return reject(GraphEditError::MissingGroup, "unknown stable group ID");
 }
 
 GraphEditStatus GraphEditDocument::undo() {
