@@ -751,19 +751,14 @@ GraphEditStatus GraphEditDocument::initialize(GraphEditSnapshot initial) {
 
 GraphEditStatus GraphEditDocument::begin_move(std::string_view id) {
   if (move_) return reject(GraphEditError::Busy, "another gesture is active");
-  for (const auto &group : committed_.groups)
-    if (group.collapsed &&
-        std::find(group.member_node_ids.begin(),
-                  group.member_node_ids.end(), std::string(id)) !=
-            group.member_node_ids.end())
-      return reject(GraphEditError::LockedNode,
-                    "node is hidden behind a collapsed group proxy");
+  if (outermost_collapsed_owner(committed_, id))
+    return reject(GraphEditError::LockedNode,
+                  "node is hidden by a collapsed ancestor group");
   for (const auto &node : committed_.nodes) {
-    if (node.id == id) {
-      if (node.locked) return reject(GraphEditError::LockedNode, "node is locked");
-      move_ = MovePreview{node.id, node.x, node.y, node.x, node.y};
-      return {};
-    }
+    if (node.id != id) continue;
+    if (node.locked) return reject(GraphEditError::LockedNode, "node is locked");
+    move_ = MovePreview{node.id, node.x, node.y, node.x, node.y};
+    return {};
   }
   return reject(GraphEditError::MissingNode, "unknown stable node ID");
 }
@@ -771,62 +766,63 @@ GraphEditStatus GraphEditDocument::begin_move(std::string_view id) {
 GraphEditStatus GraphEditDocument::begin_group_move(
     std::string_view group_id) {
   if (move_) return reject(GraphEditError::Busy, "another gesture is active");
-  for (const auto &group : committed_.groups) {
-    if (group.id != group_id) continue;
-    // A compound drag cannot bypass the same locked-member protection as a
-    // direct node drag, even when the member is visually collapsed.
-    for (const auto &id : group.member_node_ids) {
-      const auto member = std::find_if(
-          committed_.nodes.begin(), committed_.nodes.end(),
-          [&](const GraphEditNode &node) { return node.id == id; });
-      if (member == committed_.nodes.end())
-        return reject(GraphEditError::MissingNode,
-                      "group member was removed from the document");
-      if (member->locked)
-        return reject(GraphEditError::LockedNode,
-                      "group contains a locked member");
-    }
-    move_ = MovePreview{group.id, group.x, group.y,
-                        group.x, group.y, true};
-    return {};
-  }
-  return reject(GraphEditError::MissingGroup, "unknown stable group ID");
+  const auto *group = find_group(committed_, group_id);
+  if (!group) return reject(GraphEditError::MissingGroup,
+                            "unknown stable group ID");
+  if (!group_ancestors_expanded(committed_, group_id))
+    return reject(GraphEditError::LockedNode,
+                  "group is hidden by a collapsed ancestor");
+
+  // A parent's single gesture owns every descendant leaf, including locked
+  // children that could otherwise bypass ordinary node-move constraints.
+  for (const auto &node : committed_.nodes)
+    if (belongs_to_subtree(committed_, node.id, group_id) && node.locked)
+      return reject(GraphEditError::LockedNode,
+                    "group subtree contains a locked original node");
+
+  double x = 0.0, y = 0.0;
+  if (!world_origin(committed_, group_id, x, y))
+    return reject(GraphEditError::InvalidGeometry,
+                  "cannot resolve group parent-local transform");
+  move_ = MovePreview{group->id, x, y, x, y, true};
+  return {};
 }
 
 GraphEditStatus GraphEditDocument::preview_move(double dx, double dy) {
-  if (!move_) return reject(GraphEditError::Conflict, "no active node gesture");
+  if (!move_) return reject(GraphEditError::Conflict, "no active move gesture");
   const double x = move_->original_x + dx;
   const double y = move_->original_y + dy;
   if (!std::isfinite(x) || !std::isfinite(y) ||
-      std::abs(x) > 1.0e6 || std::abs(y) > 1.0e6) {
-    return reject(GraphEditError::InvalidGeometry, "invalid drag preview coordinates");
-  }
+      std::abs(x) > 1.0e6 || std::abs(y) > 1.0e6)
+    return reject(GraphEditError::InvalidGeometry,
+                  "invalid drag preview coordinates");
   if (move_->group) {
-    const auto group_it = std::find_if(
-        committed_.groups.begin(), committed_.groups.end(),
-        [&](const GraphEditGroup &group) { return group.id == move_->id; });
-    if (group_it == committed_.groups.end())
+    if (!find_group(committed_, move_->id))
       return reject(GraphEditError::MissingGroup,
                     "group was retired during the gesture");
-    const GraphEditNode proxy{
-        "group@" + group_it->id, x, y,
-        group_it->width, group_it->height, true};
-    if (!finite_geometry(proxy))
-      return reject(GraphEditError::InvalidGeometry,
-                    "group proxy moved outside the bounded geometry");
-    for (const auto &id : group_it->member_node_ids) {
-      const auto member = std::find_if(
-          committed_.nodes.begin(), committed_.nodes.end(),
-          [&](const GraphEditNode &node) { return node.id == id; });
-      if (member == committed_.nodes.end())
-        return reject(GraphEditError::MissingNode,
-                      "group member was retired during the gesture");
-      GraphEditNode translated = *member;
-      translated.x += dx;
-      translated.y += dy;
-      if (!finite_geometry(translated))
+    // All descendants translate rigidly in world space. The nested group
+    // origins themselves stay parent-local; only their world projection
+    // shifts until the owner commits the parent translation.
+    for (const auto &group : committed_.groups) {
+      if (!descendant_or_self(committed_, group.id, move_->id)) continue;
+      double gx = 0.0, gy = 0.0;
+      if (!world_origin(committed_, group.id, gx, gy))
         return reject(GraphEditError::InvalidGeometry,
-                      "group member moved outside bounded geometry");
+                      "invalid descendant local group transform");
+      const GraphEditNode moved{"group@" + group.id, gx + dx, gy + dy,
+                                group.width, group.height, true};
+      if (!finite_geometry(moved))
+        return reject(GraphEditError::InvalidGeometry,
+                      "descendant group leaves geometry bounds");
+    }
+    for (const auto &node : committed_.nodes) {
+      if (!belongs_to_subtree(committed_, node.id, move_->id)) continue;
+      GraphEditNode moved = node;
+      moved.x += dx;
+      moved.y += dy;
+      if (!finite_geometry(moved))
+        return reject(GraphEditError::InvalidGeometry,
+                      "descendant node leaves geometry bounds");
     }
   }
   move_->x = x;
@@ -838,34 +834,30 @@ bool GraphEditDocument::preview_position(std::string_view id, double &x,
                                           double &y) const noexcept {
   if (!move_) return false;
   if (!move_->group) {
-    if (move_->id != id) return false;
+    if (id != move_->id) return false;
     x = move_->x;
     y = move_->y;
     return true;
   }
-  // No allocation on the noexcept paint/semantics preview path.
-  if (id.size() == move_->id.size() + 6 &&
-      id.substr(0, 6) == "group@" &&
-      id.substr(6) == move_->id) {
-    x = move_->x;
-    y = move_->y;
+  const double dx = move_->x - move_->original_x;
+  const double dy = move_->y - move_->original_y;
+  if (id.size() > 6 && id.substr(0, 6) == "group@") {
+    const auto group_id = id.substr(6);
+    if (!descendant_or_self(committed_, group_id, move_->id)) return false;
+    double gx = 0.0, gy = 0.0;
+    if (!world_origin(committed_, group_id, gx, gy)) return false;
+    x = gx + dx;
+    y = gy + dy;
     return true;
   }
-  const auto group = std::find_if(
-      committed_.groups.begin(), committed_.groups.end(),
-      [&](const GraphEditGroup &g) { return g.id == move_->id; });
-  if (group == committed_.groups.end()) return false;
-  const auto member = std::find_if(
-      group->member_node_ids.begin(), group->member_node_ids.end(),
-      [&](const std::string &node_id) { return id.compare(node_id) == 0; });
-  if (member == group->member_node_ids.end()) return false;
-  const auto node = std::find_if(
-      committed_.nodes.begin(), committed_.nodes.end(),
-      [&](const GraphEditNode &n) { return n.id == *member; });
-  if (node == committed_.nodes.end()) return false;
-  x = node->x + (move_->x - move_->original_x);
-  y = node->y + (move_->y - move_->original_y);
-  return true;
+  if (!belongs_to_subtree(committed_, id, move_->id)) return false;
+  for (const auto &node : committed_.nodes) {
+    if (node.id != id) continue;
+    x = node.x + dx;
+    y = node.y + dy;
+    return true;
+  }
+  return false;
 }
 
 GraphEditStatus GraphEditDocument::publish(GraphEditSnapshot candidate) {
@@ -915,12 +907,13 @@ GraphEditStatus GraphEditDocument::commit_move() {
                     "dragged group was retired");
     const double dx = preview.x - preview.original_x;
     const double dy = preview.y - preview.original_y;
-    group->x = preview.x;
-    group->y = preview.y;
+    // The group's own origin is stored parent-local; translating that one
+    // origin moves every descendant group's resolved world rectangle.
+    // Their nested local transforms must remain byte-for-byte unchanged.
+    group->x += dx;
+    group->y += dy;
     for (auto &node : candidate.nodes) {
-      if (std::find(group->member_node_ids.begin(),
-                    group->member_node_ids.end(), node.id) ==
-          group->member_node_ids.end()) continue;
+      if (!belongs_to_subtree(committed_, node.id, preview.id)) continue;
       node.x += dx;
       node.y += dy;
     }
@@ -965,6 +958,29 @@ GraphEditStatus GraphEditDocument::visible_snapshot(
     return {};
   }
   return project_visible_graph(committed_, view);
+}
+
+GraphEditStatus GraphEditDocument::group_world_rect(
+    std::string_view id, GraphEditNode &rect) const {
+  const auto *group = find_group(committed_, id);
+  if (!group) return reject(GraphEditError::MissingGroup,
+                            "unknown stable group ID");
+  double x = 0.0, y = 0.0;
+  if (!world_origin(committed_, id, x, y))
+    return reject(GraphEditError::InvalidGeometry,
+                  "invalid group parent-local transform");
+  GraphEditNode measured{"group@" + group->id, x, y,
+                         group->width, group->height, true};
+  if (!finite_geometry(measured))
+    return reject(GraphEditError::InvalidGeometry,
+                  "invalid measured group world rectangle");
+  rect = std::move(measured);
+  return {};
+}
+
+bool GraphEditDocument::group_is_visible(
+    std::string_view id) const noexcept {
+  return group_ancestors_expanded(committed_, id);
 }
 
 GraphEditStatus GraphEditDocument::add_group(GraphEditGroup group) {
@@ -1105,6 +1121,11 @@ GraphEditStatus GraphRouteWorker::submit_move(
   if (!std::isfinite(dx) || !std::isfinite(dy) ||
       std::abs(dx) > 1.0e6 || std::abs(dy) > 1.0e6)
     return reject(GraphEditError::InvalidGeometry, "invalid worker move displacement");
+  // An optional single-node worker must not bypass the owner-side visibility
+  // gate for a leaf hidden behind any collapsed ancestor.
+  if (outermost_collapsed_owner(owner.committed_, node_id))
+    return reject(GraphEditError::LockedNode,
+                  "cannot asynchronously move a hidden group member");
 
   // Replacing a finished task revokes any result that was polled but not
   // yet published by the document owner. A stale handoff never remains
