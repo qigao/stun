@@ -94,6 +94,7 @@ struct GraphRouteUpdateStats {
   std::size_t queried_segments = 0; // Size of OLD index used by the query.
   std::size_t segment_candidates = 0;
   std::size_t index_queries = 0;
+  std::size_t y_axis_queries = 0; // Selected more selective Y-index queries.
 };
 
 class GraphRouteWorker;
@@ -151,6 +152,7 @@ private:
     std::string edge_id;
     double left = 0.0, right = 0.0, top = 0.0, bottom = 0.0;
     double prefix_max_right = 0.0;
+    double prefix_max_bottom = 0.0;
   };
 
 public:
@@ -169,6 +171,7 @@ public:
     GraphEditSnapshot next_;
     GraphRouteUpdateStats stats_;
     std::vector<IndexedRouteSegment> index_;
+    std::vector<IndexedRouteSegment> index_y_;
     GraphEditStatus status_{GraphEditError::Conflict, "empty worker result"};
     std::shared_ptr<std::atomic_bool> cancelled_;
     std::uint64_t expected_revision_ = 0;
@@ -180,16 +183,19 @@ public:
 private:
   static GraphEditStatus build_route_index(
       const GraphEditSnapshot &snapshot,
-      std::vector<IndexedRouteSegment> &index);
+      std::vector<IndexedRouteSegment> &index,
+      std::vector<IndexedRouteSegment> &index_y);
   static GraphEditStatus validate_and_route(
       GraphEditSnapshot &next, const GraphEditSnapshot *previous,
       const std::vector<IndexedRouteSegment> *previous_index,
+      const std::vector<IndexedRouteSegment> *previous_index_y,
       GraphRouteUpdateStats &stats);
   GraphEditStatus publish(GraphEditSnapshot candidate);
 
   GraphEditSnapshot committed_;
   GraphRouteUpdateStats route_stats_;
   std::vector<IndexedRouteSegment> route_segments_;
+  std::vector<IndexedRouteSegment> route_segments_y_;
   std::uint64_t route_index_revision_ = 0;
   std::optional<MovePreview> move_;
   std::vector<GraphEditSnapshot> undo_;

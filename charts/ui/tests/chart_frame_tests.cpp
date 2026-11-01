@@ -925,6 +925,7 @@ spec("GraphCanvas M1b real routing scale and frame-budget evidence") {
     samples_us.reserve(8);
     std::size_t biggest_candidates = 0;
     std::size_t biggest_reroute = 0;
+    std::size_t total_y_axis_queries = 0;
     for (int repetition = 0; repetition < 8; ++repetition) {
       const double delta = (repetition % 2 == 0) ? -44.0 : 44.0;
       const auto began = std::chrono::steady_clock::now();
@@ -942,7 +943,9 @@ spec("GraphCanvas M1b real routing scale and frame-budget evidence") {
       // All 49 horizontal routes overlap the same X interval. A correct
       // x-index may enumerate every segment, before exact Y filtering.
       // Do not invent an x-pruning ratio where the fixture cannot yield one.
-      check_true(stats.segment_candidates <= stats.queried_segments);
+      check_true(stats.segment_candidates < stats.queried_segments);
+      check_equal(stats.y_axis_queries, 1U);
+      total_y_axis_queries += stats.y_axis_queries;
       biggest_candidates = std::max(biggest_candidates, stats.segment_candidates);
       biggest_reroute = std::max(biggest_reroute, stats.rerouted);
     }
@@ -953,6 +956,7 @@ spec("GraphCanvas M1b real routing scale and frame-budget evidence") {
     check_true(p50 >= 0 && p95 >= p50);
     check_equal(model.snapshot().revision, std::uint64_t{9});
     check_equal(node_by_id(model, "blocker")->y, affected_row + 38.0);
+    check_equal(total_y_axis_queries, 8U);
     // Measured on the actual CI host: report, never assert a fabricated
     // platform-independent latency SLA or invent 500/1000-node performance.
     std::cout << "GRAPH_CANVAS_M1B_MEASURE"
@@ -963,6 +967,7 @@ spec("GraphCanvas M1b real routing scale and frame-budget evidence") {
               << " edit_commit_p95_us=" << p95
               << " max_dirty_routes=" << biggest_reroute
               << " max_index_candidates=" << biggest_candidates
+              << " y_axis_queries=" << total_y_axis_queries
               << " queried_segments=" << model.last_route_update().queried_segments
               << " indexed_segments=" << model.last_route_update().indexed_segments
               << std::endl;
