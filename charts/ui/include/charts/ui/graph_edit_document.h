@@ -46,9 +46,9 @@ struct GraphEditRoute {
   std::vector<stun::graphlayout::Point> points;
 };
 
-// M2a: compound identity belongs to the logical document. The routing view
-// never owns these original nodes or their edges. No nested-group transform
-// or automatic proxy-port synthesis is implemented in this first slice.
+// Compound identity belongs to one logical document. Views use only the
+// existing native GraphLayout; proxy attachment positions are measured,
+// stable mappings (never inferred by a second UI graph or route engine).
 struct GraphEditGroupProxyPort {
   std::string id;               // Stable, globally unique visible proxy port.
   std::string original_port_id; // Preserved endpoint of the logical edge.
@@ -59,6 +59,9 @@ struct GraphEditGroupProxyPort {
 
 struct GraphEditGroup {
   std::string id;
+  // M2c: (x,y) is parent-local translation when parent_group_id is nonempty,
+  // otherwise world coordinates. No rotation/scale/shear. Member node
+  // rectangles remain in world space, transformed atomically on group drag.
   double x = 0.0;
   double y = 0.0;
   double width = 0.0;
@@ -66,6 +69,7 @@ struct GraphEditGroup {
   bool collapsed = false;
   std::vector<std::string> member_node_ids;
   std::vector<GraphEditGroupProxyPort> proxy_ports;
+  std::string parent_group_id; // Empty for top-level group. Stable on replay.
 };
 
 struct GraphEditSnapshot {
@@ -137,6 +141,11 @@ public:
   // explicitly measured boundary ports replace hidden children; internal
   // edges stay in the logical snapshot but disappear from the visible view.
   GraphEditStatus visible_snapshot(GraphEditSnapshot &view) const;
+  // Resolve one group's measured world rectangle from parent-local origins.
+  // Never expose a persistent second group model or UI scene graph.
+  GraphEditStatus group_world_rect(std::string_view id,
+                                   GraphEditNode &rect) const;
+  bool group_is_visible(std::string_view id) const noexcept;
   const GraphRouteUpdateStats &last_route_update() const noexcept {
     return route_stats_;
   }
