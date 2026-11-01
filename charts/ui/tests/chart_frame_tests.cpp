@@ -1377,7 +1377,7 @@ spec("GraphCanvas M2f in-place topology edits and history") {
     GraphEditDocument doc;
     check_true(static_cast<bool>(doc.initialize(example(false))));
     const auto baseline = doc.snapshot();
-    const GraphEditNode gamma{"gamma", 740.0, 36.0, 80.0, 72.0, false};
+    const charts::ui::GraphEditNode gamma{"gamma", 740.0, 36.0, 80.0, 72.0, false};
     const std::vector<charts::ui::GraphEditPort> gamma_ports = {
         {"gamma-in", "gamma", gl::Side::West, 0.0, 36.0, false},
         {"gamma-out", "gamma", gl::Side::East, 80.0, 36.0, true}};
