@@ -145,6 +145,12 @@ public:
   // Never expose a persistent second group model or UI scene graph.
   GraphEditStatus group_world_rect(std::string_view id,
                                    GraphEditNode &rect) const;
+  // Bounded v1 JSON persistence of LOGICAL identity and group hierarchy.
+  // Routes, revisions, runtime state and Undo/Redo are derived/transient;
+  // load_json revalidates/reroutes atomically via initialize() and resets
+  // history only after success. No second graph model/parser is introduced.
+  GraphEditStatus save_json(std::string &out) const;
+  GraphEditStatus load_json(std::string_view json);
   bool group_is_visible(std::string_view id) const noexcept;
   const GraphRouteUpdateStats &last_route_update() const noexcept {
     return route_stats_;

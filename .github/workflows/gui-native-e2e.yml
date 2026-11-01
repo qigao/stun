@@ -19,6 +19,8 @@ on:
       - 'flexUI/examples/desktop_editor/**'
       - 'charts/ui/src/graph_canvas_widget.cpp'
       - 'charts/ui/src/graph_edit_document.cpp'
+      - 'charts/ui/src/graph_edit_persistence.cpp'
+      - 'charts/ui/CMakeLists.txt'
       - 'charts/ui/include/charts/ui/graph_canvas_widget.h'
       - 'charts/ui/include/charts/ui/graph_edit_document.h'
       - 'charts/ui/tests/chart_frame_tests.cpp'

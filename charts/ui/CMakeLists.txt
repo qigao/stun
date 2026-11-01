@@ -4,6 +4,7 @@ add_library(chart_ui STATIC
     src/dotgraph_frame.cpp
     src/flex_node_plot_widget.cpp
     src/graph_edit_document.cpp
+    src/graph_edit_persistence.cpp
     src/graph_canvas_widget.cpp
 )
 
