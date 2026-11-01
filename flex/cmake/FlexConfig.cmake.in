@@ -1,0 +1,9 @@
+@PACKAGE_INIT@
+
+include(CMakeFindDependencyMacro)
+find_dependency(Salts CONFIG)
+find_dependency(box2d CONFIG)
+# Flex::VendorMIR and Flex::VendorMiniBLAS are installed real archives in
+# FlexTargets; no ad-hoc linker names or producer source-tree paths.
+include("${CMAKE_CURRENT_LIST_DIR}/FlexTargets.cmake")
+check_required_components(Flex)

@@ -21,11 +21,10 @@ set(FLEXUI_ROOT "${CMAKE_CURRENT_SOURCE_DIR}")
 set(FLEXUI_INCLUDE_DIR "${FLEXUI_ROOT}/include")
 add_subdirectory(modules/tailwindcss)
 
-# Canonical REQUIRED dependency resolution; compiler/linker own the failure.
-find_path(LEXBOR_INCLUDE_DIR NAMES lexbor/core/base.h REQUIRED)
-find_library(LEXBOR_LIBRARY NAMES lexbor lexbor_static NAMES_PER_DIR REQUIRED)
+# Lexbor publishes a real relocatable CMake target. Requiring that target
+# avoids embedding the producer's absolute library path in FlexUI::Core.
+find_package(lexbor CONFIG REQUIRED)
 find_package(unofficial-tree-sitter CONFIG REQUIRED)
-include_directories(${LEXBOR_INCLUDE_DIR})
 
 set(FLEXUI_UTILITY_WHITELIST
     "${CMAKE_CURRENT_SOURCE_DIR}/../tools/shadcn-ir/schema/utility_whitelist.json")
@@ -212,11 +211,7 @@ set(FLEXUI_HEADERS
 # 创建库
 add_library(flexUI STATIC ${FLEXUI_SOURCES} ${FLEXUI_HEADERS})
 add_library(FlexUI::Core ALIAS flexUI)
-
-get_filename_component(_flexui_lexbor_library_name "${LEXBOR_LIBRARY}" NAME_WE)
-if(_flexui_lexbor_library_name MATCHES "^(lib)?lexbor_static$")
-  target_compile_definitions(flexUI PRIVATE LEXBOR_STATIC)
-endif()
+set_target_properties(flexUI PROPERTIES EXPORT_NAME Core)
 
 # Windows: disable min/max macros that conflict with std::min/std::max
 if(WIN32)
@@ -225,10 +220,18 @@ endif()
 
 # 链接依赖
 target_link_libraries(flexUI 
-    PUBLIC ${LEXBOR_LIBRARY} Flex::Runtime Flex::Render Flex::Animation FlexUI::TailwindCSS Salts::Core Salts::CMeta nlohmann_json::nlohmann_json
+    PUBLIC lexbor::lexbor_static Flex::Runtime Flex::Render Flex::Animation FlexUI::TailwindCSS Salts::Core Salts::CMeta nlohmann_json::nlohmann_json
     PRIVATE Flex::Compiler Salts::Unicode unofficial::tree-sitter::tree-sitter pugixml::pugixml
 )
 set_target_properties(flexUI PROPERTIES FOLDER flexUI/)
+
+# Linked C++ widget SDK. This is the *actual* Core link graph, not a second
+# runtime, a DLL Widget ABI, or a fake imported alias.
+add_library(flexUI_widget_sdk INTERFACE)
+add_library(FlexUI::WidgetSDK ALIAS flexUI_widget_sdk)
+target_link_libraries(flexUI_widget_sdk INTERFACE FlexUI::Core)
+set_target_properties(flexUI_widget_sdk PROPERTIES EXPORT_NAME WidgetSDK)
+
 target_include_directories(
   flexUI
   PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src
@@ -236,9 +239,10 @@ target_include_directories(
   PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
          $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}>
          $<BUILD_INTERFACE:${CMAKE_SOURCE_DIR}/tools/tree-sitter/plugins>
-         ${CMAKE_SOURCE_DIR}/vendor/tinyfsm/
+         $<BUILD_INTERFACE:${FLEXUI_ROOT}/../vendor/tinyfsm>
          $<INSTALL_INTERFACE:include>
-         ${Stb_INCLUDE_DIR})
+         $<INSTALL_INTERFACE:include/flex/vendor>
+  PRIVATE ${Stb_INCLUDE_DIR})
 
 if(WIN32)
   add_custom_command(
@@ -265,6 +269,12 @@ write_basic_package_version_file(
   VERSION "${FLEXUI_PLUGIN_PACKAGE_VERSION}"
   COMPATIBILITY SameMajorVersion)
 
+install(
+  EXPORT FlexUICoreTargets
+  FILE FlexUICoreTargets.cmake
+  NAMESPACE FlexUI::
+  DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/FlexUI"
+  COMPONENT FlexWidgetSDK)
 install(
   EXPORT FlexUIPluginSDKTargets
   FILE FlexUIPluginSDKTargets.cmake
@@ -301,12 +311,29 @@ install(
   COMPONENT FlexUIPlugin)
 
 
-# 安装头文件
-install(DIRECTORY include/flexUI DESTINATION include)
-install(FILES include/flexUI.h DESTINATION include)
+# Core/WidgetSDK headers belong to the actual installed C++ package.
+install(DIRECTORY include/flexUI DESTINATION include
+  COMPONENT FlexWidgetSDK)
+install(FILES include/flexUI.h DESTINATION include
+  COMPONENT FlexWidgetSDK)
 
-# 安装库
-install(TARGETS flexUI flexUI_tailwindcss DESTINATION lib)
+# Package the actual C++ Core and linked-Widget SDK graph. Consumers receive
+# the same static libraries and one registry/Element owner as the source tree.
+install(
+  TARGETS flexUI flexUI_tailwindcss flexUI_widget_sdk
+  EXPORT FlexUICoreTargets
+  ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
+  LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+  RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+  COMPONENT FlexWidgetSDK)
+
+# The C++ SDK may be installed without installing the optional native
+# service-plugin binaries, but shares the one FlexUIConfig definition.
+install(
+  FILES "${CMAKE_CURRENT_BINARY_DIR}/FlexUIConfig.cmake"
+        "${CMAKE_CURRENT_BINARY_DIR}/FlexUIConfigVersion.cmake"
+  DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/FlexUI"
+  COMPONENT FlexWidgetSDK)
 
 if(NANOGUI_BUILD_EXAMPLES)
   add_subdirectory(examples)

@@ -49,7 +49,15 @@ set_target_properties(mir PROPERTIES FOLDER vendor/mir)
 
 # ------------------ LIBMIR -----------------------
 add_library(mir_static STATIC)
-target_link_libraries(mir_static PRIVATE mir)
+target_sources(mir_static PRIVATE $<TARGET_OBJECTS:mir>)
+# The static archive owns MIR's actual object code. Do not publish a dangling
+# OBJECT-library target in the installed Flex SDK's link interface.
+if(Threads_FOUND)
+    target_compile_definitions(mir_static PUBLIC MIR_PARALLEL_GEN)
+endif()
+if(UNIX)
+    target_link_libraries(mir_static PRIVATE m)
+endif()
 set_target_properties(mir_static PROPERTIES FOLDER vendor/mir)
 
 # ------------------ LIBMIR SO --------------------

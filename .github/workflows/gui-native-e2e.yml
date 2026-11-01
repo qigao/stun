@@ -256,8 +256,12 @@ jobs:
         run: |
           set -euo pipefail
           cmake --build build/stun-gui --target \
-            flexui_desktop_editor stun_ui_core_test stun_markdown_adapter_test \
+            flexui_desktop_editor flex stun_ui_core_test stun_markdown_adapter_test \
             stun_markdown_tango_candidate_test test_markdown_widget --parallel 2
+          # Install the REAL production Core/WidgetSDK plus its Flex/RichDoc
+          # archive graph. No installer/consumer test project is generated.
+          cmake --install build/stun-gui --component FlexWidgetSDK \
+            --prefix "$RUNNER_TEMP/stun-widget-sdk"
 
       - name: Qualify one Markdown grammar and real C11 Tango Widget consumers
         shell: bash

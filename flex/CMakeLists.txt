@@ -2,6 +2,8 @@
 cmake_minimum_required(VERSION 3.16)
 
 project(flex LANGUAGES C CXX)
+include(CMakePackageConfigHelpers)
+include(GNUInstallDirs)
 find_package(Stb REQUIRED)
 
 set(FLEX_ENGINE_ROOT "${CMAKE_CURRENT_SOURCE_DIR}")
@@ -107,15 +109,66 @@ set(FLEX_EXPORT_TARGETS
   flex_dsl
   flex_core)
 
+# Export the exact native libraries used by FlexUI::Core. Private static
+# dependencies are real imported Flex::Vendor* archives, not linker-name
+# fallbacks or absolute source-tree paths.
+set_target_properties(
+  flex PROPERTIES EXPORT_NAME Engine)
+set_target_properties(
+  flex_expression PROPERTIES EXPORT_NAME Expression)
+set_target_properties(
+  flex_animation PROPERTIES EXPORT_NAME Animation)
+set_target_properties(
+  flex_render PROPERTIES EXPORT_NAME Render)
+set_target_properties(
+  flex_runtime PROPERTIES EXPORT_NAME Runtime)
+set_target_properties(
+  flex_compiler PROPERTIES EXPORT_NAME Compiler)
+set_target_properties(
+  flex_core PROPERTIES EXPORT_NAME Core)
+set_target_properties(
+  flex_dsl PROPERTIES EXPORT_NAME DSL)
+set_target_properties(
+  mir_static PROPERTIES EXPORT_NAME VendorMIR)
+set_target_properties(
+  miniblas_linalg PROPERTIES EXPORT_NAME VendorMiniBLAS)
+
 install(
-  TARGETS ${FLEX_EXPORT_TARGETS}
-  EXPORT flex-targets
-  LIBRARY DESTINATION lib
-  ARCHIVE DESTINATION lib
-  RUNTIME DESTINATION bin)
+  TARGETS ${FLEX_EXPORT_TARGETS} mir_static miniblas_linalg
+  EXPORT FlexTargets
+  LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+  ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
+  RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+  COMPONENT FlexWidgetSDK)
+install(EXPORT FlexTargets
+  FILE FlexTargets.cmake
+  NAMESPACE Flex::
+  DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/Flex
+  COMPONENT FlexWidgetSDK)
+
+configure_package_config_file(
+  cmake/FlexConfig.cmake.in
+  "${CMAKE_CURRENT_BINARY_DIR}/FlexConfig.cmake"
+  INSTALL_DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/Flex")
+write_basic_package_version_file(
+  "${CMAKE_CURRENT_BINARY_DIR}/FlexConfigVersion.cmake"
+  VERSION "1.0.0"
+  COMPATIBILITY SameMajorVersion)
+install(
+  FILES "${CMAKE_CURRENT_BINARY_DIR}/FlexConfig.cmake"
+        "${CMAKE_CURRENT_BINARY_DIR}/FlexConfigVersion.cmake"
+  DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/Flex"
+  COMPONENT FlexWidgetSDK)
 
 install(
   DIRECTORY include/flex
-  DESTINATION include
+  DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
+  COMPONENT FlexWidgetSDK
   PATTERN "bridge/renderer_*.h" EXCLUDE)
-install(FILES include/flex.h DESTINATION include)
+install(FILES include/flex.h DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
+  COMPONENT FlexWidgetSDK)
+# flex/core/fsm.h is public and includes tinyfsm.hpp; install its actual
+# header once and expose it through the Flex::Runtime include interface.
+install(FILES "${FLEX_ENGINE_ROOT}/../vendor/tinyfsm/tinyfsm.hpp"
+  DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/flex/vendor"
+  COMPONENT FlexWidgetSDK)
