@@ -168,6 +168,15 @@ public:
 
   GraphEditStatus connect(std::string source_port, std::string target_port,
                           std::string edge_id);
+  // M2f: application-owner topology edits. Every operation publishes a
+  // validated logical snapshot through the same GraphLayout and creates ONE
+  // Undo step. Removal also retires incident edges and dependent proxy
+  // mappings atomically; never persist ephemeral visible graph IDs.
+  GraphEditStatus add_node(GraphEditNode node,
+                           std::vector<GraphEditPort> ports = {});
+  GraphEditStatus remove_node(std::string_view node_id);
+  GraphEditStatus add_port(GraphEditPort port);
+  GraphEditStatus remove_port(std::string_view port_id);
   GraphEditStatus add_group(GraphEditGroup group);
   GraphEditStatus remove_group(std::string_view group_id);
   GraphEditStatus set_group_collapsed(std::string_view group_id,

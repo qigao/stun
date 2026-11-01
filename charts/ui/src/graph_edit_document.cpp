@@ -6,6 +6,7 @@
 #include <chrono>
 #include <cmath>
 #include <exception>
+#include <iterator>
 #include <limits>
 #include <map>
 #include <set>
@@ -22,6 +23,29 @@ GraphEditStatus reject(GraphEditError error, std::string message) {
 
 bool valid_id(const std::string &id) {
   return !id.empty() && id.size() <= 128;
+}
+
+// Remove every logical relationship owned by a retired original PortId.
+// Do this on one uncommitted GraphEditSnapshot; the single publish() call
+// routes/validates the resulting full graph and creates exactly one history
+// entry, or leaves all previous state untouched on failure.
+void prune_port_dependencies(GraphEditSnapshot &candidate,
+                             const std::set<std::string> &removed) {
+  candidate.edges.erase(
+      std::remove_if(candidate.edges.begin(), candidate.edges.end(),
+          [&](const GraphEditEdge &edge) {
+            return removed.count(edge.source_port) ||
+                   removed.count(edge.target_port);
+          }),
+      candidate.edges.end());
+  for (auto &group : candidate.groups) {
+    group.proxy_ports.erase(
+        std::remove_if(group.proxy_ports.begin(), group.proxy_ports.end(),
+            [&](const GraphEditGroupProxyPort &proxy) {
+              return removed.count(proxy.original_port_id) != 0;
+            }),
+        group.proxy_ports.end());
+  }
 }
 
 bool finite_geometry(const GraphEditNode &n) {
@@ -930,6 +954,100 @@ GraphEditStatus GraphEditDocument::commit_move() {
     }
   }
   return reject(GraphEditError::Conflict, "dragged node was retired");
+}
+
+GraphEditStatus GraphEditDocument::add_node(
+    GraphEditNode node, std::vector<GraphEditPort> ports) {
+  if (move_) return reject(GraphEditError::Busy,
+                            "cannot insert a node during a live gesture");
+  // A node and its measured original ports must commit together. This is
+  // distinct from document replacement: existing Undo/Redo and stable IDs
+  // remain owned by this same GraphEditDocument.
+  for (const auto &port : ports)
+    if (port.node_id != node.id)
+      return reject(GraphEditError::InvalidInput,
+                    "new node port owner must match the stable NodeId");
+  GraphEditSnapshot candidate = committed_;
+  candidate.nodes.push_back(std::move(node));
+  candidate.ports.insert(candidate.ports.end(),
+                         std::make_move_iterator(ports.begin()),
+                         std::make_move_iterator(ports.end()));
+  return publish(std::move(candidate));
+}
+
+GraphEditStatus GraphEditDocument::add_port(GraphEditPort port) {
+  if (move_) return reject(GraphEditError::Busy,
+                            "cannot insert a port during a live gesture");
+  const auto node = std::find_if(committed_.nodes.begin(),
+                                committed_.nodes.end(),
+      [&](const GraphEditNode &existing) { return existing.id == port.node_id; });
+  if (node == committed_.nodes.end())
+    return reject(GraphEditError::MissingNode,
+                  "new port references a missing original node");
+  if (node->locked)
+    return reject(GraphEditError::LockedNode,
+                  "cannot alter a locked node's port schema");
+  GraphEditSnapshot candidate = committed_;
+  candidate.ports.push_back(std::move(port));
+  return publish(std::move(candidate));
+}
+
+GraphEditStatus GraphEditDocument::remove_port(std::string_view port_id) {
+  if (move_) return reject(GraphEditError::Busy,
+                            "cannot delete a port during a live gesture");
+  const auto original = std::find_if(committed_.ports.begin(),
+                                    committed_.ports.end(),
+      [&](const GraphEditPort &port) { return port.id == port_id; });
+  if (original == committed_.ports.end())
+    return reject(GraphEditError::InvalidInput, "unknown original PortId");
+  for (const auto &node : committed_.nodes)
+    if (node.id == original->node_id && node.locked)
+      return reject(GraphEditError::LockedNode,
+                    "cannot remove a locked node's port");
+  GraphEditSnapshot candidate = committed_;
+  const std::set<std::string> removed{original->id};
+  candidate.ports.erase(
+      std::remove_if(candidate.ports.begin(), candidate.ports.end(),
+          [&](const GraphEditPort &port) {
+            return removed.count(port.id) != 0;
+          }),
+      candidate.ports.end());
+  prune_port_dependencies(candidate, removed);
+  return publish(std::move(candidate));
+}
+
+GraphEditStatus GraphEditDocument::remove_node(std::string_view node_id) {
+  if (move_) return reject(GraphEditError::Busy,
+                            "cannot delete a node during a live gesture");
+  const auto original = std::find_if(committed_.nodes.begin(),
+                                    committed_.nodes.end(),
+      [&](const GraphEditNode &node) { return node.id == node_id; });
+  if (original == committed_.nodes.end())
+    return reject(GraphEditError::MissingNode, "unknown original NodeId");
+  if (original->locked)
+    return reject(GraphEditError::LockedNode, "cannot delete a locked node");
+  GraphEditSnapshot candidate = committed_;
+  std::set<std::string> removed_ports;
+  for (const auto &port : candidate.ports)
+    if (port.node_id == node_id) removed_ports.insert(port.id);
+  candidate.nodes.erase(
+      std::remove_if(candidate.nodes.begin(), candidate.nodes.end(),
+          [&](const GraphEditNode &node) { return node.id == node_id; }),
+      candidate.nodes.end());
+  candidate.ports.erase(
+      std::remove_if(candidate.ports.begin(), candidate.ports.end(),
+          [&](const GraphEditPort &port) {
+            return removed_ports.count(port.id) != 0;
+          }),
+      candidate.ports.end());
+  prune_port_dependencies(candidate, removed_ports);
+  for (auto &group : candidate.groups) {
+    group.member_node_ids.erase(
+        std::remove(group.member_node_ids.begin(),
+                    group.member_node_ids.end(), std::string(node_id)),
+        group.member_node_ids.end());
+  }
+  return publish(std::move(candidate));
 }
 
 GraphEditStatus GraphEditDocument::connect(std::string source_port,
