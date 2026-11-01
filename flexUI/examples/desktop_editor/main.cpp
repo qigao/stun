@@ -19,6 +19,7 @@
 #include <utility>
 #include <string>
 #include <string_view>
+#include <thread>
 
 #ifndef FLEXUI_DESKTOP_EDITOR_ASSET_DIRECTORY_NAME
   #error FLEXUI_DESKTOP_EDITOR_ASSET_DIRECTORY_NAME must name the editor asset directory
@@ -91,7 +92,7 @@ bool load_sources(const std::filesystem::path &root, SourceBundle &sources, std:
          read_bounded_file(root / "editor.tbs", sources.script, error);
 }
 
-flexUI::GCanvasWindowHostConfig window_config(bool smoke) {
+flexUI::GCanvasWindowHostConfig window_config(bool smoke, bool async_routing) {
   flexUI::GCanvasWindowHostConfig config;
   config.window.title = "FlexUI Desktop Editor";
   config.window.width = kWindowWidth;
@@ -101,7 +102,11 @@ flexUI::GCanvasWindowHostConfig window_config(bool smoke) {
   config.window.resizeable = !smoke;
   config.window.vsync = !smoke;
   config.window.backend = gcanvas::Backend::OpenGL;
-  config.frame_mode = flexUI::GCanvasWindowHostFrameMode::EventDriven;
+  // An opt-in async graph must be pumped without waiting for a new OS event.
+  // Preserve the established event-driven default for synchronous canvases.
+  config.frame_mode = async_routing
+      ? flexUI::GCanvasWindowHostFrameMode::Continuous
+      : flexUI::GCanvasWindowHostFrameMode::EventDriven;
   return config;
 }
 
@@ -118,12 +123,16 @@ flexUI::PluginHostBuildResult build_plugins(const std::filesystem::path &plugin_
 
 flexUI::DesktopApplicationBuilder application_builder(
     SourceBundle sources, std::shared_ptr<flexui_demo::TimelineState> timeline_model,
-    std::shared_ptr<charts::ui::GraphEditDocument> graph_model) {
+    std::shared_ptr<charts::ui::GraphEditDocument> graph_model,
+    bool async_routing) {
   auto registry = flexUI::WidgetRegistry::builtins();
   if (auto error = flexui_demo::register_timeline_widget(registry, std::move(timeline_model))) {
     throw std::runtime_error(error.message);
   }
-  if (auto error = charts::ui::register_graph_canvas_widget(registry, std::move(graph_model))) {
+  if (auto error = charts::ui::register_graph_canvas_widget(
+          registry, std::move(graph_model),
+          async_routing ? charts::ui::GraphCanvasRoutingMode::AsyncCommit
+                        : charts::ui::GraphCanvasRoutingMode::Synchronous)) {
     throw std::runtime_error(error.message);
   }
   flexUI::TurboScriptControllerOptions script_options;
@@ -170,7 +179,8 @@ bool pump_until_saved(flexUI::GCanvasPluginWindowHost &host, const flexUI::Eleme
 
 int run_smoke(flexUI::GCanvasPluginWindowHost &host,
               const std::shared_ptr<flexui_demo::TimelineState> &timeline_model,
-              const std::shared_ptr<charts::ui::GraphEditDocument> &graph_model) {
+              const std::shared_ptr<charts::ui::GraphEditDocument> &graph_model,
+              bool async_routing) {
   auto pumped = host.pump_once(0.0);
   if (!pumped) {
     return fail("initial frame", pumped.error.message);
@@ -246,11 +256,46 @@ int run_smoke(flexUI::GCanvasPluginWindowHost &host,
   }
   auto drag_up = flexUI::Event::mouse_up(gx + 127.0F, gy + 70.0F);
   if (!host.application().dispatch_event(drag_up) || !drag_up.handled ||
-      host.application().box().capturing_element() != nullptr ||
-      graph_model->snapshot().nodes.front().x != 87.0 ||
-      graph_model->snapshot().revision != original_revision + 1) {
-    return fail("graph commit", "drag did not commit exactly one versioned node edit");
+      host.application().box().capturing_element() != nullptr) {
+    return fail("graph release", "pointer capture remained after MouseUp");
   }
+  if (async_routing) {
+    if (graph_model->snapshot().revision != original_revision ||
+        graph_model->snapshot().nodes.front().x != 55.0 ||
+        graph_model->has_preview() ||
+        !graph->attribute("data-routing") ||
+        *graph->attribute("data-routing") != "pending") {
+      return fail("graph async snapshot", "MouseUp committed before owner accepted worker");
+    }
+    // Actual OpenGL/PluginHost frames drive the attached Widget's frame
+    // callback, not a test-only direct call to GraphRouteWorker::poll().
+    constexpr int kMaximumAsyncPumps = 160;
+    for (int i = 0; i < kMaximumAsyncPumps &&
+         graph_model->snapshot().revision == original_revision; ++i) {
+      pumped = host.pump_once(0.0);
+      if (!pumped) return fail("graph async host pump", pumped.error.message);
+      std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    if (graph_model->snapshot().revision != original_revision + 1 ||
+        !graph->attribute("data-routing") ||
+        *graph->attribute("data-routing") != "committed") {
+      return fail("graph async publish", "owner frame did not publish exact worker result");
+    }
+    // Semantic node identity belongs to the SAME Box and is updated on
+    // the frame after the frozen worker result was committed.
+    bool node_painted_from_result = false;
+    for (auto *child : graph->children()) {
+      auto *part = static_cast<flexUI::Element *>(child);
+      const auto *name = part->attribute("part");
+      if (name && *name == "node:alpha" && part->x() == 87.0f)
+        node_painted_from_result = true;
+    }
+    if (!node_painted_from_result)
+      return fail("graph async frame geometry", "semantic node was not updated by owner frame");
+  }
+  if (graph_model->snapshot().nodes.front().x != 87.0 ||
+      graph_model->snapshot().revision != original_revision + 1)
+    return fail("graph commit", "drag did not commit exactly one versioned node edit");
   auto undo = flexUI::Event::key_down(flexUI::KeyCode::Z,
                                      static_cast<int>(flexUI::KeyMod::Control));
   auto redo = flexUI::Event::key_down(flexUI::KeyCode::Y,
@@ -324,10 +369,15 @@ int run_smoke(flexUI::GCanvasPluginWindowHost &host,
 
 int main(int argc, char **argv) {
   bool smoke = false;
+  bool async_routing = false;
   if (argc == 2 && std::string_view(argv[1]) == "--smoke") {
     smoke = true;
+  } else if (argc == 2 && std::string_view(argv[1]) == "--smoke-async") {
+    smoke = true;
+    async_routing = true;
   } else if (argc != 1) {
-    return fail("arguments", "usage: flexui_desktop_editor [--smoke]");
+    return fail("arguments",
+                "usage: flexui_desktop_editor [--smoke|--smoke-async]");
   }
 
   std::error_code path_error;
@@ -361,8 +411,9 @@ int main(int argc, char **argv) {
     return fail("graph source", status.message);
   }
   auto built = flexUI::GCanvasPluginWindowHost::create(
-      window_config(smoke),
-      application_builder(std::move(sources), timeline_model, graph_model),
+      window_config(smoke, async_routing),
+      application_builder(std::move(sources), timeline_model, graph_model,
+                          async_routing),
       std::move(plugins),
       capability_manifest(), kShutdownTimeout);
   if (!built) {
@@ -370,7 +421,7 @@ int main(int argc, char **argv) {
   }
 
   if (smoke) {
-    return run_smoke(*built.host, timeline_model, graph_model);
+    return run_smoke(*built.host, timeline_model, graph_model, async_routing);
   }
   const auto ran = built.host->run();
   return ran ? EXIT_SUCCESS : fail("desktop loop", ran.error.message);

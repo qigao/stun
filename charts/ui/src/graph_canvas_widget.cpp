@@ -6,6 +6,7 @@
 #include <flexUI/render_command.h>
 
 #include <algorithm>
+#include <atomic>
 #include <cmath>
 #include <cstdint>
 #include <memory>
@@ -24,6 +25,7 @@ constexpr double kDragStartThresholdPx = 4.0;
 // The Box borrower inspector currently caps each Widget at 1024 owned parts.
 // M0 is an intentionally bounded, fully materialized semantic graph.
 constexpr std::size_t kMaxSemanticParts = 1024;
+std::atomic<std::uint64_t> next_graph_mount_generation{1};
 
 enum class GestureMode { Idle, ArmedNode, MoveNode, Connect, Pan };
 
@@ -35,6 +37,11 @@ struct SemanticPart {
 struct Interaction {
   std::weak_ptr<GraphEditDocument> document;
   GraphCanvasViewport view;
+  GraphCanvasRoutingMode routing_mode = GraphCanvasRoutingMode::Synchronous;
+  std::uint64_t mount_generation = 0;
+  GraphRouteWorker worker;
+  bool routing_pending = false;
+  std::string routing_state = "idle";
   GestureMode mode = GestureMode::Idle;
   std::string selected_node;
   std::string source_port;
@@ -50,8 +57,11 @@ struct Interaction {
   std::vector<SemanticPart> semantic_ports;
 
   ~Interaction() {
-    // The widget may be destroyed by document/root retirement without
-    // receiving a final FocusOut. No Box/Element pointers are touched here.
+    // Cancel the worker before the Box can retire this widget; the worker
+    // owns only immutable numeric graph snapshots, never Element pointers.
+    worker.cancel();
+    // The widget may be destroyed without a final FocusOut. No Box/Element
+    // pointers are touched here. The worker destructor joins the task.
     if (mode == GestureMode::MoveNode) {
       if (auto owner = document.lock()) owner->cancel_move();
     }
@@ -134,6 +144,7 @@ void build_semantic_parts(flexUI::NativeCanvasWidget &widget,
   host.set_attribute("aria-label", "Interactive graph editor");
   host.set_attribute("aria-keyshortcuts", "Control+Z Control+Y ArrowUp ArrowDown ArrowLeft ArrowRight");
   host.set_attribute("data-slot", "graph-canvas");
+  host.set_attribute("data-routing", state.routing_state);
 
   for (const auto &node : snapshot.nodes) {
     const auto name = "node:" + node.id;
@@ -210,7 +221,9 @@ void sync_semantic_parts(const GraphEditDocument &model,
       break;
     }
   }
-  (void)host; // Host attributes were fixed during mount, not per render.
+  const auto *old_routing = host.attribute("data-routing");
+  if (!old_routing || *old_routing != state.routing_state)
+    host.set_attribute("data-routing", state.routing_state);
 }
 
 void paint_canvas(const GraphEditDocument &model, const Interaction &interaction,
@@ -306,10 +319,23 @@ void paint_canvas(const GraphEditDocument &model, const Interaction &interaction
   if (model.has_preview()) {
     commands.draw_text("MOVE PREVIEW (uncommitted)", 12.0F, height - 8.0F,
                        "Arial", 10.0F, false, muted);
+  } else if (interaction.routing_pending) {
+    commands.draw_text("ROUTING PENDING (uncommitted)", 12.0F, height - 8.0F,
+                       "Arial", 10.0F, false, muted);
   } else if (!interaction.status_message.empty()) {
     commands.draw_text(interaction.status_message, 12.0F, height - 8.0F,
                        "Arial", 10.0F, false, muted);
   }
+}
+
+void cancel_pending(Interaction &state, flexUI::Element &element) {
+  if (state.routing_mode != GraphCanvasRoutingMode::AsyncCommit ||
+      (!state.worker.pending() && !state.routing_pending)) return;
+  state.worker.cancel();
+  state.routing_pending = false;
+  state.routing_state = "canceled";
+  state.status_message = "Graph routing canceled";
+  element.mark_paint_dirty();
 }
 
 void cancel(Interaction &state, GraphEditDocument &document,
@@ -329,13 +355,20 @@ bool handle_input(Interaction &state, GraphEditDocument &model,
   using flexUI::MouseButton;
   if (event.type == EventType::FocusOut) {
     if (state.mode != GestureMode::Idle) cancel(state, model, widget, element);
+    cancel_pending(state, element);
     return false;
   }
   if (event.type == EventType::KeyDown) {
-    if (event.key == KeyCode::Escape && state.mode != GestureMode::Idle) {
-      cancel(state, model, widget, element);
+    if (event.key == KeyCode::Escape &&
+        (state.mode != GestureMode::Idle || state.routing_pending)) {
+      if (state.mode != GestureMode::Idle) cancel(state, model, widget, element);
+      cancel_pending(state, element);
       return true;
     }
+    // Do not race new Undo/Redo or arrow edits with an in-flight edit.
+    // Escape/FocusOut can revoke it, and the frame callback drains it.
+    if (state.routing_mode == GraphCanvasRoutingMode::AsyncCommit &&
+        state.worker.pending()) return true;
     if (state.mode == GestureMode::Idle && (event.mods & static_cast<int>(flexUI::KeyMod::Control))) {
       GraphEditStatus result;
       if (event.key == KeyCode::Z) result = model.undo();
@@ -390,6 +423,8 @@ bool handle_input(Interaction &state, GraphEditDocument &model,
   }
 
   if (event.type == EventType::MouseDown) {
+    if (state.routing_mode == GraphCanvasRoutingMode::AsyncCommit &&
+        state.worker.pending()) return true;
     if (state.mode != GestureMode::Idle || !inside(element, x, y)) return false;
     state.press_x = state.previous_x = x;
     state.press_y = state.previous_y = y;
@@ -463,8 +498,30 @@ bool handle_input(Interaction &state, GraphEditDocument &model,
         ? event.button == MouseButton::Middle
         : event.button == MouseButton::Left;
     if (matching && state.mode == GestureMode::MoveNode) {
-      const auto status = model.commit_move();
-      state.status_message = status ? "" : status.message;
+      if (state.routing_mode == GraphCanvasRoutingMode::AsyncCommit) {
+        double px = 0.0, py = 0.0;
+        const bool has_position =
+            model.preview_position(state.selected_node, px, py);
+        const auto *original = find_node(model.snapshot(), state.selected_node);
+        if (has_position && original) {
+          const auto dx = px - original->x, dy = py - original->y;
+          // Release the transaction preview BEFORE submitting a frozen
+          // immutable snapshot; the worker may never read the live owner.
+          model.cancel_move();
+          const auto result = state.worker.submit_move(
+              model, state.selected_node, dx, dy, state.mount_generation);
+          state.routing_pending = static_cast<bool>(result);
+          state.routing_state = result ? "pending" : "error";
+          state.status_message = result ? "" : result.message;
+        } else {
+          model.cancel_move();
+          state.routing_state = "error";
+          state.status_message = "drag preview was not available";
+        }
+      } else {
+        const auto status = model.commit_move();
+        state.status_message = status ? "" : status.message;
+      }
     } else if (matching && state.mode == GestureMode::Connect) {
       const auto *target = hit_port(model, state, x, y, false);
       if (target) {
@@ -487,6 +544,26 @@ bool handle_input(Interaction &state, GraphEditDocument &model,
     return true;
   }
   return false;
+}
+
+void poll_routing(Interaction &state, GraphEditDocument &document,
+                  flexUI::Element &element) {
+  if (state.routing_mode != GraphCanvasRoutingMode::AsyncCommit) return;
+  auto result = state.worker.poll(); // zero-time wait, on UI owner thread.
+  if (!result) return;
+  if (state.routing_pending) {
+    auto status = document.accept_prepared_move(
+        std::move(*result), state.mount_generation);
+    state.routing_state = status ? "committed" : "error";
+    state.status_message = status ? "Graph routing committed" : status.message;
+  } else {
+    // A canceled job may complete later. No result is ever applied to the
+    // graph after Escape, FocusOut or scope cancellation.
+    state.routing_state = "canceled";
+  }
+  state.routing_pending = false;
+  sync_semantic_parts(document, state, element);
+  element.mark_paint_dirty();
 }
 
 } // namespace
@@ -529,17 +606,23 @@ bool GraphCanvasViewport::zoom_at(double local_x, double local_y,
 }
 
 flexUI::WidgetRegistryError register_graph_canvas_widget(
-    flexUI::WidgetRegistry &registry, std::shared_ptr<GraphEditDocument> document) {
+    flexUI::WidgetRegistry &registry, std::shared_ptr<GraphEditDocument> document,
+    GraphCanvasRoutingMode mode) {
   if (!document) {
     return {flexUI::WidgetRegistryErrorCode::InvalidFactory,
             "GraphCanvas requires one application-owned graph document"};
   }
   return registry.register_widget(
       "native-graph",
-      [document = std::move(document)](const flexUI::UiNodeDefinition &)
+      [document = std::move(document), mode](const flexUI::UiNodeDefinition &)
           -> std::unique_ptr<flexUI::Widget> {
         auto state = std::make_shared<Interaction>();
         state->document = document;
+        state->routing_mode = mode;
+        state->mount_generation =
+            next_graph_mount_generation.fetch_add(1, std::memory_order_relaxed);
+        if (state->mount_generation == 0)
+          throw std::overflow_error("GraphCanvas mount generation exhausted");
         flexUI::NativeCanvasWidget::Callbacks callbacks;
         callbacks.paint = [document, state](
             const flexUI::Element &element, flexUI::RenderCommandList &commands) {
@@ -550,6 +633,11 @@ flexUI::WidgetRegistryError register_graph_canvas_widget(
             flexUI::Element &element) {
           return handle_input(*state, *document, widget, event, element);
         };
+        if (mode == GraphCanvasRoutingMode::AsyncCommit) {
+          callbacks.frame = [document, state](float, flexUI::Element &elem) {
+            poll_routing(*state, *document, elem);
+          };
+        }
         callbacks.mount = [document, state](flexUI::NativeCanvasWidget &widget,
                                             flexUI::Element &host) {
           build_semantic_parts(widget, host, *document, *state);
