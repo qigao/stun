@@ -180,7 +180,7 @@ bool pump_until_saved(flexUI::GCanvasPluginWindowHost &host, const flexUI::Eleme
 int run_smoke(flexUI::GCanvasPluginWindowHost &host,
               const std::shared_ptr<flexui_demo::TimelineState> &timeline_model,
               const std::shared_ptr<charts::ui::GraphEditDocument> &graph_model,
-              bool async_routing) {
+              bool async_routing, bool group_smoke) {
   auto pumped = host.pump_once(0.0);
   if (!pumped) {
     return fail("initial frame", pumped.error.message);
@@ -325,6 +325,87 @@ int run_smoke(flexUI::GCanvasPluginWindowHost &host,
   pumped = host.pump_once(0.0);
   if (!pumped) return fail("native graph repaint", pumped.error.message);
 
+  if (group_smoke) {
+    // Run the GROUP gesture in the real OpenGL/PluginHost/Box owner. This is
+    // independent of the existing native ChartUiTest and screenshot suite.
+    // Ordinary graph editing above leaves alpha moved to (87,50).
+    if (graph_model->snapshot().groups.size() != 1 ||
+        graph_model->snapshot().groups[0].collapsed) {
+      return fail("group source", "measured compound group was not mounted");
+    }
+    const auto revision = graph_model->snapshot().revision;
+    auto group_down = flexUI::Event::mouse_down(gx + 60.0F, gy + 30.0F);
+    auto group_up = flexUI::Event::mouse_up(gx + 60.0F, gy + 30.0F);
+    if (!host.application().dispatch_event(group_down) || !group_down.handled ||
+        host.application().box().capturing_element() != graph ||
+        !host.application().dispatch_event(group_up) || !group_up.handled ||
+        host.application().box().capturing_element() != nullptr ||
+        graph_model->snapshot().revision != revision + 1 ||
+        !graph_model->snapshot().groups[0].collapsed ||
+        graph_model->snapshot().edges[0].source_port != "source") {
+      return fail("group collapse", "native click failed to commit stable proxy");
+    }
+    if (graph_model->snapshot().routes.size() != 1 ||
+        graph_model->snapshot().routes[0].points.front().x != 210.0) {
+      return fail("group boundary", "collapsed route ignored measured proxy port");
+    }
+    const auto collapsed_revision = graph_model->snapshot().revision;
+    auto group_drag_down = flexUI::Event::mouse_down(gx + 85.0F, gy + 91.0F);
+    auto group_drag_move = flexUI::Event::mouse_move(gx + 109.0F, gy + 103.0F);
+    auto group_drag_up = flexUI::Event::mouse_up(gx + 109.0F, gy + 103.0F);
+    if (!host.application().dispatch_event(group_drag_down) ||
+        !group_drag_down.handled ||
+        host.application().box().capturing_element() != graph ||
+        !host.application().dispatch_event(group_drag_move) ||
+        !group_drag_move.handled ||
+        !graph_model->has_preview() ||
+        graph_model->snapshot().revision != collapsed_revision) {
+      return fail("group preview", "real pointer capture did not preserve frozen geometry");
+    }
+    double preview_x = 0.0, preview_y = 0.0;
+    if (!graph_model->preview_position("alpha", preview_x, preview_y) ||
+        preview_x != 111.0 || preview_y != 62.0 ||
+        !host.application().dispatch_event(group_drag_up) ||
+        !group_drag_up.handled ||
+        host.application().box().capturing_element() != nullptr ||
+        graph_model->has_preview() ||
+        graph_model->snapshot().revision != collapsed_revision + 1 ||
+        graph_model->snapshot().groups[0].x != 64.0 ||
+        graph_model->snapshot().groups[0].y != 36.0 ||
+        graph_model->snapshot().nodes.front().x != 111.0 ||
+        graph_model->snapshot().nodes.back().x != 440.0 ||
+        graph_model->snapshot().edges[0].source_port != "source" ||
+        graph_model->snapshot().routes[0].points.front().x != 234.0) {
+      return fail("group commit", "compound geometry or logical endpoints were not atomic");
+    }
+    pumped = host.pump_once(0.0);
+    if (!pumped) return fail("group owner repaint", pumped.error.message);
+    bool proxy_semantics_updated = false;
+    for (auto *child : graph->children()) {
+      auto *part = static_cast<flexUI::Element *>(child);
+      const auto *name = part->attribute("part");
+      if (name && *name == "node:group@pack" && part->x() == 64.0f &&
+          part->attribute("aria-hidden") &&
+          *part->attribute("aria-hidden") == "false") {
+        proxy_semantics_updated = true;
+      }
+    }
+    if (!proxy_semantics_updated)
+      return fail("group owner semantics", "real Box did not publish the moved proxy");
+
+    // One final click expands, without changing original member/edge IDs.
+    auto expand_down = flexUI::Event::mouse_down(gx + 100.0F, gy + 110.0F);
+    auto expand_up = flexUI::Event::mouse_up(gx + 100.0F, gy + 110.0F);
+    if (!host.application().dispatch_event(expand_down) ||
+        !host.application().dispatch_event(expand_up) ||
+        !expand_up.handled || graph_model->snapshot().groups[0].collapsed ||
+        graph_model->snapshot().nodes.front().x != 111.0 ||
+        graph_model->snapshot().edges[0].source_port != "source")
+      return fail("group expand", "expansion damaged logical identities");
+    pumped = host.pump_once(0.0);
+    if (!pumped) return fail("group expand repaint", pumped.error.message);
+  }
+
   auto *save = host.application().box().get_by_id("save");
   if (save == nullptr) {
     return fail("smoke lookup", "compiled UI did not publish #save");
@@ -370,14 +451,18 @@ int run_smoke(flexUI::GCanvasPluginWindowHost &host,
 int main(int argc, char **argv) {
   bool smoke = false;
   bool async_routing = false;
+  bool group_smoke = false;
   if (argc == 2 && std::string_view(argv[1]) == "--smoke") {
     smoke = true;
   } else if (argc == 2 && std::string_view(argv[1]) == "--smoke-async") {
     smoke = true;
     async_routing = true;
+  } else if (argc == 2 && std::string_view(argv[1]) == "--smoke-group") {
+    smoke = true;
+    group_smoke = true;
   } else if (argc != 1) {
     return fail("arguments",
-                "usage: flexui_desktop_editor [--smoke|--smoke-async]");
+                "usage: flexui_desktop_editor [--smoke|--smoke-async|--smoke-group]");
   }
 
   std::error_code path_error;
@@ -407,6 +492,16 @@ int main(int argc, char **argv) {
   initial_graph.ports = {
       {"sink", "beta", stun::graphlayout::Side::West, 0.0, 36.0, false},
       {"source", "alpha", stun::graphlayout::Side::East, 125.0, 36.0, true}};
+  if (group_smoke) {
+    charts::ui::GraphEditGroup group;
+    group.id = "pack";
+    group.x = 40.0; group.y = 24.0;
+    group.width = 170.0; group.height = 130.0;
+    group.member_node_ids = {"alpha"};
+    group.proxy_ports.push_back(
+        {"pack-out", "source", stun::graphlayout::Side::East, 170.0, 48.0});
+    initial_graph.groups.push_back(std::move(group));
+  }
   if (const auto status = graph_model->initialize(std::move(initial_graph)); !status) {
     return fail("graph source", status.message);
   }
@@ -421,7 +516,8 @@ int main(int argc, char **argv) {
   }
 
   if (smoke) {
-    return run_smoke(*built.host, timeline_model, graph_model, async_routing);
+    return run_smoke(*built.host, timeline_model, graph_model,
+                     async_routing, group_smoke);
   }
   const auto ran = built.host->run();
   return ran ? EXIT_SUCCESS : fail("desktop loop", ran.error.message);
