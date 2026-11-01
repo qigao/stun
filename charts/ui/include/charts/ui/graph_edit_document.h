@@ -142,6 +142,9 @@ public:
   }
 
   GraphEditStatus begin_move(std::string_view id);
+  // M2b: one compound gesture. Moves a group's measured rectangle and all
+  // stable member nodes together; no nested groups or automatic solver layout.
+  GraphEditStatus begin_group_move(std::string_view group_id);
   GraphEditStatus preview_move(double dx, double dy);
   GraphEditStatus commit_move();
   void cancel_move() noexcept { move_.reset(); }
@@ -174,6 +177,7 @@ private:
     double original_y = 0.0;
     double x = 0.0;
     double y = 0.0;
+    bool group = false;
   };
 
   // M1b keeps one *committed-revision-owned* sorted interval index. It is
