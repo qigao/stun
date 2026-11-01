@@ -1496,6 +1496,15 @@ BoxWidgetPartError Box::reconcile_widget_parts(
           return BoxWidgetPartError::BorrowedPart;
       retiring.insert(part);
     }
+    // Geometry-only changes retain the entire part tree, identity and style
+    // caches instead of producing an unnecessary tree-layout revision.
+    bool same_order = staged.empty() && retiring.empty() &&
+                      children.size() == host->child_count();
+    if (same_order)
+      for (std::size_t i = 0; i < children.size(); ++i)
+        if (host->children()[i] != children[i]) { same_order = false; break; }
+    if (same_order) return BoxWidgetPartError::None;
+
     // Rebuild full ownership maps before touching the active tree. Failure
     // here retains the entire old topology and Widget::parts_ map.
     if (elements_.size() > elements_.max_size() - staged.size())
