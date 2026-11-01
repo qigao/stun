@@ -152,7 +152,7 @@ void build_semantic_parts(flexUI::NativeCanvasWidget &widget,
 
   host.set_attribute("role", "region");
   host.set_attribute("aria-label", "Interactive graph editor");
-  host.set_attribute("aria-keyshortcuts", "Control+Z Control+Y ArrowUp ArrowDown ArrowLeft ArrowRight");
+  host.set_attribute("aria-keyshortcuts", "Control+Z Control+Y ArrowUp ArrowDown ArrowLeft ArrowRight Delete Backspace");
   host.set_attribute("data-slot", "graph-canvas");
   host.set_attribute("data-routing", state.routing_state);
 
@@ -519,6 +519,20 @@ bool handle_input(Interaction &state, GraphEditDocument &model,
       return true;
     }
     if (state.mode == GestureMode::Idle && !state.selected_node.empty()) {
+      // M2g: ordinary keyboard deletion uses the SAME original-node
+      // transaction as programmatic topology edits. Incident edges/ports
+      // and collapsed group proxy mappings are validated and retired as
+      // one snapshot; a locked node fails without losing its selection.
+      if (event.key == KeyCode::Delete || event.key == KeyCode::Backspace) {
+        const auto result = model.remove_node(state.selected_node);
+        if (result) {
+          state.selected_node.clear();
+          state.selected_group.clear();
+        }
+        state.status_message = result ? "" : result.message;
+        element.mark_paint_dirty();
+        return true;
+      }
       const double step = (event.mods & static_cast<int>(flexUI::KeyMod::Shift))
           ? 32.0 : 8.0;
       double dx = 0.0, dy = 0.0;
