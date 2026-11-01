@@ -8,6 +8,9 @@
 #include <flexUI/ui_xml.h>
 #include <algorithm>
 #include <chrono>
+#include <filesystem>
+#include <fstream>
+#include <iterator>
 #include <iostream>
 #include <limits>
 #include <memory>
@@ -1317,6 +1320,218 @@ spec("GraphCanvas M2c nested hierarchy, local origins and outermost proxy") {
     check_true(static_cast<bool>(doc->undo()));
     check_equal(node_by_id(*doc, "a")->x, 80.0);
     check_equal(group_by_id(*doc, "inner")->x, 20.0);
+  }
+}
+
+// M2d: sibling group crossing and a real file-backed, versioned logical
+// document round-trip, reusing original ChartUiTest and native GraphOrthogonal.
+namespace {
+GraphEditSnapshot sibling_group_fixture() {
+  GraphEditSnapshot data;
+  data.nodes = {{"left", 80, 95, 80, 50, false},
+                {"right", 370, 95, 80, 50, false},
+                {"outside", 800, 95, 80, 50, false}};
+  data.ports = {
+      {"left-out", "left", gl::Side::East, 80, 25, true},
+      {"right-in", "right", gl::Side::West, 0, 25, false},
+      {"right-out", "right", gl::Side::East, 80, 25, true},
+      {"outside-in", "outside", gl::Side::West, 0, 25, false}};
+  data.edges = {{"left-right", "left-out", "right-in"},
+                {"right-outside", "right-out", "outside-in"}};
+
+  charts::ui::GraphEditGroup root;
+  root.id = "root";
+  root.x = 20; root.y = 20; root.width = 680; root.height = 270;
+  root.proxy_ports.push_back(
+      {"root-out", "right-out", gl::Side::East, 680, 100});
+  charts::ui::GraphEditGroup left;
+  left.id = "left-group";
+  left.parent_group_id = "root";
+  left.x = 20; left.y = 45; left.width = 180; left.height = 120;
+  left.member_node_ids = {"left"};
+  left.proxy_ports.push_back(
+      {"left-group-out", "left-out", gl::Side::East, 180, 50});
+  charts::ui::GraphEditGroup right;
+  right.id = "right-group";
+  right.parent_group_id = "root";
+  right.x = 320; right.y = 45; right.width = 160; right.height = 120;
+  right.member_node_ids = {"right"};
+  right.proxy_ports.push_back(
+      {"right-group-in", "right-in", gl::Side::West, 0, 55});
+  right.proxy_ports.push_back(
+      {"right-group-out", "right-out", gl::Side::East, 160, 55});
+  data.groups = {root, left, right};
+  return data;
+}
+} // namespace
+
+spec("GraphCanvas M2d sibling crossing and canonical logical persistence") {
+  it("routes sibling boundary ports without losing original node or edge IDs") {
+    GraphEditDocument doc;
+    check_true(static_cast<bool>(doc.initialize(sibling_group_fixture())));
+    const auto baseline = doc.snapshot();
+    check_equal(baseline.routes.size(), 2U);
+    check_equal(baseline.edges[0].source_port, "left-out");
+    check_equal(baseline.edges[1].source_port, "right-out");
+
+    check_true(static_cast<bool>(doc.set_group_collapsed("left-group", true)));
+    GraphEditSnapshot left_view;
+    check_true(static_cast<bool>(doc.visible_snapshot(left_view)));
+    check_equal(left_view.nodes.size(), 3U); // proxy-left + right + outside
+    check_equal(left_view.edges[0].source_port, "left-group-out");
+    check_equal(left_view.edges[0].target_port, "right-in");
+    check_within(doc.snapshot().routes[0].points.front().x, 220.0, 1e-6);
+    check_equal(doc.snapshot().edges[0].source_port, "left-out");
+
+    check_true(static_cast<bool>(doc.set_group_collapsed("right-group", true)));
+    GraphEditSnapshot siblings;
+    check_true(static_cast<bool>(doc.visible_snapshot(siblings)));
+    check_equal(siblings.nodes.size(), 3U);
+    check_equal(siblings.edges.size(), 2U);
+    check_equal(siblings.edges[0].source_port, "left-group-out");
+    check_equal(siblings.edges[0].target_port, "right-group-in");
+    check_equal(siblings.edges[1].source_port, "right-group-out");
+    check_equal(siblings.edges[1].target_port, "outside-in");
+    check_within(doc.snapshot().routes[0].points.front().x, 220.0, 1e-6);
+    check_within(doc.snapshot().routes[0].points.back().x, 340.0, 1e-6);
+    check_within(doc.snapshot().routes[1].points.front().x, 500.0, 1e-6);
+    check_equal(doc.snapshot().edges[0].source_port, "left-out");
+    check_equal(doc.snapshot().edges[0].target_port, "right-in");
+
+    check_true(static_cast<bool>(doc.set_group_collapsed("root", true)));
+    GraphEditSnapshot root_view;
+    check_true(static_cast<bool>(doc.visible_snapshot(root_view)));
+    check_equal(root_view.nodes.size(), 2U);
+    check_equal(root_view.edges.size(), 1U);
+    check_equal(root_view.edges[0].id, "right-outside");
+    check_equal(root_view.edges[0].source_port, "root-out");
+    check_equal(root_view.edges[0].target_port, "outside-in");
+    check_within(doc.snapshot().routes[0].points.front().x, 700.0, 1e-6);
+    check_equal(doc.snapshot().edges.size(), 2U);
+    check_equal(doc.snapshot().ports.size(), 4U);
+
+    check_true(static_cast<bool>(doc.undo())); // show both sibling proxies
+    check_equal(doc.snapshot().routes.size(), 2U);
+    check_true(static_cast<bool>(doc.undo())); // show right original node
+    check_true(static_cast<bool>(doc.undo())); // original full logical view
+    for (std::size_t i = 0; i < baseline.routes.size(); ++i)
+      check_true(route_points_identical(
+          doc.snapshot().routes[i], baseline.routes[i]));
+    check_true(static_cast<bool>(doc.redo()));
+    check_true(static_cast<bool>(doc.redo()));
+    check_true(static_cast<bool>(doc.redo()));
+    check_equal(doc.snapshot().routes.size(), 1U);
+  }
+
+  it("serializes a nested collapsed graph and validates a real file roundtrip") {
+    auto input = nested_group_fixture();
+    GraphEditDocument first;
+    check_true(static_cast<bool>(first.initialize(std::move(input))));
+    check_true(static_cast<bool>(first.set_group_collapsed("inner", true)));
+    check_true(static_cast<bool>(first.set_group_collapsed("middle", true)));
+    const auto original = first.snapshot();
+    std::string encoded = "unchanged on failure";
+    check_true(static_cast<bool>(first.save_json(encoded)));
+    check_true(encoded.size() > 100U);
+    check_true(encoded.find("stun.graphcanvas.logical") != std::string::npos);
+    check_true(encoded.find("parent") != std::string::npos);
+    check_true(encoded.find("geometry_revision") == std::string::npos);
+    check_true(encoded.find("routes") == std::string::npos);
+
+    const auto file = std::filesystem::temp_directory_path() /
+        ("stun-graphcanvas-m2d-" +
+         std::to_string(std::chrono::steady_clock::now()
+             .time_since_epoch().count()) + ".json");
+    {
+      std::ofstream output(file, std::ios::binary | std::ios::trunc);
+      check_true(output.is_open());
+      if (!output) return;
+      output.write(encoded.data(), static_cast<std::streamsize>(encoded.size()));
+      check_true(output.good());
+    }
+    std::string file_bytes;
+    {
+      std::ifstream input_file(file, std::ios::binary);
+      check_true(input_file.is_open());
+      if (!input_file) {
+        std::filesystem::remove(file);
+        return;
+      }
+      file_bytes.assign(std::istreambuf_iterator<char>(input_file),
+                        std::istreambuf_iterator<char>());
+    }
+    check_true(std::filesystem::remove(file));
+    check_equal(file_bytes, encoded);
+
+    GraphEditDocument restored;
+    check_true(static_cast<bool>(restored.load_json(file_bytes)));
+    check_equal(restored.snapshot().groups.size(), original.groups.size());
+    check_equal(restored.snapshot().nodes.size(), original.nodes.size());
+    check_equal(restored.snapshot().ports.size(), original.ports.size());
+    check_equal(restored.snapshot().edges.size(), original.edges.size());
+    check_equal(restored.snapshot().routes.size(), original.routes.size());
+    check_true(group_by_id(restored, "inner")->collapsed);
+    check_true(group_by_id(restored, "middle")->collapsed);
+    check_equal(group_by_id(restored, "inner")->parent_group_id, "middle");
+    check_equal(group_by_id(restored, "middle")->parent_group_id, "outer");
+    check_equal(group_by_id(restored, "inner")->x, 20.0);
+    check_equal(node_by_id(restored, "a")->x, 80.0);
+    for (std::size_t i = 0; i < original.routes.size(); ++i)
+      check_true(route_points_identical(
+          restored.snapshot().routes[i], original.routes[i]));
+    check_equal(restored.undo_count(), 0U); // history is runtime-only
+    check_equal(restored.redo_count(), 0U);
+    std::string encoded_again;
+    check_true(static_cast<bool>(restored.save_json(encoded_again)));
+    check_equal(encoded_again, encoded);
+    check_true(static_cast<bool>(restored.set_group_collapsed("outer", true)));
+    check_true(static_cast<bool>(restored.undo()));
+    check_equal(restored.snapshot().routes.size(), original.routes.size());
+  }
+
+  it("rejects unknown schema, bad references and oversized input atomically") {
+    GraphEditDocument doc;
+    check_true(static_cast<bool>(doc.initialize(sibling_group_fixture())));
+    const auto before = doc.snapshot();
+    std::string valid;
+    check_true(static_cast<bool>(doc.save_json(valid)));
+    std::string unchanged = valid;
+    auto corrupt = valid;
+    const auto version_at = corrupt.find("\"version\":1");
+    check_true(version_at != std::string::npos);
+    if (version_at == std::string::npos) return;
+    corrupt.replace(version_at, 11, "\"version\":9");
+    auto failed = doc.load_json(corrupt);
+    check_false(static_cast<bool>(failed));
+    check(failed.error == GraphEditError::InvalidInput);
+    check_equal(doc.snapshot().revision, before.revision);
+    check_equal(doc.undo_count(), 0U);
+
+    corrupt = valid;
+    const auto ref_at = corrupt.find("\"node\":\"left\"");
+    check_true(ref_at != std::string::npos);
+    if (ref_at == std::string::npos) return;
+    corrupt.replace(ref_at, 13, "\"node\":\"ghost\"");
+    failed = doc.load_json(corrupt);
+    check_false(static_cast<bool>(failed));
+    check_equal(doc.snapshot().revision, before.revision);
+    check_equal(doc.snapshot().edges.size(), before.edges.size());
+    check_true(route_points_identical(
+        doc.snapshot().routes[0], before.routes[0]));
+
+    failed = doc.load_json(std::string(1024U * 1024U + 1U, 'x'));
+    check_false(static_cast<bool>(failed));
+    check(failed.error == GraphEditError::CapacityExceeded);
+    check_equal(doc.snapshot().revision, before.revision);
+    check_equal(doc.undo_count(), 0U);
+    check_equal(unchanged, valid);
+
+    // On successful replacement the new revision is monotone even if old
+    // workers complete late. History is cleared only after validation.
+    check_true(static_cast<bool>(doc.load_json(valid)));
+    check_equal(doc.snapshot().revision, before.revision + 1);
+    check_equal(doc.undo_count(), 0U);
+    check_equal(doc.snapshot().groups.size(), before.groups.size());
   }
 }
 
