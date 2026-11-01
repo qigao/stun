@@ -260,9 +260,9 @@ def build_source_sdk(args):
         run("git", "-C", destination, "checkout", "--detach", "FETCH_HEAD")
 
     checkout("qigao/salts-utils", args.source_sha, root)
-    # Same cache contract and Crypto inputs as the accepted producer profile.
+    # Released versioned cache infrastructure; Crypto inputs stay independently pinned.
     contract = root / "build/ci-vcpkg-contract"
-    checkout("qigao/vcpkg-cache", "fafb1efe5ac2440bfd7a08e493988d0459d89e51", contract)
+    checkout("qigao/vcpkg-cache", "v0.1.0", contract)
     checkout("qigao/crypto", "a99f29a569af14b865c9e713360aa81d39a04bf0", root / "_ci_crypto")
     checkout("guanzhi/GmSSL", "7c9f02904ef33e59c87b4f16621cc8fd434e7579", root / "_ci_gmssl")
     if args.rid == "linux-x64":
