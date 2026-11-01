@@ -1,4 +1,5 @@
 #include <flexUI.h>
+#include <flexUI/native_canvas_widget.h>
 
 #include <tinytest.hpp>
 
@@ -323,5 +324,128 @@ spec("FlexUI anonymous nodes stay outside the named index") {
       check_equal(box.resolve_handle(handle), title);
       check_equal(title->text(), "Named");
     }
+  }
+}
+
+
+spec("FlexUI linked native canvas widget uses the one XML and Box event path") {
+  it("registers a native canvas and captures drag events through EventDispatcher") {
+    struct Counters {
+      int paints = 0;
+      int moves = 0;
+      int releases = 0;
+    };
+    auto counters = std::make_shared<Counters>();
+    auto registry = flexUI::WidgetRegistry::builtins();
+    const auto registered = registry.register_widget(
+        "native-canvas",
+        [counters](const flexUI::UiNodeDefinition &) -> std::unique_ptr<flexUI::Widget> {
+          flexUI::NativeCanvasWidget::Callbacks callbacks;
+          callbacks.paint = [counters](const flexUI::Element &elem,
+                                       flexUI::RenderCommandList &commands) {
+            ++counters->paints;
+            commands.draw_rect(0.0F, 0.0F, elem.width(), elem.height(), 0.0F,
+                               flexUI::Paint::solid(flexUI::Color{0.3F, 0.5F, 0.7F, 1.0F}),
+                               flexUI::Paint::none(), 0.0F);
+          };
+          callbacks.input = [counters](flexUI::NativeCanvasWidget &widget,
+                                       const flexUI::Event &event,
+                                       flexUI::Element &elem) {
+            if (event.type == flexUI::EventType::MouseDown) {
+              widget.request_pointer_capture();
+              return true;
+            }
+            if (event.type == flexUI::EventType::MouseMove) {
+              ++counters->moves;
+              elem.mark_paint_dirty();
+              return true;
+            }
+            if (event.type == flexUI::EventType::MouseUp) {
+              ++counters->releases;
+              widget.release_pointer_capture();
+              return true;
+            }
+            return false;
+          };
+          callbacks.measure = [](const flexUI::Element &, float, float,
+                                 float &w, float &h) {
+            w = 120.0F;
+            h = 80.0F;
+            return true;
+          };
+          return std::make_unique<flexUI::NativeCanvasWidget>(std::move(callbacks));
+        },
+        flexUI::UiContentModel::Empty);
+    check_false(static_cast<bool>(registered));
+    check(registry.descriptor("native-canvas")->kind == flexUI::UiNodeKind::Widget);
+
+    const auto compiled = flexUI::compile_ui_xml(
+        "<ui name=\"NativeCanvas\"><div id=\"root\"><native-canvas id=\"canvas\"/></div></ui>");
+    check(static_cast<bool>(compiled));
+    if (!compiled) return;
+    flexUI::Box box(nullptr);
+    const auto mounted =
+        flexUI::UiDocumentInstantiator::instantiate(box, *compiled.program, registry);
+    check(static_cast<bool>(mounted));
+    if (!mounted) return;
+    auto *root = box.get_by_id("root");
+    auto *canvas = box.get_by_id("canvas");
+    check_not_null(root);
+    check_not_null(canvas);
+    if (!root || !canvas) return;
+    root->set_layout_bounds(0.0F, 0.0F, 300.0F, 150.0F);
+    canvas->set_layout_bounds(0.0F, 0.0F, 100.0F, 100.0F);
+
+    auto *native = dynamic_cast<flexUI::NativeCanvasWidget *>(canvas->widget);
+    check_not_null(native);
+    if (!native) return;
+    check_false(native->needs_frame_update(*canvas));
+    float intrinsic_w = 0.0F, intrinsic_h = 0.0F;
+    check_true(native->measure_intrinsic_size(*canvas, 300.0F, 150.0F,
+                                               intrinsic_w, intrinsic_h));
+    check_equal(intrinsic_w, 120.0F);
+    check_equal(intrinsic_h, 80.0F);
+
+    auto down = flexUI::Event::mouse_down(20.0F, 20.0F);
+    box.dispatch_event(down);
+    check_true(down.handled);
+    check(box.capturing_element() == canvas);
+
+    auto move = flexUI::Event::mouse_move(180.0F, 20.0F);
+    box.dispatch_event(move);
+    check_true(move.handled);
+    check(move.target == canvas);
+    check_equal(counters->moves, 1);
+
+    auto up = flexUI::Event::mouse_up(180.0F, 20.0F);
+    box.dispatch_event(up);
+    check_true(up.handled);
+    check_null(box.capturing_element());
+    check_equal(counters->releases, 1);
+
+    flexUI::RenderCommandList commands(flex::RendererCapabilities{});
+    native->emit_render_commands(*canvas, commands);
+    check_equal(counters->paints, 1);
+  }
+
+  it("rejects a missing native paint callback before publishing the tree") {
+    auto registry = flexUI::WidgetRegistry::builtins();
+    const auto registered = registry.register_widget(
+        "invalid-native", [](const flexUI::UiNodeDefinition &) {
+          return std::make_unique<flexUI::NativeCanvasWidget>(
+              flexUI::NativeCanvasWidget::Callbacks{});
+        },
+        flexUI::UiContentModel::Empty);
+    check_false(static_cast<bool>(registered));
+    const auto compiled = flexUI::compile_ui_xml(
+        "<ui name=\"BadCanvas\"><invalid-native id=\"native\"/></ui>");
+    check(static_cast<bool>(compiled));
+    if (!compiled) return;
+    flexUI::Box box(nullptr);
+    const auto result =
+        flexUI::UiDocumentInstantiator::instantiate(box, *compiled.program, registry);
+    check_false(static_cast<bool>(result));
+    check(result.error.code == flexUI::UiDocumentErrorCode::WidgetFactoryFailed);
+    check_null(box.root());
   }
 }

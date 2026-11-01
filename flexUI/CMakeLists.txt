@@ -164,6 +164,7 @@ set(FLEXUI_HEADERS
   include/flexUI/tailwindcss.h
   include/flexUI/utility_jit.h
   include/flexUI/widget.h
+  include/flexUI/native_canvas_widget.h
   include/flexUI/element.h
   include/flexUI/box.h
   include/flexUI/textedit.h

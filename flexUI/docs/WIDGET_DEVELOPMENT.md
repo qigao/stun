@@ -368,6 +368,32 @@ void MyWidget::update(float delta_ms, Element& elem) {
 
 ---
 
+## Linked third-party native canvas widgets
+
+`NativeCanvasWidget` is a small **linked C++** adapter, not a dynamic
+`PluginHost` or GPU texture ABI. Register a custom XML tag using
+`WidgetRegistry::register_widget(..., UiContentModel::Empty)`, and supply
+paint/input callbacks through `NativeCanvasWidget::Callbacks`. The paint
+callback **must** emit into the provided `RenderCommandList`; it never owns or
+calls the backend `Renderer`. Input is delivered by the existing Box
+`EventDispatcher`. To drag outside the hit rectangle, request/release capture
+from the input callback; the dispatcher performs the actual routing.
+
+The callback captures must own all state they retain. Neither `Element&`
+nor `RenderCommandList&` may survive a callback. Keep durable widget state in
+the application or an instance-owned object, keep styling and layout in the
+one Element tree, and invalidate paint using `Element::mark_paint_dirty()`
+after user edits. The example
+`flexUI/examples/desktop_editor/native_timeline_widget.cpp` registers
+`<native-timeline/>` and implements drag, trim handles and frame-aligned
+magnetic snapping through the real desktop editor (including its normal smoke
+test).
+
+This does **not** imply separately installable `FlexUI::Core` yet (#31).
+Dynamic Widget DLL registration, native GPU texture/surface leasing and
+in-place unmount are independently blocked by #375/#298; do not treat
+`FlexUI::PluginSDK` service ABI v2 as a widget ABI.
+
 ## Widget Template
 
 ```cpp

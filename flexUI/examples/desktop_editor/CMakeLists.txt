@@ -9,11 +9,11 @@ set_target_properties(
              VISIBILITY_INLINES_HIDDEN ON
              FOLDER "flexUI/examples/desktop_editor")
 
-add_executable(flexui_desktop_editor main.cpp)
+add_executable(flexui_desktop_editor main.cpp native_timeline_widget.cpp)
 target_compile_features(flexui_desktop_editor PRIVATE cxx_std_17)
 target_link_libraries(
   flexui_desktop_editor
-  PRIVATE FlexUI::GCanvasPluginWindowHost FlexUI::ControllerTurboScript
+  PRIVATE FlexUI::Core FlexUI::GCanvasPluginWindowHost FlexUI::ControllerTurboScript
           Salts::Core)
 target_compile_definitions(
   flexui_desktop_editor

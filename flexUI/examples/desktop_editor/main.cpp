@@ -1,3 +1,5 @@
+#include "native_timeline_widget.h"
+
 #include <flexUI/application_turboscript.h>
 #include <flexUI/gcanvas_plugin_window_host.h>
 
@@ -10,6 +12,9 @@
 #include <filesystem>
 #include <iostream>
 #include <new>
+#include <memory>
+#include <stdexcept>
+#include <utility>
 #include <string>
 #include <string_view>
 
@@ -109,12 +114,18 @@ flexUI::PluginHostBuildResult build_plugins(const std::filesystem::path &plugin_
   return builder.build();
 }
 
-flexUI::DesktopApplicationBuilder application_builder(SourceBundle sources) {
+flexUI::DesktopApplicationBuilder application_builder(
+    SourceBundle sources, std::shared_ptr<flexui_demo::TimelineState> timeline_model) {
+  auto registry = flexUI::WidgetRegistry::builtins();
+  if (auto error = flexui_demo::register_timeline_widget(registry, std::move(timeline_model))) {
+    throw std::runtime_error(error.message);
+  }
   flexUI::TurboScriptControllerOptions script_options;
   script_options.execution_mode = flexUI::TurboScriptExecutionMode::Jit;
 
   flexUI::DesktopApplicationBuilder builder;
   builder.xml_entry(std::move(sources.xml))
+      .widget_registry(std::move(registry))
       .stylesheet(std::move(sources.css))
       .script(std::move(sources.script),
               flexUI::make_turboscript_desktop_module_factory(script_options), "desktop-editor");
@@ -151,11 +162,43 @@ bool pump_until_saved(flexUI::GCanvasPluginWindowHost &host, const flexUI::Eleme
   return true;
 }
 
-int run_smoke(flexUI::GCanvasPluginWindowHost &host) {
+int run_smoke(flexUI::GCanvasPluginWindowHost &host,
+              const std::shared_ptr<flexui_demo::TimelineState> &timeline_model) {
   auto pumped = host.pump_once(0.0);
   if (!pumped) {
     return fail("initial frame", pumped.error.message);
   }
+
+
+  // Verify a linked native widget inside the real XML/CSS/Script/PluginHost
+  // application. Drag Clip A five frames; its end must magnetically snap to
+  // the start of Clip B (frame 24), i.e. Clip A starts at frame 14.
+  auto *timeline = host.application().box().get_by_id("timeline");
+  if (!timeline || !timeline->widget) {
+    return fail("native timeline lookup", "registered widget is absent");
+  }
+  const float x = timeline->absolute_x() + 20.0F + 8.0F * 12.0F + 30.0F;
+  const float y = timeline->absolute_y() + 92.0F;
+  auto down = flexUI::Event::mouse_down(x, y);
+  if (!host.application().dispatch_event(down) || !down.handled ||
+      host.application().box().capturing_element() != timeline) {
+    return fail("native timeline pointer down", "widget did not capture the drag");
+  }
+  auto move = flexUI::Event::mouse_move(x + 5.0F * 12.0F, y);
+  if (!host.application().dispatch_event(move) || !move.handled) {
+    return fail("native timeline pointer move", "widget did not process the drag");
+  }
+  auto up = flexUI::Event::mouse_up(x + 5.0F * 12.0F, y);
+  if (!host.application().dispatch_event(up) || !up.handled ||
+      host.application().box().capturing_element() != nullptr) {
+    return fail("native timeline pointer up", "widget did not retire capture");
+  }
+  if (timeline_model->clips[0].start_frame != 14 ||
+      timeline_model->clips[0].length_frames != 10) {
+    return fail("native timeline snap", "five-frame drag did not snap to Clip B");
+  }
+  pumped = host.pump_once(0.0);
+  if (!pumped) return fail("native timeline repaint", pumped.error.message);
 
   auto *save = host.application().box().get_by_id("save");
   if (save == nullptr) {
@@ -226,15 +269,17 @@ int main(int argc, char **argv) {
     return fail(plugins.error.stage, plugins.error.message);
   }
 
+  auto timeline_model = std::make_shared<flexui_demo::TimelineState>();
   auto built = flexUI::GCanvasPluginWindowHost::create(
-      window_config(smoke), application_builder(std::move(sources)), std::move(plugins),
+      window_config(smoke), application_builder(std::move(sources), timeline_model),
+      std::move(plugins),
       capability_manifest(), kShutdownTimeout);
   if (!built) {
     return fail("runtime composition", built.error.message);
   }
 
   if (smoke) {
-    return run_smoke(*built.host);
+    return run_smoke(*built.host, timeline_model);
   }
   const auto ran = built.host->run();
   return ran ? EXIT_SUCCESS : fail("desktop loop", ran.error.message);

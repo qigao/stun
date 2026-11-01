@@ -269,11 +269,17 @@ jobs:
             --output-on-failure --timeout 120 \
             -R '^(stun_ui_core_test|stun_markdown_adapter_test|stun_markdown_tango_candidate_test|test_markdown_widget)$'
 
-      - name: Qualify real Stun Save and reject wrong visible states
+      - name: Qualify native timeline drag/snap and real visible Save states
         shell: bash
         run: |
           set -euo pipefail
           export LD_LIBRARY_PATH="$SALTS_ROOT/lib:$SALTS_UTILS_ROOT/lib:$CHTTP_ROOT/lib:$TURBOSCRIPT_ROOT/lib:${LD_LIBRARY_PATH:-}"
+          # Drive the actual built desktop editor: this GUI runtime builds
+          # the production executable but does not register its optional
+          # test_flexui_desktop_editor_smoke CTest target.
+          # --smoke verifies pointer capture, drag/snap, repaint and service.
+          xvfb-run -a -s '-screen 0 1280x900x24 -nolisten tcp' \
+            build/stun-gui/bin/flexui_desktop_editor --smoke
           xvfb-run -a -s '-screen 0 1280x900x24 -nolisten tcp' \
             /usr/bin/python3 .github/scripts/gui_native_suite.py \
               --exe build/stun-gui/bin/flexui_desktop_editor \

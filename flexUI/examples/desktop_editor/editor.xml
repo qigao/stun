@@ -5,6 +5,7 @@
       <button id="save" on:click="save_document">Save</button>
     </div>
     <textarea id="document">Build native desktop interfaces with XML, CSS, TurboScript, and gCanvas.</textarea>
+    <native-timeline id="timeline" />
     <label id="runtime">OpenGL · TurboScript JIT · native DLL service</label>
   </main>
 </ui>
