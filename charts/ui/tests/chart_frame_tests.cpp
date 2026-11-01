@@ -890,6 +890,140 @@ spec("GraphCanvas M1a uses conservative bounded incremental orthogonal routing")
   }
 }
 
+spec("GraphCanvas M1b immutable native graph worker and revision gate") {
+  it("prepares on a separate thread and publishes only through its owner") {
+    GraphEditDocument model;
+    check_true(static_cast<bool>(model.initialize(swept_obstacle_graph())));
+    const auto baseline = model.snapshot();
+    charts::ui::GraphRouteWorker worker;
+    check_true(static_cast<bool>(worker.submit_move(
+        model, "blocker", 0.0, -180.0, 17)));
+    check_true(worker.pending());
+    worker.wait();
+    auto ready = worker.poll();
+    check_true(static_cast<bool>(ready));
+    if (!ready) return;
+    check_true(static_cast<bool>(ready->status()));
+    check_equal(ready->baseline_revision(), baseline.revision);
+    check_true(static_cast<bool>(
+        model.accept_prepared_move(std::move(*ready), 17)));
+    check_equal(model.snapshot().revision, baseline.revision + 1);
+    check_equal(model.snapshot().document_revision, baseline.document_revision + 1);
+    check_equal(model.snapshot().geometry_revision, baseline.geometry_revision + 1);
+    check_equal(node_by_id(model, "blocker")->y, 30.0);
+    check_equal(model.last_route_update().rerouted, 1U);
+    check_equal(model.last_route_update().reused, 1U);
+    check_true(model.last_route_update().index_queries >= 1U);
+    check_equal(model.undo_count(), 1U);
+    check_false(worker.pending());
+    check_true(static_cast<bool>(model.undo()));
+    check_equal(node_by_id(model, "blocker")->y, 210.0);
+    check_true(static_cast<bool>(model.redo()));
+    check_equal(node_by_id(model, "blocker")->y, 30.0);
+  }
+
+  it("rejects a completed but STALE result after another owner commit") {
+    GraphEditDocument model;
+    check_true(static_cast<bool>(model.initialize(example())));
+    charts::ui::GraphRouteWorker worker;
+    check_true(static_cast<bool>(
+        worker.submit_move(model, "alpha", 32.0, 14.0, 22)));
+    // A synchronous native edit wins, regardless of which thread finished.
+    check_true(static_cast<bool>(model.begin_move("alpha")));
+    check_true(static_cast<bool>(model.preview_move(20.0, 0.0)));
+    check_true(static_cast<bool>(model.commit_move()));
+    const auto version = model.snapshot().revision;
+    worker.wait();
+    auto stale = worker.poll();
+    check_true(static_cast<bool>(stale));
+    if (!stale) return;
+    check_true(static_cast<bool>(stale->status()));
+    const auto rejected = model.accept_prepared_move(std::move(*stale), 22);
+    check_false(static_cast<bool>(rejected));
+    check(rejected.error == GraphEditError::Conflict);
+    check_equal(node_by_id(model, "alpha")->x, 75.0);
+    check_equal(model.snapshot().revision, version);
+    check_equal(model.undo_count(), 1U);
+    check_equal(model.last_route_update().committed_revision, version);
+  }
+
+  it("rejects canceled work even when A* completed before cancellation") {
+    GraphEditDocument model;
+    check_true(static_cast<bool>(model.initialize(example())));
+    charts::ui::GraphRouteWorker worker;
+    check_true(static_cast<bool>(
+        worker.submit_move(model, "alpha", 32.0, 14.0, 23)));
+    worker.wait();
+    worker.cancel(); // Explicit cancellation wins even over completed A*.
+    auto canceled = worker.poll();
+    check_true(static_cast<bool>(canceled));
+    if (!canceled) return;
+    check_false(static_cast<bool>(canceled->status()));
+    check(canceled->status().error == GraphEditError::Conflict);
+    const auto rejected = model.accept_prepared_move(std::move(*canceled), 23);
+    check_false(static_cast<bool>(rejected));
+    check_equal(model.snapshot().revision, std::uint64_t{1});
+    check_equal(node_by_id(model, "alpha")->x, 55.0);
+    check_equal(model.undo_count(), 0U);
+  }
+
+  it("rejects an old widget mount token without touching committed geometry") {
+    GraphEditDocument model;
+    check_true(static_cast<bool>(model.initialize(example())));
+    charts::ui::GraphRouteWorker worker;
+    check_true(static_cast<bool>(
+        worker.submit_move(model, "alpha", 32.0, 14.0, 31)));
+    worker.wait();
+    auto ready = worker.poll();
+    check_true(static_cast<bool>(ready));
+    if (!ready) return;
+    check_true(static_cast<bool>(ready->status()));
+    const auto rejected = model.accept_prepared_move(std::move(*ready), 32);
+    check_false(static_cast<bool>(rejected));
+    check(rejected.error == GraphEditError::Conflict);
+    check_equal(model.snapshot().revision, std::uint64_t{1});
+    check_equal(node_by_id(model, "alpha")->x, 55.0);
+  }
+
+  it("prevents document replacement ABA by increasing revision at initialize") {
+    GraphEditDocument model;
+    check_true(static_cast<bool>(model.initialize(example())));
+    charts::ui::GraphRouteWorker worker;
+    check_true(static_cast<bool>(
+        worker.submit_move(model, "alpha", 32.0, 14.0, 40)));
+    auto new_document = example(false);
+    check_true(static_cast<bool>(model.initialize(std::move(new_document))));
+    check_equal(model.snapshot().revision, std::uint64_t{2});
+    worker.wait();
+    auto old = worker.poll();
+    check_true(static_cast<bool>(old));
+    if (!old) return;
+    check_true(static_cast<bool>(old->status()));
+    const auto rejected = model.accept_prepared_move(std::move(*old), 40);
+    check_false(static_cast<bool>(rejected));
+    check(rejected.error == GraphEditError::Conflict);
+    check_equal(model.snapshot().edges.size(), 0U);
+    check_equal(model.snapshot().revision, std::uint64_t{2});
+  }
+
+  it("joins a canceled worker before its owner releases the input snapshot") {
+    GraphEditDocument model;
+    check_true(static_cast<bool>(model.initialize(example())));
+    {
+      charts::ui::GraphRouteWorker worker;
+      check_true(static_cast<bool>(
+          worker.submit_move(model, "alpha", 32.0, 14.0, 91)));
+      worker.cancel();
+      // Destructor does not detach a task that could outlive its snapshots.
+    }
+    check_equal(model.snapshot().revision, std::uint64_t{1});
+    check_false(model.has_preview());
+    check_equal(model.undo_count(), 0U);
+    check_true(static_cast<bool>(model.begin_move("alpha")));
+    model.cancel_move();
+  }
+}
+
 spec("GraphCanvas M0 uses real FlexUI Box-owned XML and EventDispatcher") {
   it("captures off-node moves, cancels Escape/focus loss, connects and paints") {
     auto model = std::make_shared<GraphEditDocument>();

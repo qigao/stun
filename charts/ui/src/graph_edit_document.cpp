@@ -3,7 +3,9 @@
 #include <stun/graphlayout/port_bindings.h>
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
+#include <exception>
 #include <limits>
 #include <map>
 #include <set>
@@ -354,13 +356,18 @@ GraphEditStatus GraphEditDocument::validate_and_route(
 
 GraphEditStatus GraphEditDocument::initialize(GraphEditSnapshot initial) {
   if (move_) return reject(GraphEditError::Busy, "cannot replace an active edit");
+  // Replacement MUST consume a new revision. Reusing revision 1 could let a
+  // worker from an earlier document incarnation pass a stale acceptance gate.
+  if (committed_.revision == std::numeric_limits<std::uint64_t>::max())
+    return reject(GraphEditError::CapacityExceeded, "graph revision exhausted");
+  const auto next_revision = committed_.revision + 1;
   GraphRouteUpdateStats prepared_stats;
   const auto status = validate_and_route(initial, nullptr, nullptr, prepared_stats);
   if (!status) return status;
   std::vector<IndexedRouteSegment> index;
   const auto indexed = build_route_index(initial, index);
   if (!indexed) return indexed;
-  set_committed_revisions(initial, 1);
+  set_committed_revisions(initial, next_revision);
   prepared_stats.committed_revision = initial.revision;
   prepared_stats.indexed_segments = index.size();
   committed_ = std::move(initial);
@@ -504,6 +511,157 @@ GraphEditStatus GraphEditDocument::redo() {
   route_index_revision_ = committed_.revision;
   route_stats_.indexed_segments = route_segments_.size();
   return {};
+}
+
+
+GraphEditStatus GraphEditDocument::accept_prepared_move(
+    PreparedMove &&prepared, std::uint64_t current_mount_generation) {
+  // Only the original document owner may publish the worker's geometry.
+  if (std::this_thread::get_id() != owner_thread_)
+    return reject(GraphEditError::Conflict, "wrong graph document owner thread");
+  if (move_) return reject(GraphEditError::Busy, "owner gesture still active");
+  if (prepared.cancelled_ &&
+      prepared.cancelled_->load(std::memory_order_acquire))
+    return reject(GraphEditError::Conflict, "worker operation was canceled");
+  if (!prepared.status_) return prepared.status_;
+  if (prepared.mount_generation_ == 0 ||
+      current_mount_generation != prepared.mount_generation_)
+    return reject(GraphEditError::Conflict, "graph widget mount generation changed");
+  if (prepared.expected_revision_ != committed_.revision ||
+      prepared.expected_document_revision_ != committed_.document_revision ||
+      prepared.expected_geometry_revision_ != committed_.geometry_revision)
+    return reject(GraphEditError::Conflict, "stale graph snapshot revision");
+  if (committed_.revision == std::numeric_limits<std::uint64_t>::max())
+    return reject(GraphEditError::CapacityExceeded, "graph revision exhausted");
+
+  // The only possible success candidate came from the sealed, in-tree
+  // GraphRouteWorker and passed the full GraphOrthogonal postcondition
+  // before it left the worker. No caller can rewrite the private buffers.
+  undo_.push_back(committed_);
+  if (undo_.size() > kMaxHistory) undo_.erase(undo_.begin());
+  redo_.clear();
+  set_committed_revisions(prepared.next_, committed_.revision + 1);
+  prepared.stats_.committed_revision = prepared.next_.revision;
+  prepared.stats_.indexed_segments = prepared.index_.size();
+  committed_ = std::move(prepared.next_);
+  route_stats_ = prepared.stats_;
+  route_segments_.swap(prepared.index_);
+  route_index_revision_ = committed_.revision;
+  return {};
+}
+
+GraphRouteWorker::~GraphRouteWorker() {
+  cancel();
+  wait(); // Join bounded native GraphOrthogonal; never detach a worker.
+}
+
+GraphEditStatus GraphRouteWorker::submit_move(
+    const GraphEditDocument &owner, std::string node_id,
+    double dx, double dy, std::uint64_t mount_generation) {
+  if (future_.valid())
+    return reject(GraphEditError::Busy, "worker already has an outstanding task");
+  if (std::this_thread::get_id() != owner.owner_thread_)
+    return reject(GraphEditError::Conflict, "submit from a non-owner thread");
+  if (owner.has_preview())
+    return reject(GraphEditError::Busy, "synchronous graph gesture is active");
+  if (owner.committed_.revision == 0 ||
+      owner.route_index_revision_ != owner.committed_.revision ||
+      mount_generation == 0)
+    return reject(GraphEditError::Conflict, "missing stable graph or widget generation");
+  if (!std::isfinite(dx) || !std::isfinite(dy) ||
+      std::abs(dx) > 1.0e6 || std::abs(dy) > 1.0e6)
+    return reject(GraphEditError::InvalidGeometry, "invalid worker move displacement");
+
+  // These are the ONLY values captured by the worker. It cannot reach the
+  // live document, a Box subtree, Widget, Element or render resource.
+  GraphEditSnapshot baseline = owner.committed_;
+  auto old_index = owner.route_segments_;
+  auto flag = std::make_shared<std::atomic_bool>(false);
+  try {
+    future_ = std::async(
+        std::launch::async,
+        [baseline = std::move(baseline), old_index = std::move(old_index),
+         flag, id = std::move(node_id), dx, dy, mount_generation]() mutable {
+          GraphEditDocument::PreparedMove result;
+          result.cancelled_ = flag;
+          result.expected_revision_ = baseline.revision;
+          result.expected_document_revision_ = baseline.document_revision;
+          result.expected_geometry_revision_ = baseline.geometry_revision;
+          result.mount_generation_ = mount_generation;
+          const auto cancelled = [&]() {
+            if (!flag->load(std::memory_order_acquire)) return false;
+            result.status_ = reject(GraphEditError::Conflict,
+                                    "worker operation was canceled");
+            return true;
+          };
+          if (cancelled()) return result;
+
+          result.next_ = baseline;
+          bool found = false;
+          for (auto &node : result.next_.nodes) {
+            if (node.id != id) continue;
+            found = true;
+            if (node.locked) {
+              result.status_ = reject(GraphEditError::LockedNode,
+                                      "worker move target is locked");
+              return result;
+            }
+            node.x += dx;
+            node.y += dy;
+            break;
+          }
+          if (!found) {
+            result.status_ = reject(GraphEditError::MissingNode,
+                                    "worker move target is missing");
+            return result;
+          }
+          // This step may run bounded A* in the one, existing GraphLayout
+          // engine. No preemption inside that engine is claimed.
+          result.status_ = GraphEditDocument::validate_and_route(
+              result.next_, &baseline, &old_index, result.stats_);
+          if (!result.status_ || cancelled()) return result;
+          result.status_ = GraphEditDocument::build_route_index(
+              result.next_, result.index_);
+          if (cancelled()) return result;
+          return result;
+        });
+    cancellation_ = std::move(flag);
+  } catch (const std::exception &error) {
+    return reject(GraphEditError::InternalInvariant,
+                  std::string("failed to launch graph worker: ") + error.what());
+  }
+  return {};
+}
+
+std::optional<GraphEditDocument::PreparedMove> GraphRouteWorker::poll() {
+  if (!future_.valid() ||
+      future_.wait_for(std::chrono::seconds(0)) != std::future_status::ready)
+    return std::nullopt;
+  GraphEditDocument::PreparedMove completed;
+  try {
+    completed = future_.get();
+  } catch (const std::exception &error) {
+    completed.status_ = reject(GraphEditError::InternalInvariant,
+                               std::string("graph worker failed: ") + error.what());
+  } catch (...) {
+    completed.status_ = reject(GraphEditError::InternalInvariant,
+                               "graph worker failed with unknown exception");
+  }
+  completed.cancelled_ = cancellation_;
+  if (cancellation_ &&
+      cancellation_->load(std::memory_order_acquire))
+    completed.status_ = reject(GraphEditError::Conflict,
+                               "graph worker canceled before result publication");
+  cancellation_.reset();
+  return std::optional<GraphEditDocument::PreparedMove>{std::move(completed)};
+}
+
+void GraphRouteWorker::cancel() noexcept {
+  if (cancellation_) cancellation_->store(true, std::memory_order_release);
+}
+
+void GraphRouteWorker::wait() noexcept {
+  if (future_.valid()) future_.wait();
 }
 
 } // namespace charts::ui
