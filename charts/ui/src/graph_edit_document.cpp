@@ -1115,8 +1115,47 @@ GraphEditStatus GraphEditDocument::remove_group(std::string_view group_id) {
       [&](const GraphEditGroup &group) { return group.id == group_id; });
   if (it == candidate.groups.end())
     return reject(GraphEditError::MissingGroup, "unknown stable group ID");
+
+  // M2h: removing a group is a topology reparenting transaction, NOT a
+  // deletion of original nodes/ports/edges. The group's local origin is
+  // expressed in its parent's coordinates; adding it to each direct child
+  // group's local origin retains the child's EXACT world rectangle when
+  // reparented to the grandparent (or promoted to the world/root frame).
+  const GraphEditGroup removed = *it;
+  for (auto &child : candidate.groups) {
+    if (child.parent_group_id != removed.id) continue;
+    const double child_x = child.x + removed.x;
+    const double child_y = child.y + removed.y;
+    if (!std::isfinite(child_x) || !std::isfinite(child_y))
+      return reject(GraphEditError::InvalidGeometry,
+                    "nested ungroup exceeds finite local transform bounds");
+    child.x = child_x;
+    child.y = child_y;
+    child.parent_group_id = removed.parent_group_id;
+  }
+
+  // Direct leaves inherit the surviving parent group; root-level leaves
+  // become ungrouped. All descendants retain their original NodeId, PortId
+  // and EdgeId. No guessed or transient visible proxy mapping is persisted.
+  if (!removed.parent_group_id.empty()) {
+    const auto parent = std::find_if(
+        candidate.groups.begin(), candidate.groups.end(),
+        [&](const GraphEditGroup &group) {
+          return group.id == removed.parent_group_id;
+        });
+    if (parent == candidate.groups.end())
+      return reject(GraphEditError::InvalidInput,
+                    "nested ungroup has no owning parent");
+    parent->member_node_ids.insert(parent->member_node_ids.end(),
+                                   removed.member_node_ids.begin(),
+                                   removed.member_node_ids.end());
+  }
+
+  // Removed group's proxy ports no longer have a visual owner. All surviving
+  // ancestor/descendant explicit measured mappings remain intact, and the
+  // sole native GraphLayout validates the entire projected view again.
   candidate.groups.erase(it);
-  return publish(std::move(candidate));
+  return publish(std::move(candidate)); // ONE Undo entry; no partial commit.
 }
 
 GraphEditStatus GraphEditDocument::set_group_collapsed(
