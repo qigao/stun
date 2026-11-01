@@ -90,7 +90,8 @@ struct GraphRouteUpdateStats {
   std::size_t obstacle_invalidated = 0;
   bool full_rebuild = false;
   // Counts reflect the actual sorted-interval segment index, not GPU draws.
-  std::size_t indexed_segments = 0;
+  std::size_t indexed_segments = 0; // Size of NEW committed route index.
+  std::size_t queried_segments = 0; // Size of OLD index used by the query.
   std::size_t segment_candidates = 0;
   std::size_t index_queries = 0;
 };

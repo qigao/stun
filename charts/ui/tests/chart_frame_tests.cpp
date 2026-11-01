@@ -942,7 +942,7 @@ spec("GraphCanvas M1b real routing scale and frame-budget evidence") {
       // All 49 horizontal routes overlap the same X interval. A correct
       // x-index may enumerate every segment, before exact Y filtering.
       // Do not invent an x-pruning ratio where the fixture cannot yield one.
-      check_true(stats.segment_candidates <= stats.indexed_segments);
+      check_true(stats.segment_candidates <= stats.queried_segments);
       biggest_candidates = std::max(biggest_candidates, stats.segment_candidates);
       biggest_reroute = std::max(biggest_reroute, stats.rerouted);
     }
@@ -963,6 +963,7 @@ spec("GraphCanvas M1b real routing scale and frame-budget evidence") {
               << " edit_commit_p95_us=" << p95
               << " max_dirty_routes=" << biggest_reroute
               << " max_index_candidates=" << biggest_candidates
+              << " queried_segments=" << model.last_route_update().queried_segments
               << " indexed_segments=" << model.last_route_update().indexed_segments
               << std::endl;
   }

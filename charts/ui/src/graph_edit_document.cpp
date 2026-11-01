@@ -249,6 +249,7 @@ GraphEditStatus GraphEditDocument::validate_and_route(
   std::map<std::string, const GraphEditRoute *> old_routes;
   std::set<std::string> swept_dirty_edges;
   if (reuse_allowed) {
+    stats.queried_segments = previous_index->size();
     for (std::size_t i = 0; i < next.nodes.size(); ++i) {
       const auto &before = previous->nodes[i], &after = next.nodes[i];
       if (before.x == after.x && before.y == after.y) continue;
