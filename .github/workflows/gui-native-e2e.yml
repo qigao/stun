@@ -299,6 +299,11 @@ jobs:
           # semantics, expand and unchanged Save. No new workflow/target.
           xvfb-run -a -s '-screen 0 1280x900x24 -nolisten tcp' \
             build/stun-gui/bin/flexui_desktop_editor --smoke-group
+          # M2c exact production host: nested local-origin groups, innermost
+          # header capture, outermost collapsed route/semantics and Undo/Save.
+          # Reuse this workflow and its existing compiled native application.
+          xvfb-run -a -s '-screen 0 1280x900x24 -nolisten tcp' \
+            build/stun-gui/bin/flexui_desktop_editor --smoke-hierarchy
           xvfb-run -a -s '-screen 0 1280x900x24 -nolisten tcp' \
             /usr/bin/python3 .github/scripts/gui_native_suite.py \
               --exe build/stun-gui/bin/flexui_desktop_editor \
