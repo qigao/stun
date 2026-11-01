@@ -44,7 +44,11 @@ struct GraphEditRoute {
 
 struct GraphEditSnapshot {
   // Revision is monotone even across Undo/Redo; never restore an old revision.
-  std::uint64_t revision = 0;
+  std::uint64_t revision = 0; // Legacy alias for document_revision.
+  // Distinct fields are required for future async dirty routing. M0 commits
+  // both together because every accepted edit recomputes full geometry.
+  std::uint64_t document_revision = 0;
+  std::uint64_t geometry_revision = 0;
   std::vector<GraphEditNode> nodes;
   std::vector<GraphEditPort> ports;
   std::vector<GraphEditEdge> edges;

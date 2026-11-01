@@ -25,6 +25,14 @@ class RequirementTests(unittest.TestCase):
             ".github/scripts/tests/test_gui_native_e2e.py",
             ".github/scripts/tests/test_gui_native_suite.py",
             ".github/scripts/gui_runtime/CMakeLists.txt",
+            # The real editor links the linked GraphCanvas and native Widget.
+            # Their source-only changes require the SAME physical X11 gate.
+            "charts/ui/src/graph_canvas_widget.cpp",
+            "charts/ui/src/graph_edit_document.cpp",
+            "charts/ui/include/charts/ui/graph_canvas_widget.h",
+            "charts/ui/include/charts/ui/graph_edit_document.h",
+            "charts/ui/tests/chart_frame_tests.cpp",
+            "flexUI/include/flexUI/native_canvas_widget.h",
             ".github/workflows/gui-native-e2e.yml",
         ):
             with self.subTest(path=path):
