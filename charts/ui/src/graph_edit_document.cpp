@@ -192,6 +192,26 @@ GraphEditStatus project_visible_graph(const GraphEditSnapshot &source,
       if (group.collapsed) hidden_members.emplace(id, proxy_node);
     }
 
+    // Validate boundary geometry even while expanded. The native named-port
+    // binder is the single source of truth for physical side/position rules;
+    // merely storing finite (x,y) must not defer a bad measurement until a
+    // later collapse, nor invent a boundary anchor in the UI layer.
+    if (!group.proxy_ports.empty()) {
+      gl::Layout proxy_layout;
+      proxy_layout.nodes.push_back(
+          {group.x, group.y, group.width, group.height, 0, 0});
+      std::vector<gl::MeasuredNamedPort> measurements;
+      for (const auto &binding : group.proxy_ports)
+        measurements.push_back({0, binding.id, binding.side,
+                                {binding.local_x, binding.local_y}});
+      gl::NamedPortBindings checked;
+      const auto bound = gl::bind_named_ports(
+          proxy_layout, measurements, checked);
+      if (!bound)
+        return reject(GraphEditError::InvalidGeometry,
+                      "invalid measured group boundary: " + bound.message);
+    }
+
     std::set<std::string> local_bindings;
     for (const auto &binding : group.proxy_ports) {
       const auto original = ports.find(binding.original_port_id);
