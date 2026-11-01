@@ -40,7 +40,7 @@ target_include_directories(chart_ui
 # generated flex_parser_gen.h exported by the Flex::Compiler target.
 add_library(Charts::UI ALIAS chart_ui)
 target_link_libraries(chart_ui PUBLIC flexUI flex Stun::GraphCore
-    PRIVATE Stun::GraphOrthogonal Stun::GraphPortBindings)
+    PRIVATE Stun::GraphOrthogonal Stun::GraphPortBindings Threads::Threads)
 target_compile_features(chart_ui PUBLIC cxx_std_17)
 set_target_properties(chart_ui PROPERTIES FOLDER "Modules/Charts/UI")
 

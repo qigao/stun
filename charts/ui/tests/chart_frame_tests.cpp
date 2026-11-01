@@ -7,6 +7,8 @@
 #include <flexUI/ui_document.h>
 #include <flexUI/ui_xml.h>
 #include <algorithm>
+#include <chrono>
+#include <iostream>
 #include <limits>
 #include <memory>
 
@@ -735,6 +737,9 @@ spec("GraphCanvas M1a uses conservative bounded incremental orthogonal routing")
     check_equal(stats.incident_invalidated, 0U);
     check_equal(stats.obstacle_invalidated, 1U);
     check_false(stats.full_rebuild);
+    check_equal(stats.index_queries, 1U);
+    check_true(stats.indexed_segments >= 2U);
+    check_true(stats.segment_candidates <= stats.indexed_segments);
 
     // Independent whole-graph routing from scratch is a reference for the
     // genuinely dirty path, while the unrelated lower path is byte-for-byte
@@ -760,6 +765,74 @@ spec("GraphCanvas M1a uses conservative bounded incremental orthogonal routing")
     check_equal(node_by_id(model, "blocker")->y, 30.0);
     check_equal(model.snapshot().document_revision, model.snapshot().revision);
     check_equal(model.snapshot().geometry_revision, model.snapshot().revision);
+  }
+
+  it("uses a sorted segment index to exclude far-away route intervals") {
+    GraphEditDocument model;
+    auto graph = swept_obstacle_graph();
+    graph.nodes.push_back({"far-start", 1800, 340, 100, 80, false});
+    graph.nodes.push_back({"far-end", 2200, 340, 100, 80, false});
+    graph.ports.push_back({"far-out", "far-start", gl::Side::East, 100, 40, true});
+    graph.ports.push_back({"far-in", "far-end", gl::Side::West, 0, 40, false});
+    graph.edges.push_back({"far-route", "far-out", "far-in"});
+    check_true(static_cast<bool>(model.initialize(std::move(graph))));
+    const auto old = model.snapshot();
+    const auto *far_before = route_by_id(old, "far-route");
+    check_not_null(far_before);
+    if (!far_before) return;
+    check_true(model.last_route_update().indexed_segments >= 3U);
+
+    check_true(static_cast<bool>(model.begin_move("blocker")));
+    check_true(static_cast<bool>(model.preview_move(0, -180)));
+    check_true(static_cast<bool>(model.commit_move()));
+    const auto &stats = model.last_route_update();
+    check_false(stats.full_rebuild);
+    check_equal(stats.index_queries, 1U);
+    check_equal(stats.obstacle_invalidated, 1U);
+    check_equal(stats.rerouted, 1U);
+    check_equal(stats.reused, 2U);
+    check_true(stats.segment_candidates < stats.indexed_segments);
+    const auto *far_after = route_by_id(model.snapshot(), "far-route");
+    check_not_null(far_after);
+    if (far_after) check_true(route_points_identical(*far_before, *far_after));
+
+    // Undo restores the indexed old revision. A subsequent NEW move must
+    // query that revision's index, rather than stale segments from Redo.
+    check_true(static_cast<bool>(model.undo()));
+    check_equal(model.last_route_update().indexed_segments,
+                model.snapshot().routes[0].points.size() - 1 +
+                model.snapshot().routes[1].points.size() - 1 +
+                model.snapshot().routes[2].points.size() - 1);
+    check_true(static_cast<bool>(model.begin_move("blocker")));
+    check_true(static_cast<bool>(model.preview_move(0, -180)));
+    check_true(static_cast<bool>(model.commit_move()));
+    check_equal(model.last_route_update().rerouted, 1U);
+    check_equal(model.last_route_update().reused, 2U);
+  }
+
+  it("keeps routing budgets for 100, 500 and 1000 node documents") {
+    GraphEditDocument model;
+    GraphEditSnapshot data;
+    for (int i = 0; i < 100; ++i) {
+      data.nodes.push_back({"scale-" + std::to_string(i),
+                            static_cast<double>(i) * 110.0,
+                            10.0, 72.0, 38.0, false});
+    }
+    check_true(static_cast<bool>(model.initialize(data)));
+    check_equal(model.snapshot().nodes.size(), 100U);
+    check_equal(model.last_route_update().indexed_segments, 0U);
+    for (const int count : {500, 1000}) {
+      data.nodes.clear();
+      for (int i = 0; i < count; ++i)
+        data.nodes.push_back({"scale-" + std::to_string(i),
+                              static_cast<double>(i) * 110.0,
+                              10.0, 72.0, 38.0, false});
+      const auto status = model.initialize(data);
+      check_false(static_cast<bool>(status));
+      check(status.error == GraphEditError::CapacityExceeded);
+      check_equal(model.snapshot().nodes.size(), 100U);
+      check_equal(model.snapshot().revision, std::uint64_t{1});
+    }
   }
 
   it("reroutes only the newly CONNECTED edge while keeping old paths intact") {
@@ -816,6 +889,265 @@ spec("GraphCanvas M1a uses conservative bounded incremental orthogonal routing")
     check_equal(model.last_route_update().obstacle_invalidated, 0U);
     check_equal(node_by_id(model, "beta")->x, 440.0);
     check_false(model.last_route_update().full_rebuild);
+  }
+}
+
+spec("GraphCanvas M1b real routing scale and frame-budget evidence") {
+  it("measures the actual 100-node / 49-edge native commit, not a mock layout") {
+    GraphEditSnapshot source;
+    for (int i = 0; i < 49; ++i) {
+      const auto label = std::to_string(i);
+      const double y = static_cast<double>(i) * 70.0;
+      source.nodes.push_back({"s-" + label, 20.0, y, 80.0, 36.0, false});
+      source.nodes.push_back({"t-" + label, 400.0, y, 80.0, 36.0, false});
+      source.ports.push_back({"o-" + label, "s-" + label,
+                              gl::Side::East, 80.0, 18.0, true});
+      source.ports.push_back({"i-" + label, "t-" + label,
+                              gl::Side::West, 0.0, 18.0, false});
+      source.edges.push_back({"e-" + label, "o-" + label, "i-" + label});
+    }
+    const double affected_row = 25.0 * 70.0;
+    // Existing blocker is clear of route #25 and its neighbor #26.
+    // Moving it 44 world units upward blocks route #25 only.
+    source.nodes.push_back({"blocker", 230.0, affected_row + 38.0,
+                             40.0, 24.0, false});
+    source.nodes.push_back({"parked", 1200.0, 4000.0, 40.0, 24.0, false});
+    GraphEditDocument model;
+    const auto setup_start = std::chrono::steady_clock::now();
+    check_true(static_cast<bool>(model.initialize(std::move(source))));
+    const auto setup_us = std::chrono::duration_cast<std::chrono::microseconds>(
+        std::chrono::steady_clock::now() - setup_start).count();
+    check_equal(model.snapshot().nodes.size(), 100U);
+    check_equal(model.snapshot().routes.size(), 49U);
+    check_true(model.last_route_update().indexed_segments >= 49U);
+
+    std::vector<std::int64_t> samples_us;
+    samples_us.reserve(8);
+    std::size_t biggest_candidates = 0;
+    std::size_t biggest_reroute = 0;
+    for (int repetition = 0; repetition < 8; ++repetition) {
+      const double delta = (repetition % 2 == 0) ? -44.0 : 44.0;
+      const auto began = std::chrono::steady_clock::now();
+      check_true(static_cast<bool>(model.begin_move("blocker")));
+      check_true(static_cast<bool>(model.preview_move(0.0, delta)));
+      check_true(static_cast<bool>(model.commit_move()));
+      const auto elapsed = std::chrono::duration_cast<std::chrono::microseconds>(
+          std::chrono::steady_clock::now() - began).count();
+      samples_us.push_back(elapsed);
+      const auto &stats = model.last_route_update();
+      check_equal(stats.total_routes, 49U);
+      check_equal(stats.index_queries, 1U);
+      check_equal(stats.rerouted + stats.reused, 49U);
+      check_true(stats.rerouted < 49U);
+      // All 49 horizontal routes overlap the same X interval. A correct
+      // x-index may enumerate every segment, before exact Y filtering.
+      // Do not invent an x-pruning ratio where the fixture cannot yield one.
+      check_true(stats.segment_candidates <= stats.queried_segments);
+      biggest_candidates = std::max(biggest_candidates, stats.segment_candidates);
+      biggest_reroute = std::max(biggest_reroute, stats.rerouted);
+    }
+
+    std::sort(samples_us.begin(), samples_us.end());
+    const auto p50 = samples_us[3];
+    const auto p95 = samples_us[7];
+    check_true(p50 >= 0 && p95 >= p50);
+    check_equal(model.snapshot().revision, std::uint64_t{9});
+    check_equal(node_by_id(model, "blocker")->y, affected_row + 38.0);
+    // Measured on the actual CI host: report, never assert a fabricated
+    // platform-independent latency SLA or invent 500/1000-node performance.
+    std::cout << "GRAPH_CANVAS_M1B_MEASURE"
+              << " nodes=100 routes=49"
+              << " samples=8"
+              << " initial_full_routing_us=" << setup_us
+              << " edit_commit_p50_us=" << p50
+              << " edit_commit_p95_us=" << p95
+              << " max_dirty_routes=" << biggest_reroute
+              << " max_index_candidates=" << biggest_candidates
+              << " queried_segments=" << model.last_route_update().queried_segments
+              << " indexed_segments=" << model.last_route_update().indexed_segments
+              << std::endl;
+  }
+}
+
+spec("GraphCanvas M1b immutable native graph worker and revision gate") {
+  it("prepares on a separate thread and publishes only through its owner") {
+    GraphEditDocument model;
+    check_true(static_cast<bool>(model.initialize(swept_obstacle_graph())));
+    const auto baseline = model.snapshot();
+    charts::ui::GraphRouteWorker worker;
+    check_true(static_cast<bool>(worker.submit_move(
+        model, "blocker", 0.0, -180.0, 17)));
+    check_true(worker.pending());
+    worker.wait();
+    auto ready = worker.poll();
+    check_true(static_cast<bool>(ready));
+    if (!ready) return;
+    check_true(static_cast<bool>(ready->status()));
+    check_equal(ready->baseline_revision(), baseline.revision);
+    check_true(static_cast<bool>(
+        model.accept_prepared_move(std::move(*ready), 17)));
+    check_equal(model.snapshot().revision, baseline.revision + 1);
+    check_equal(model.snapshot().document_revision, baseline.document_revision + 1);
+    check_equal(model.snapshot().geometry_revision, baseline.geometry_revision + 1);
+    check_equal(node_by_id(model, "blocker")->y, 30.0);
+    check_equal(model.last_route_update().rerouted, 1U);
+    check_equal(model.last_route_update().reused, 1U);
+    check_true(model.last_route_update().index_queries >= 1U);
+    check_equal(model.undo_count(), 1U);
+    check_false(worker.pending());
+    check_true(static_cast<bool>(model.undo()));
+    check_equal(node_by_id(model, "blocker")->y, 210.0);
+    check_true(static_cast<bool>(model.redo()));
+    check_equal(node_by_id(model, "blocker")->y, 30.0);
+  }
+
+  it("rejects a completed but STALE result after another owner commit") {
+    GraphEditDocument model;
+    check_true(static_cast<bool>(model.initialize(example())));
+    charts::ui::GraphRouteWorker worker;
+    check_true(static_cast<bool>(
+        worker.submit_move(model, "alpha", 32.0, 14.0, 22)));
+    // A synchronous native edit wins, regardless of which thread finished.
+    check_true(static_cast<bool>(model.begin_move("alpha")));
+    check_true(static_cast<bool>(model.preview_move(20.0, 0.0)));
+    check_true(static_cast<bool>(model.commit_move()));
+    const auto version = model.snapshot().revision;
+    worker.wait();
+    auto stale = worker.poll();
+    check_true(static_cast<bool>(stale));
+    if (!stale) return;
+    check_true(static_cast<bool>(stale->status()));
+    const auto rejected = model.accept_prepared_move(std::move(*stale), 22);
+    check_false(static_cast<bool>(rejected));
+    check(rejected.error == GraphEditError::Conflict);
+    check_equal(node_by_id(model, "alpha")->x, 75.0);
+    check_equal(model.snapshot().revision, version);
+    check_equal(model.undo_count(), 1U);
+    check_equal(model.last_route_update().committed_revision, version);
+  }
+
+  it("rejects canceled work even when A* completed before cancellation") {
+    GraphEditDocument model;
+    check_true(static_cast<bool>(model.initialize(example())));
+    charts::ui::GraphRouteWorker worker;
+    check_true(static_cast<bool>(
+        worker.submit_move(model, "alpha", 32.0, 14.0, 23)));
+    worker.wait();
+    worker.cancel(); // Explicit cancellation wins even over completed A*.
+    auto canceled = worker.poll();
+    check_true(static_cast<bool>(canceled));
+    if (!canceled) return;
+    check_false(static_cast<bool>(canceled->status()));
+    check(canceled->status().error == GraphEditError::Conflict);
+    const auto rejected = model.accept_prepared_move(std::move(*canceled), 23);
+    check_false(static_cast<bool>(rejected));
+    check_equal(model.snapshot().revision, std::uint64_t{1});
+    check_equal(node_by_id(model, "alpha")->x, 55.0);
+    check_equal(model.undo_count(), 0U);
+  }
+
+  it("revokes a completed handoff if canceled after poll") {
+    GraphEditDocument model;
+    check_true(static_cast<bool>(model.initialize(example())));
+    charts::ui::GraphRouteWorker worker;
+    check_true(static_cast<bool>(
+        worker.submit_move(model, "alpha", 32.0, 14.0, 28)));
+    worker.wait();
+    auto result = worker.poll();
+    check_true(static_cast<bool>(result));
+    if (!result) return;
+    check_true(static_cast<bool>(result->status()));
+    worker.cancel(); // Future consumed, but its result retains the token.
+    const auto rejected = model.accept_prepared_move(std::move(*result), 28);
+    check_false(static_cast<bool>(rejected));
+    check(rejected.error == GraphEditError::Conflict);
+    check_equal(model.snapshot().revision, std::uint64_t{1});
+    check_equal(model.undo_count(), 0U);
+  }
+
+  it("superseding a polled result invalidates its publication token") {
+    GraphEditDocument model;
+    check_true(static_cast<bool>(model.initialize(example())));
+    charts::ui::GraphRouteWorker worker;
+    check_true(static_cast<bool>(
+        worker.submit_move(model, "alpha", 32.0, 14.0, 35)));
+    worker.wait();
+    auto old_result = worker.poll();
+    check_true(static_cast<bool>(old_result));
+    if (!old_result) return;
+    check_true(static_cast<bool>(old_result->status()));
+    check_true(static_cast<bool>(
+        worker.submit_move(model, "alpha", 24.0, 12.0, 35)));
+    const auto rejected = model.accept_prepared_move(
+        std::move(*old_result), 35);
+    check_false(static_cast<bool>(rejected));
+    check(rejected.error == GraphEditError::Conflict);
+    worker.wait();
+    auto current = worker.poll();
+    check_true(static_cast<bool>(current));
+    if (!current) return;
+    check_true(static_cast<bool>(current->status()));
+    check_true(static_cast<bool>(
+        model.accept_prepared_move(std::move(*current), 35)));
+    check_equal(node_by_id(model, "alpha")->x, 79.0);
+    check_equal(model.snapshot().revision, std::uint64_t{2});
+    check_equal(model.undo_count(), 1U);
+  }
+
+  it("rejects an old widget mount token without touching committed geometry") {
+    GraphEditDocument model;
+    check_true(static_cast<bool>(model.initialize(example())));
+    charts::ui::GraphRouteWorker worker;
+    check_true(static_cast<bool>(
+        worker.submit_move(model, "alpha", 32.0, 14.0, 31)));
+    worker.wait();
+    auto ready = worker.poll();
+    check_true(static_cast<bool>(ready));
+    if (!ready) return;
+    check_true(static_cast<bool>(ready->status()));
+    const auto rejected = model.accept_prepared_move(std::move(*ready), 32);
+    check_false(static_cast<bool>(rejected));
+    check(rejected.error == GraphEditError::Conflict);
+    check_equal(model.snapshot().revision, std::uint64_t{1});
+    check_equal(node_by_id(model, "alpha")->x, 55.0);
+  }
+
+  it("prevents document replacement ABA by increasing revision at initialize") {
+    GraphEditDocument model;
+    check_true(static_cast<bool>(model.initialize(example())));
+    charts::ui::GraphRouteWorker worker;
+    check_true(static_cast<bool>(
+        worker.submit_move(model, "alpha", 32.0, 14.0, 40)));
+    auto new_document = example(false);
+    check_true(static_cast<bool>(model.initialize(std::move(new_document))));
+    check_equal(model.snapshot().revision, std::uint64_t{2});
+    worker.wait();
+    auto old = worker.poll();
+    check_true(static_cast<bool>(old));
+    if (!old) return;
+    check_true(static_cast<bool>(old->status()));
+    const auto rejected = model.accept_prepared_move(std::move(*old), 40);
+    check_false(static_cast<bool>(rejected));
+    check(rejected.error == GraphEditError::Conflict);
+    check_equal(model.snapshot().edges.size(), 0U);
+    check_equal(model.snapshot().revision, std::uint64_t{2});
+  }
+
+  it("joins a canceled worker before its owner releases the input snapshot") {
+    GraphEditDocument model;
+    check_true(static_cast<bool>(model.initialize(example())));
+    {
+      charts::ui::GraphRouteWorker worker;
+      check_true(static_cast<bool>(
+          worker.submit_move(model, "alpha", 32.0, 14.0, 91)));
+      worker.cancel();
+      // Destructor does not detach a task that could outlive its snapshots.
+    }
+    check_equal(model.snapshot().revision, std::uint64_t{1});
+    check_false(model.has_preview());
+    check_equal(model.undo_count(), 0U);
+    check_true(static_cast<bool>(model.begin_move("alpha")));
+    model.cancel_move();
   }
 }
 
