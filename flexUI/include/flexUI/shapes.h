@@ -12,7 +12,6 @@
 #include "flexUI/group.h"
 #include "flexUI/text_layout.h"
 #include "flexUI/text_util.h"
-#include <stb_sprintf.h>
 #include <string>
 
 namespace flexUI {

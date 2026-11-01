@@ -1,0 +1,16 @@
+@PACKAGE_INIT@
+
+include(CMakeFindDependencyMacro)
+find_dependency(Salts CONFIG)
+find_dependency(box2d CONFIG)
+# The real Stb port is a header-only CMake MODULE package. Geometry's public
+# inline helpers use stb_sprintf.h; consumers require the same provider,
+# located at *their own* SDK prefix instead of the producer's source path.
+find_dependency(Stb MODULE)
+# Flex::VendorMIR and Flex::VendorMiniBLAS are installed real archives in
+# FlexTargets; no ad-hoc linker names or producer source-tree paths.
+include("${CMAKE_CURRENT_LIST_DIR}/FlexTargets.cmake")
+# Apply the actual Stb package include to the imported, real Flex runtime.
+# Do not write producer-machine include paths into FlexTargets.cmake.
+target_include_directories(Flex::Runtime INTERFACE "${Stb_INCLUDE_DIR}")
+check_required_components(Flex)

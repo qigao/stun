@@ -17,4 +17,5 @@ target_compile_features(flexUI_tailwindcss PUBLIC cxx_std_17)
 target_link_libraries(flexUI_tailwindcss PUBLIC nlohmann_json::nlohmann_json)
 set_target_properties(
   flexUI_tailwindcss PROPERTIES FOLDER "flexUI/tailwindcss"
+                                EXPORT_NAME TailwindCSS
                                 POSITION_INDEPENDENT_CODE ON)

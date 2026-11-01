@@ -1,11 +1,13 @@
 @PACKAGE_INIT@
 
+set(FlexUI_Core_FOUND FALSE)
+set(FlexUI_WidgetSDK_FOUND FALSE)
 set(FlexUI_PluginSDK_FOUND FALSE)
 set(FlexUI_Services_FOUND FALSE)
 set(FlexUI_PluginHost_FOUND FALSE)
 unset(FlexUI_NOT_FOUND_MESSAGE)
 
-set(_FlexUI_supported_components PluginSDK Services PluginHost)
+set(_FlexUI_supported_components Core WidgetSDK PluginSDK Services PluginHost)
 set(_FlexUI_components "${FlexUI_FIND_COMPONENTS}")
 if(NOT _FlexUI_components)
   set(_FlexUI_components PluginSDK Services)
@@ -22,6 +24,11 @@ foreach(_FlexUI_component IN LISTS _FlexUI_components)
   endif()
 endforeach()
 
+if("WidgetSDK" IN_LIST _FlexUI_components)
+  list(APPEND _FlexUI_components Core)
+endif()
+list(REMOVE_DUPLICATES _FlexUI_components)
+
 if("PluginHost" IN_LIST _FlexUI_components)
   if(@FLEXUI_CONFIG_HAS_PLUGIN_HOST@)
     list(APPEND _FlexUI_components PluginSDK Services)
@@ -29,6 +36,23 @@ if("PluginHost" IN_LIST _FlexUI_components)
     string(APPEND FlexUI_NOT_FOUND_MESSAGE
            "PluginHost was not enabled in this FlexUI installation. ")
   endif()
+endif()
+
+# Core is opt-in: finding PluginSDK alone must NOT require Flex, Lexbor,
+# Salts, Markdown, GUI backends, or any runtime service dependencies.
+if("Core" IN_LIST _FlexUI_components)
+  include(CMakeFindDependencyMacro)
+  find_dependency(Salts CONFIG)
+  find_dependency(SaltsUtils CONFIG)
+  find_dependency(Flex CONFIG)
+  find_dependency(lexbor CONFIG)
+  find_dependency(nlohmann_json CONFIG)
+  find_dependency(pugixml CONFIG)
+  find_dependency(unofficial-tree-sitter CONFIG)
+  find_dependency(StunUICore CONFIG)
+  include("${CMAKE_CURRENT_LIST_DIR}/FlexUICoreTargets.cmake")
+  set(FlexUI_Core_FOUND TRUE)
+  set(FlexUI_WidgetSDK_FOUND TRUE)
 endif()
 
 if("PluginSDK" IN_LIST _FlexUI_components)

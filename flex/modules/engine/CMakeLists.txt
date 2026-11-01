@@ -19,10 +19,11 @@ target_include_directories(
   flex
   PUBLIC $<BUILD_INTERFACE:${FLEX_ENGINE_INCLUDE_DIR}>
          $<BUILD_INTERFACE:${FLEX_ENGINE_BINARY_DIR}>
-         ${CMAKE_SOURCE_DIR}/vendor/tinyfsm/
+         $<BUILD_INTERFACE:${FLEX_ENGINE_ROOT}/../vendor/tinyfsm>
          $<INSTALL_INTERFACE:include>
-         ${Stb_INCLUDE_DIR}
-  PRIVATE ${FLEX_ENGINE_ROOT}/modules/runtime)
+         $<INSTALL_INTERFACE:include/flex/vendor>
+  PRIVATE ${Stb_INCLUDE_DIR}
+          ${FLEX_ENGINE_ROOT}/modules/runtime)
 target_compile_features(flex PUBLIC cxx_std_17)
 set_target_properties(
   flex PROPERTIES FOLDER "flex/engine" POSITION_INDEPENDENT_CODE ON)

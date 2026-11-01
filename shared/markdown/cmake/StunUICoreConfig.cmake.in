@@ -1,0 +1,9 @@
+@PACKAGE_INIT@
+
+include(CMakeFindDependencyMacro)
+find_dependency(Salts CONFIG)
+find_dependency(SaltsUtils CONFIG)
+# Stun::UICore is the one native C11 RichDoc adapter used by FlexUI; it
+# delegates parsing and rendering to the installed SaltsUtils providers.
+include("${CMAKE_CURRENT_LIST_DIR}/StunUICoreTargets.cmake")
+check_required_components(StunUICore)

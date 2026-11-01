@@ -11,11 +11,12 @@ target_include_directories(
   flex_runtime
   PUBLIC $<BUILD_INTERFACE:${FLEX_ENGINE_INCLUDE_DIR}>
          $<BUILD_INTERFACE:${FLEX_ENGINE_BINARY_DIR}>
-         ${CMAKE_SOURCE_DIR}/vendor/tinyfsm/
+         $<BUILD_INTERFACE:${FLEX_ENGINE_ROOT}/../vendor/tinyfsm>
          $<INSTALL_INTERFACE:include>
-         ${Stb_INCLUDE_DIR}
-         $<BUILD_INTERFACE:${CMAKE_SOURCE_DIR}/vendor/mir>
-         $<BUILD_INTERFACE:${CMAKE_SOURCE_DIR}/vendor/miniblas>)
+         $<INSTALL_INTERFACE:include/flex/vendor>
+         $<BUILD_INTERFACE:${Stb_INCLUDE_DIR}>
+  PRIVATE $<BUILD_INTERFACE:${FLEX_ENGINE_ROOT}/../vendor/mir>
+          $<BUILD_INTERFACE:${FLEX_ENGINE_ROOT}/../vendor/miniblas>)
 target_compile_features(flex_runtime PUBLIC cxx_std_17)
 
 find_package(box2d CONFIG REQUIRED)
