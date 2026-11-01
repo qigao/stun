@@ -88,13 +88,13 @@ enum class GraphEditError {
   InvalidInput,
   InvalidGeometry,
   MissingNode,
-  MissingGroup,
   LockedNode,
   Busy,
   NoPath,
   CapacityExceeded,
   Conflict,
   InternalInvariant,
+  MissingGroup,
 };
 
 struct GraphEditStatus {
