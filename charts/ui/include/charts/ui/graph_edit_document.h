@@ -178,6 +178,10 @@ public:
   GraphEditStatus add_port(GraphEditPort port);
   GraphEditStatus remove_port(std::string_view port_id);
   GraphEditStatus add_group(GraphEditGroup group);
+  // Ungroup one nested group atomically. Direct child groups are reparented
+  // with world-space geometry preserved; direct original leaves inherit the
+  // parent, or become ungrouped at root. One full native-route validation
+  // and one Undo/Redo entry, never a second graph or UI component tree.
   GraphEditStatus remove_group(std::string_view group_id);
   GraphEditStatus set_group_collapsed(std::string_view group_id,
                                       bool collapsed);
