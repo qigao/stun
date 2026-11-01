@@ -939,6 +939,247 @@ spec("GraphCanvas M2a stable group proxy and atomic history") {
   }
 }
 
+spec("GraphCanvas M2b compound group move and real Box gestures") {
+  it("moves expanded group and every original member as ONE atomic snapshot") {
+    auto data = example();
+    charts::ui::GraphEditGroup group;
+    group.id = "pack";
+    group.x = 40.0; group.y = 24.0;
+    group.width = 170.0; group.height = 130.0;
+    group.member_node_ids = {"alpha"};
+    group.proxy_ports.push_back(
+        {"pack-out", "source", gl::Side::East, 170.0, 48.0});
+    data.groups.push_back(group);
+    GraphEditDocument doc;
+    check_true(static_cast<bool>(doc.initialize(std::move(data))));
+    const auto baseline = doc.snapshot();
+    check_equal(doc.undo_count(), 0U);
+
+    check_true(static_cast<bool>(doc.begin_group_move("pack")));
+    check_true(static_cast<bool>(doc.preview_move(30.0, 16.0)));
+    double nx = 0.0, ny = 0.0;
+    check_true(doc.preview_position("alpha", nx, ny));
+    check_equal(nx, 85.0);
+    check_equal(ny, 52.0);
+    check_true(doc.preview_position("group@pack", nx, ny));
+    check_equal(nx, 70.0);
+    check_equal(ny, 40.0);
+    check_equal(node_by_id(doc, "alpha")->x, 55.0);
+    check_equal(doc.snapshot().groups[0].x, 40.0);
+    check_equal(doc.snapshot().revision, baseline.revision);
+    check_equal(doc.undo_count(), 0U);
+
+    check_true(static_cast<bool>(doc.commit_move()));
+    check_equal(doc.snapshot().revision, baseline.revision + 1);
+    check_equal(doc.snapshot().groups[0].id, "pack");
+    check_equal(doc.snapshot().groups[0].x, 70.0);
+    check_equal(doc.snapshot().groups[0].y, 40.0);
+    check_equal(node_by_id(doc, "alpha")->x, 85.0);
+    check_equal(node_by_id(doc, "alpha")->y, 52.0);
+    check_equal(node_by_id(doc, "beta")->x, 440.0);
+    check_equal(doc.snapshot().edges[0].source_port, "source");
+    check_equal(doc.snapshot().ports[0].id, "sink");
+    check_equal(doc.snapshot().routes.size(), 1U);
+    check_equal(doc.undo_count(), 1U);
+    check_true(static_cast<bool>(doc.undo()));
+    check_equal(doc.snapshot().groups[0].x, 40.0);
+    check_equal(node_by_id(doc, "alpha")->x, 55.0);
+    check_true(route_points_identical(
+        doc.snapshot().routes.front(), baseline.routes.front()));
+    check_true(static_cast<bool>(doc.redo()));
+    check_equal(node_by_id(doc, "alpha")->x, 85.0);
+    check_equal(doc.snapshot().groups[0].x, 70.0);
+  }
+
+  it("moves a collapsed proxy together with hidden children, not external nodes") {
+    auto data = example();
+    charts::ui::GraphEditGroup group;
+    group.id = "pack";
+    group.x = 40.0; group.y = 24.0;
+    group.width = 170.0; group.height = 130.0;
+    group.collapsed = true;
+    group.member_node_ids = {"alpha"};
+    group.proxy_ports.push_back(
+        {"pack-out", "source", gl::Side::East, 170.0, 48.0});
+    data.groups.push_back(group);
+    GraphEditDocument doc;
+    check_true(static_cast<bool>(doc.initialize(std::move(data))));
+    const auto original = doc.snapshot();
+    check_within(doc.snapshot().routes[0].points[0].x, 210.0, 0.0001);
+    check_true(static_cast<bool>(doc.begin_group_move("pack")));
+    check_true(static_cast<bool>(doc.preview_move(24.0, 12.0)));
+    double x = 0.0, y = 0.0;
+    check_true(doc.preview_position("group@pack", x, y));
+    check_equal(x, 64.0); check_equal(y, 36.0);
+    check_true(doc.preview_position("alpha", x, y));
+    check_equal(x, 79.0); check_equal(y, 48.0);
+    check_true(static_cast<bool>(doc.commit_move()));
+    check_equal(doc.snapshot().groups[0].x, 64.0);
+    check_true(doc.snapshot().groups[0].collapsed);
+    check_equal(node_by_id(doc, "alpha")->x, 79.0);
+    check_equal(node_by_id(doc, "beta")->x, 440.0);
+    check_within(doc.snapshot().routes[0].points.front().x, 234.0, 0.0001);
+    GraphEditSnapshot visible;
+    check_true(static_cast<bool>(doc.visible_snapshot(visible)));
+    check_equal(visible.edges.size(), 1U);
+    check_equal(visible.edges[0].source_port, "pack-out");
+    check_equal(doc.snapshot().edges[0].source_port, "source");
+    check_true(static_cast<bool>(doc.undo()));
+    check_equal(doc.snapshot().groups[0].x, original.groups[0].x);
+    check_equal(node_by_id(doc, "alpha")->x, 55.0);
+    check_true(route_points_identical(
+        doc.snapshot().routes[0], original.routes[0]));
+    check_true(static_cast<bool>(doc.redo()));
+    check_equal(doc.snapshot().groups[0].x, 64.0);
+  }
+
+  it("rejects invalid compound geometry without touching routes or history") {
+    auto data = example();
+    charts::ui::GraphEditGroup group;
+    group.id = "pack";
+    group.x = 40.0; group.y = 24.0;
+    group.width = 170.0; group.height = 130.0;
+    group.collapsed = true;
+    group.member_node_ids = {"alpha"};
+    group.proxy_ports.push_back(
+        {"pack-out", "source", gl::Side::East, 170.0, 48.0});
+    data.groups.push_back(group);
+    GraphEditDocument doc;
+    check_true(static_cast<bool>(doc.initialize(std::move(data))));
+    const auto original = doc.snapshot();
+    check_true(static_cast<bool>(doc.begin_group_move("pack")));
+    check_true(static_cast<bool>(doc.preview_move(280.0, 0.0)));
+    const auto rejected = doc.commit_move(); // proxy overlaps beta
+    check_false(static_cast<bool>(rejected));
+    check(rejected.error == GraphEditError::InvalidGeometry);
+    check_equal(doc.snapshot().revision, original.revision);
+    check_equal(doc.snapshot().groups[0].x, 40.0);
+    check_equal(node_by_id(doc, "alpha")->x, 55.0);
+    check_equal(doc.undo_count(), 0U);
+    check_true(route_points_identical(
+        doc.snapshot().routes.front(), original.routes.front()));
+
+    check_true(static_cast<bool>(doc.begin_group_move("pack")));
+    check_true(static_cast<bool>(doc.preview_move(0.0, 0.0)));
+    check_true(static_cast<bool>(doc.commit_move()));
+    check_equal(doc.snapshot().revision, original.revision);
+    check_equal(doc.undo_count(), 0U);
+
+    const auto missing = doc.begin_group_move("missing");
+    check_false(static_cast<bool>(missing));
+    check(missing.error == GraphEditError::MissingGroup);
+    check_false(doc.has_preview());
+  }
+
+  it("rejects moving any group that contains a locked original member") {
+    auto data = example();
+    for (auto &node : data.nodes)
+      if (node.id == "alpha") node.locked = true;
+    charts::ui::GraphEditGroup group;
+    group.id = "pack";
+    group.x = 40.0; group.y = 24.0;
+    group.width = 170.0; group.height = 130.0;
+    group.member_node_ids = {"alpha"};
+    group.proxy_ports.push_back(
+        {"pack-out", "source", gl::Side::East, 170.0, 48.0});
+    data.groups.push_back(group);
+    GraphEditDocument doc;
+    check_true(static_cast<bool>(doc.initialize(std::move(data))));
+    const auto status = doc.begin_group_move("pack");
+    check_false(static_cast<bool>(status));
+    check(status.error == GraphEditError::LockedNode);
+    check_false(doc.has_preview());
+    check_equal(doc.undo_count(), 0U);
+  }
+
+  it("uses existing Box capture to distinguish header click from compound drag") {
+    auto data = example();
+    charts::ui::GraphEditGroup group;
+    group.id = "pack";
+    group.x = 40.0; group.y = 24.0;
+    group.width = 170.0; group.height = 130.0;
+    group.member_node_ids = {"alpha"};
+    group.proxy_ports.push_back(
+        {"pack-out", "source", gl::Side::East, 170.0, 48.0});
+    data.groups.push_back(group);
+    auto doc = std::make_shared<GraphEditDocument>();
+    check_true(static_cast<bool>(doc->initialize(std::move(data))));
+    auto registry = flexUI::WidgetRegistry::builtins();
+    check_false(static_cast<bool>(
+        charts::ui::register_graph_canvas_widget(registry, doc)));
+    auto compiled = flexUI::compile_ui_xml(
+        "<ui name=\"GroupMove\"><main id=\"root\">"
+        "<native-graph id=\"graph\" /></main></ui>");
+    check_true(static_cast<bool>(compiled));
+    if (!compiled) return;
+    flexUI::Box box(nullptr);
+    const auto installed = flexUI::UiDocumentInstantiator::instantiate(
+        box, *compiled.program, registry);
+    check_true(static_cast<bool>(installed));
+    if (!installed) return;
+    auto *root = box.get_by_id("root");
+    auto *graph = box.get_by_id("graph");
+    check_not_null(root); check_not_null(graph);
+    if (!root || !graph) return;
+    root->set_layout_bounds(0, 0, 832, 210);
+    graph->set_layout_bounds(0, 0, 832, 210);
+    const auto before = doc->snapshot().revision;
+
+    auto down = flexUI::Event::mouse_down(60, 30);
+    box.dispatch_event(down);
+    check_true(down.handled);
+    check(box.capturing_element() == graph);
+    auto micro = flexUI::Event::mouse_move(62, 30);
+    box.dispatch_event(micro);
+    check_false(doc->has_preview());
+    auto up = flexUI::Event::mouse_up(62, 30);
+    box.dispatch_event(up);
+    check_true(up.handled);
+    check_null(box.capturing_element());
+    check_true(doc->snapshot().groups[0].collapsed);
+    check_equal(doc->snapshot().revision, before + 1);
+
+    // The collapsed proxy is now the interactive target. A drag must not
+    // automatically expand it, and it must not touch the external beta node.
+    auto down2 = flexUI::Event::mouse_down(80, 90);
+    auto move2 = flexUI::Event::mouse_move(112, 106);
+    auto up2 = flexUI::Event::mouse_up(112, 106);
+    box.dispatch_event(down2);
+    box.dispatch_event(move2);
+    check_true(doc->has_preview());
+    double px = 0.0, py = 0.0;
+    check_true(doc->preview_position("alpha", px, py));
+    check_equal(px, 87.0);
+    check_equal(py, 52.0);
+    check_equal(doc->snapshot().revision, before + 1);
+    box.dispatch_event(up2);
+    check_true(up2.handled);
+    check_null(box.capturing_element());
+    check_false(doc->has_preview());
+    check_equal(doc->snapshot().revision, before + 2);
+    check_true(doc->snapshot().groups[0].collapsed);
+    check_equal(doc->snapshot().groups[0].x, 72.0);
+    check_equal(node_by_id(*doc, "alpha")->x, 87.0);
+    check_equal(node_by_id(*doc, "beta")->x, 440.0);
+
+    // A subthreshold click on that same proxy now expands, preserving the
+    // exact original NodeId/PortId/EdgeId and one history step per gesture.
+    auto down3 = flexUI::Event::mouse_down(100, 110);
+    auto up3 = flexUI::Event::mouse_up(100, 110);
+    box.dispatch_event(down3);
+    box.dispatch_event(up3);
+    check_true(up3.handled);
+    check_false(doc->snapshot().groups[0].collapsed);
+    check_equal(doc->snapshot().revision, before + 3);
+    check_equal(doc->undo_count(), 3U);
+    check_true(static_cast<bool>(doc->undo()));
+    check_true(doc->snapshot().groups[0].collapsed);
+    check_true(static_cast<bool>(doc->undo()));
+    check_equal(doc->snapshot().groups[0].x, 40.0);
+    check_equal(node_by_id(*doc, "alpha")->x, 55.0);
+  }
+}
+
 spec("GraphCanvas M1a uses conservative bounded incremental orthogonal routing") {
   it("reroutes an UNRELATED path when a moved obstacle sweeps its clearance envelope") {
     GraphEditDocument model;

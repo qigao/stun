@@ -28,7 +28,7 @@ constexpr double kDragStartThresholdPx = 4.0;
 constexpr std::size_t kMaxSemanticParts = 1024;
 std::atomic<std::uint64_t> next_graph_mount_generation{1};
 
-enum class GestureMode { Idle, ArmedNode, MoveNode, Connect, Pan };
+enum class GestureMode { Idle, ArmedNode, MoveNode, ArmedGroup, MoveGroup, Connect, Pan };
 
 struct SemanticPart {
   std::string id;
@@ -45,6 +45,7 @@ struct Interaction {
   std::string routing_state = "idle";
   GestureMode mode = GestureMode::Idle;
   std::string selected_node;
+  std::string selected_group;
   std::string source_port;
   std::string status_message;
   double press_x = 0.0;
@@ -63,7 +64,7 @@ struct Interaction {
     worker.cancel();
     // The widget may be destroyed without a final FocusOut. No Box/Element
     // pointers are touched here. The worker destructor joins the task.
-    if (mode == GestureMode::MoveNode) {
+    if (mode == GestureMode::MoveNode || mode == GestureMode::MoveGroup) {
       if (auto owner = document.lock()) owner->cancel_move();
     }
   }
@@ -326,7 +327,9 @@ void paint_canvas(const GraphEditDocument &model, const Interaction &interaction
   for (const auto &group : model.snapshot().groups) {
     if (group.collapsed) continue;
     double gx, gy;
-    if (!interaction.view.to_local(group.x, group.y, gx, gy)) continue;
+    double wx = group.x, wy = group.y;
+    model.preview_position("group@" + group.id, wx, wy);
+    if (!interaction.view.to_local(wx, wy, gx, gy)) continue;
     commands.draw_rect(static_cast<float>(gx), static_cast<float>(gy),
         static_cast<float>(group.width * interaction.view.zoom),
         static_cast<float>(group.height * interaction.view.zoom),
@@ -424,7 +427,8 @@ void cancel_pending(Interaction &state, flexUI::Element &element) {
 
 void cancel(Interaction &state, GraphEditDocument &document,
             flexUI::NativeCanvasWidget &widget, flexUI::Element &element) {
-  if (state.mode == GestureMode::MoveNode) document.cancel_move();
+  if (state.mode == GestureMode::MoveNode ||
+      state.mode == GestureMode::MoveGroup) document.cancel_move();
   state.mode = GestureMode::Idle;
   state.source_port.clear();
   widget.release_pointer_capture();
@@ -527,9 +531,13 @@ bool handle_input(Interaction &state, GraphEditDocument &model,
       const double gw = group.width * state.view.zoom;
       if (x >= gx + 4.0 && x <= gx + gw - 4.0 &&
           y >= gy && y <= gy + 20.0) {
-        const auto result = model.set_group_collapsed(group.id, true);
+        // A click toggles collapse on MouseUp. A real drag moves the whole
+        // compound document only after the same 4px gesture threshold.
         state.selected_node.clear();
-        state.status_message = result ? "" : result.message;
+        state.selected_group = group.id;
+        state.mode = GestureMode::ArmedGroup;
+        state.status_message.clear();
+        widget.request_pointer_capture();
         element.mark_paint_dirty();
         return true;
       }
@@ -543,9 +551,11 @@ bool handle_input(Interaction &state, GraphEditDocument &model,
     }
     if (const auto node = hit_node(model, state, x, y)) {
       if (is_group_proxy(model, node->id)) {
-        const auto result = model.set_group_collapsed(node->id.substr(6), false);
         state.selected_node.clear();
-        state.status_message = result ? "" : result.message;
+        state.selected_group = node->id.substr(6);
+        state.mode = GestureMode::ArmedGroup;
+        state.status_message.clear();
+        widget.request_pointer_capture();
         element.mark_paint_dirty();
         return true;
       }
@@ -576,20 +586,26 @@ bool handle_input(Interaction &state, GraphEditDocument &model,
       state.previous_x = x;
       state.previous_y = y;
     } else if (state.mode == GestureMode::ArmedNode ||
-               state.mode == GestureMode::MoveNode) {
+               state.mode == GestureMode::MoveNode ||
+               state.mode == GestureMode::ArmedGroup ||
+               state.mode == GestureMode::MoveGroup) {
       const double dx = x - state.press_x, dy = y - state.press_y;
-      if (state.mode == GestureMode::ArmedNode) {
+      if (state.mode == GestureMode::ArmedNode ||
+          state.mode == GestureMode::ArmedGroup) {
         if (dx * dx + dy * dy <=
             kDragStartThresholdPx * kDragStartThresholdPx) {
           return true; // Still a click, not a graph-document preview.
         }
-        const auto started = model.begin_move(state.selected_node);
+        const bool group = state.mode == GestureMode::ArmedGroup;
+        const auto started = group
+            ? model.begin_group_move(state.selected_group)
+            : model.begin_move(state.selected_node);
         if (!started) {
           state.status_message = started.message;
           cancel(state, model, widget, element);
           return true;
         }
-        state.mode = GestureMode::MoveNode;
+        state.mode = group ? GestureMode::MoveGroup : GestureMode::MoveNode;
       }
       const auto status = model.preview_move(
           dx / state.view.zoom, dy / state.view.zoom);
@@ -628,6 +644,27 @@ bool handle_input(Interaction &state, GraphEditDocument &model,
       } else {
         const auto status = model.commit_move();
         state.status_message = status ? "" : status.message;
+      }
+    } else if (matching && state.mode == GestureMode::MoveGroup) {
+      // M2b: compound move is an atomic synchronous UI-owner commit.
+      // AsyncCommit's existing native worker currently handles single nodes;
+      // group async scheduling is a separate gate, not an implicit fallback.
+      const auto status = model.commit_move();
+      state.status_message = status ? "" : status.message;
+    } else if (matching && state.mode == GestureMode::ArmedGroup) {
+      // Subthreshold click toggles the existing stable group rather than
+      // appending a useless move transaction to Undo/Redo.
+      const auto &groups = model.snapshot().groups;
+      const auto found = std::find_if(groups.begin(), groups.end(),
+          [&](const GraphEditGroup &g) {
+            return g.id == state.selected_group;
+          });
+      if (found != groups.end()) {
+        const auto status = model.set_group_collapsed(
+            found->id, !found->collapsed);
+        state.status_message = status ? "" : status.message;
+      } else {
+        state.status_message = "Group was retired";
       }
     } else if (matching && state.mode == GestureMode::Connect) {
       const auto target = hit_port(model, state, x, y, false);

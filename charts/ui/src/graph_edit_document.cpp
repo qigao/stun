@@ -656,6 +656,31 @@ GraphEditStatus GraphEditDocument::begin_move(std::string_view id) {
   return reject(GraphEditError::MissingNode, "unknown stable node ID");
 }
 
+GraphEditStatus GraphEditDocument::begin_group_move(
+    std::string_view group_id) {
+  if (move_) return reject(GraphEditError::Busy, "another gesture is active");
+  for (const auto &group : committed_.groups) {
+    if (group.id != group_id) continue;
+    // A compound drag cannot bypass the same locked-member protection as a
+    // direct node drag, even when the member is visually collapsed.
+    for (const auto &id : group.member_node_ids) {
+      const auto member = std::find_if(
+          committed_.nodes.begin(), committed_.nodes.end(),
+          [&](const GraphEditNode &node) { return node.id == id; });
+      if (member == committed_.nodes.end())
+        return reject(GraphEditError::MissingNode,
+                      "group member was removed from the document");
+      if (member->locked)
+        return reject(GraphEditError::LockedNode,
+                      "group contains a locked member");
+    }
+    move_ = MovePreview{group.id, group.x, group.y,
+                        group.x, group.y, true};
+    return {};
+  }
+  return reject(GraphEditError::MissingGroup, "unknown stable group ID");
+}
+
 GraphEditStatus GraphEditDocument::preview_move(double dx, double dy) {
   if (!move_) return reject(GraphEditError::Conflict, "no active node gesture");
   const double x = move_->original_x + dx;
@@ -664,6 +689,34 @@ GraphEditStatus GraphEditDocument::preview_move(double dx, double dy) {
       std::abs(x) > 1.0e6 || std::abs(y) > 1.0e6) {
     return reject(GraphEditError::InvalidGeometry, "invalid drag preview coordinates");
   }
+  if (move_->group) {
+    const auto group_it = std::find_if(
+        committed_.groups.begin(), committed_.groups.end(),
+        [&](const GraphEditGroup &group) { return group.id == move_->id; });
+    if (group_it == committed_.groups.end())
+      return reject(GraphEditError::MissingGroup,
+                    "group was retired during the gesture");
+    const GraphEditNode proxy{
+        "group@" + group_it->id, x, y,
+        group_it->width, group_it->height, true};
+    if (!finite_geometry(proxy))
+      return reject(GraphEditError::InvalidGeometry,
+                    "group proxy moved outside the bounded geometry");
+    for (const auto &id : group_it->member_node_ids) {
+      const auto member = std::find_if(
+          committed_.nodes.begin(), committed_.nodes.end(),
+          [&](const GraphEditNode &node) { return node.id == id; });
+      if (member == committed_.nodes.end())
+        return reject(GraphEditError::MissingNode,
+                      "group member was retired during the gesture");
+      GraphEditNode translated = *member;
+      translated.x += dx;
+      translated.y += dy;
+      if (!finite_geometry(translated))
+        return reject(GraphEditError::InvalidGeometry,
+                      "group member moved outside bounded geometry");
+    }
+  }
   move_->x = x;
   move_->y = y;
   return {};
@@ -671,9 +724,35 @@ GraphEditStatus GraphEditDocument::preview_move(double dx, double dy) {
 
 bool GraphEditDocument::preview_position(std::string_view id, double &x,
                                           double &y) const noexcept {
-  if (!move_ || move_->id != id) return false;
-  x = move_->x;
-  y = move_->y;
+  if (!move_) return false;
+  if (!move_->group) {
+    if (move_->id != id) return false;
+    x = move_->x;
+    y = move_->y;
+    return true;
+  }
+  // No allocation on the noexcept paint/semantics preview path.
+  if (id.size() == move_->id.size() + 6 &&
+      id.substr(0, 6) == "group@" &&
+      id.substr(6) == move_->id) {
+    x = move_->x;
+    y = move_->y;
+    return true;
+  }
+  const auto group = std::find_if(
+      committed_.groups.begin(), committed_.groups.end(),
+      [&](const GraphEditGroup &g) { return g.id == move_->id; });
+  if (group == committed_.groups.end()) return false;
+  const auto member = std::find_if(
+      group->member_node_ids.begin(), group->member_node_ids.end(),
+      [&](const std::string &node_id) { return id.compare(node_id) == 0; });
+  if (member == group->member_node_ids.end()) return false;
+  const auto node = std::find_if(
+      committed_.nodes.begin(), committed_.nodes.end(),
+      [&](const GraphEditNode &n) { return n.id == *member; });
+  if (node == committed_.nodes.end()) return false;
+  x = node->x + (move_->x - move_->original_x);
+  y = node->y + (move_->y - move_->original_y);
   return true;
 }
 
@@ -715,6 +794,29 @@ GraphEditStatus GraphEditDocument::commit_move() {
     return {}; // A click does not add an Undo step or increment revision.
   }
   GraphEditSnapshot candidate = committed_;
+  if (preview.group) {
+    const auto group = std::find_if(
+        candidate.groups.begin(), candidate.groups.end(),
+        [&](const GraphEditGroup &g) { return g.id == preview.id; });
+    if (group == candidate.groups.end())
+      return reject(GraphEditError::MissingGroup,
+                    "dragged group was retired");
+    const double dx = preview.x - preview.original_x;
+    const double dy = preview.y - preview.original_y;
+    group->x = preview.x;
+    group->y = preview.y;
+    for (auto &node : candidate.nodes) {
+      if (std::find(group->member_node_ids.begin(),
+                    group->member_node_ids.end(), node.id) ==
+          group->member_node_ids.end()) continue;
+      node.x += dx;
+      node.y += dy;
+    }
+    // The single existing publish() validates all projected routes first,
+    // then atomically replaces the original document, dual-axis indexes and
+    // ONE Undo entry. Failure preserves old geometry, history and caches.
+    return publish(std::move(candidate));
+  }
   for (auto &node : candidate.nodes) {
     if (node.id == preview.id) {
       node.x = preview.x;
