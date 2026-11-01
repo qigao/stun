@@ -1372,6 +1372,284 @@ GraphEditSnapshot sibling_group_fixture() {
 // M2f: actual editor-native Node/Port topology transactions. JSON document
 // replacement from M2d remains an import operation and intentionally clears
 // history; these mutations preserve the SAME GraphEditDocument Undo/Redo.
+// M2h: nested Ungroup is a single application-owned graph edit, not a
+// document reimport. The canonical GraphLayout still validates the same
+// original topology and measured named boundaries before Undo publication.
+spec("GraphCanvas M2h nested Ungroup preserves world transforms and history") {
+  it("reparents a middle group to its grandparent without moving a leaf") {
+    GraphEditDocument doc;
+    check_true(static_cast<bool>(doc.initialize(nested_group_fixture())));
+    const auto original = doc.snapshot();
+    charts::ui::GraphEditNode inner_before;
+    check_true(static_cast<bool>(doc.group_world_rect("inner", inner_before)));
+    check_equal(inner_before.x, 70.0);
+    check_equal(inner_before.y, 70.0);
+    check_equal(doc.undo_count(), 0U);
+
+    check_true(static_cast<bool>(doc.remove_group("middle")));
+    check_equal(doc.snapshot().revision, original.revision + 1);
+    check_equal(doc.undo_count(), 1U);
+    check_equal(doc.snapshot().groups.size(), 2U);
+    check_null(group_by_id(doc, "middle"));
+    const auto *inner = group_by_id(doc, "inner");
+    const auto *outer = group_by_id(doc, "outer");
+    check_not_null(inner); check_not_null(outer);
+    if (!inner || !outer) return;
+    check_equal(inner->parent_group_id, "outer");
+    check_equal(inner->x, 50.0);
+    check_equal(inner->y, 50.0);
+    check_equal(outer->x, 20.0);
+    check_equal(outer->member_node_ids[0], "c");
+    charts::ui::GraphEditNode after;
+    check_true(static_cast<bool>(doc.group_world_rect("inner", after)));
+    check_equal(after.x, inner_before.x);
+    check_equal(after.y, inner_before.y);
+    check_equal(node_by_id(doc, "a")->x, 80.0);
+    check_equal(node_by_id(doc, "c")->x, 340.0);
+    check_equal(doc.snapshot().nodes.size(), original.nodes.size());
+    check_equal(doc.snapshot().ports.size(), original.ports.size());
+    check_equal(doc.snapshot().edges.size(), original.edges.size());
+    check_equal(doc.snapshot().routes.size(), original.routes.size());
+    for (std::size_t i = 0; i < original.routes.size(); ++i)
+      check_true(route_points_identical(
+          doc.snapshot().routes[i], original.routes[i]));
+
+    std::string json;
+    check_true(static_cast<bool>(doc.save_json(json)));
+    GraphEditDocument imported;
+    check_true(static_cast<bool>(imported.load_json(json)));
+    check_null(group_by_id(imported, "middle"));
+    check_equal(group_by_id(imported, "inner")->parent_group_id, "outer");
+    check_equal(group_by_id(imported, "inner")->x, 50.0);
+    check_equal(imported.snapshot().routes.size(), original.routes.size());
+    check_true(static_cast<bool>(doc.undo()));
+    check_equal(doc.snapshot().groups.size(), 3U);
+    check_equal(group_by_id(doc, "inner")->parent_group_id, "middle");
+    check_equal(group_by_id(doc, "inner")->x, 20.0);
+    for (std::size_t i = 0; i < original.routes.size(); ++i)
+      check_true(route_points_identical(
+          doc.snapshot().routes[i], original.routes[i]));
+    check_true(static_cast<bool>(doc.redo()));
+    check_equal(group_by_id(doc, "inner")->parent_group_id, "outer");
+    check_equal(group_by_id(doc, "inner")->x, 50.0);
+    check_equal(doc.undo_count(), 1U);
+  }
+
+  it("transfers original leaf ownership upward, preserving parent boundary contracts") {
+    GraphEditDocument doc;
+    check_true(static_cast<bool>(doc.initialize(nested_group_fixture())));
+    const auto original = doc.snapshot();
+    check_true(static_cast<bool>(doc.remove_group("inner")));
+    check_equal(doc.snapshot().groups.size(), 2U);
+    check_null(group_by_id(doc, "inner"));
+    const auto *middle = group_by_id(doc, "middle");
+    check_not_null(middle);
+    if (!middle) return;
+    check_equal(middle->member_node_ids.size(), 2U);
+    check_equal(middle->member_node_ids[0], "a");
+    check_equal(middle->member_node_ids[1], "b");
+    check_equal(middle->proxy_ports.size(), 1U);
+    check_equal(middle->proxy_ports[0].original_port_id, "b-out");
+    check_equal(doc.snapshot().edges.size(), 3U);
+    check_equal(doc.snapshot().ports.size(), 6U);
+    check_equal(doc.snapshot().routes.size(), 3U);
+    check_equal(node_by_id(doc, "b")->x, 170.0);
+    check_true(static_cast<bool>(
+        doc.set_group_collapsed("middle", true)));
+    GraphEditSnapshot view;
+    check_true(static_cast<bool>(doc.visible_snapshot(view)));
+    check_equal(view.edges.size(), 2U);
+    check_equal(view.edges[0].source_port, "middle-out");
+    check_true(static_cast<bool>(doc.undo())); // Middle expansion.
+    check_true(static_cast<bool>(doc.undo())); // Restore inner GroupId.
+    check_equal(doc.snapshot().groups.size(), 3U);
+    check_equal(group_by_id(doc, "inner")->member_node_ids.size(), 2U);
+    check_equal(group_by_id(doc, "middle")->member_node_ids.size(), 0U);
+    for (std::size_t i = 0; i < original.routes.size(); ++i)
+      check_true(route_points_identical(
+          doc.snapshot().routes[i], original.routes[i]));
+  }
+
+  it("promotes surviving children to root in world coordinates") {
+    GraphEditDocument doc;
+    check_true(static_cast<bool>(doc.initialize(nested_group_fixture())));
+    check_true(static_cast<bool>(
+        doc.set_group_collapsed("middle", true)));
+    check_true(static_cast<bool>(
+        doc.set_group_collapsed("outer", true)));
+    const auto before = doc.snapshot();
+    check_equal(before.routes.size(), 1U);
+    check_true(static_cast<bool>(doc.remove_group("outer")));
+    check_equal(doc.snapshot().groups.size(), 2U);
+    check_null(group_by_id(doc, "outer"));
+    const auto *middle = group_by_id(doc, "middle");
+    check_not_null(middle);
+    if (!middle) return;
+    check_equal(middle->parent_group_id, "");
+    check_equal(middle->x, 50.0);
+    check_equal(middle->y, 50.0);
+    check_equal(group_by_id(doc, "inner")->parent_group_id, "middle");
+    check_equal(group_by_id(doc, "inner")->x, 20.0);
+    check_equal(doc.snapshot().nodes.size(), 4U);
+    check_equal(doc.snapshot().ports.size(), 6U);
+    check_equal(doc.snapshot().edges.size(), 3U);
+    check_equal(doc.snapshot().routes.size(), 2U);
+    check_equal(node_by_id(doc, "c")->x, 340.0);
+    GraphEditSnapshot view;
+    check_true(static_cast<bool>(doc.visible_snapshot(view)));
+    check_equal(view.edges.size(), 2U);
+    check_equal(view.edges[0].source_port, "middle-out");
+    charts::ui::GraphEditNode middle_world;
+    check_true(static_cast<bool>(
+        doc.group_world_rect("middle", middle_world)));
+    check_equal(middle_world.x, 50.0);
+    check_equal(middle_world.y, 50.0);
+    check_true(static_cast<bool>(doc.undo()));
+    check_equal(doc.snapshot().groups.size(), 3U);
+    check_true(group_by_id(doc, "outer")->collapsed);
+    check_equal(doc.snapshot().routes.size(), before.routes.size());
+    check_true(route_points_identical(
+        doc.snapshot().routes[0], before.routes[0]));
+    check_true(static_cast<bool>(doc.redo()));
+    check_equal(group_by_id(doc, "middle")->parent_group_id, "");
+  }
+
+  it("rejects ungroup if a newly exposed collapsed descendant lacks a boundary") {
+    auto data = nested_group_fixture();
+    for (auto &group : data.groups) {
+      if (group.id == "outer") group.collapsed = true;
+      if (group.id == "middle") {
+        group.collapsed = true;
+        group.proxy_ports.clear();
+      }
+    }
+    GraphEditDocument doc;
+    check_true(static_cast<bool>(doc.initialize(std::move(data))));
+    const auto original = doc.snapshot();
+    check_equal(original.routes.size(), 1U);
+    std::string encoded;
+    check_true(static_cast<bool>(doc.save_json(encoded)));
+    const auto bad = doc.remove_group("outer");
+    check_false(static_cast<bool>(bad));
+    check(bad.error == GraphEditError::InvalidInput);
+    check_equal(doc.snapshot().revision, original.revision);
+    check_equal(doc.snapshot().groups.size(), original.groups.size());
+    check_equal(group_by_id(doc, "middle")->parent_group_id, "outer");
+    check_equal(group_by_id(doc, "middle")->x, 30.0);
+    check_equal(doc.snapshot().routes.size(), 1U);
+    check_true(route_points_identical(
+        doc.snapshot().routes[0], original.routes[0]));
+    check_equal(doc.undo_count(), 0U);
+    std::string after;
+    check_true(static_cast<bool>(doc.save_json(after)));
+    check_equal(after, encoded);
+  }
+
+  it("refuses a live gesture and stale worker while leaving history atomic") {
+    GraphEditDocument doc;
+    check_true(static_cast<bool>(doc.initialize(nested_group_fixture())));
+    check_true(static_cast<bool>(doc.begin_group_move("inner")));
+    const auto revision = doc.snapshot().revision;
+    auto status = doc.remove_group("middle");
+    check_false(static_cast<bool>(status));
+    check(status.error == GraphEditError::Busy);
+    check_equal(doc.snapshot().revision, revision);
+    check_equal(doc.undo_count(), 0U);
+    doc.cancel_move();
+
+    charts::ui::GraphRouteWorker worker;
+    check_true(static_cast<bool>(worker.submit_move(
+        doc, "c", 12.0, 0.0, 201)));
+    check_true(static_cast<bool>(doc.remove_group("middle")));
+    const auto new_revision = doc.snapshot().revision;
+    worker.wait();
+    auto result = worker.poll();
+    check_true(static_cast<bool>(result));
+    if (!result) return;
+    const auto rejected = doc.accept_prepared_move(
+        std::move(*result), 201);
+    check_false(static_cast<bool>(rejected));
+    check(rejected.error == GraphEditError::Conflict);
+    check_equal(doc.snapshot().revision, new_revision);
+    check_equal(doc.undo_count(), 1U);
+    status = doc.remove_group("missing");
+    check_false(static_cast<bool>(status));
+    check(status.error == GraphEditError::MissingGroup);
+    check_equal(doc.snapshot().revision, new_revision);
+  }
+
+  it("physically retires only the removed group semantic leaves in the one Box") {
+    auto document = std::make_shared<GraphEditDocument>();
+    check_true(static_cast<bool>(document->initialize(nested_group_fixture())));
+    auto registry = flexUI::WidgetRegistry::builtins();
+    check_false(static_cast<bool>(
+        charts::ui::register_graph_canvas_widget(registry, document)));
+    const auto compiled = flexUI::compile_ui_xml(
+        "<ui name=\"NestedUngroup\"><main id=\"root\">"
+        "<native-graph id=\"graph\" /></main></ui>");
+    check_true(static_cast<bool>(compiled));
+    if (!compiled) return;
+    flexUI::Box box(nullptr);
+    check_true(static_cast<bool>(flexUI::UiDocumentInstantiator::instantiate(
+        box, *compiled.program, registry)));
+    auto *root = box.get_by_id("root");
+    auto *graph = box.get_by_id("graph");
+    check_not_null(root); check_not_null(graph);
+    if (!root || !graph) return;
+    root->set_layout_bounds(0, 0, 900, 300);
+    graph->set_layout_bounds(0, 0, 900, 300);
+    box.update();
+    const auto base_count = box.owned_element_count();
+    check_equal(graph->child_count(), 16U);
+    const auto part_by_key = [&](std::string_view id) -> flexUI::Element * {
+      for (auto *raw : graph->children()) {
+        auto *part = static_cast<flexUI::Element *>(raw);
+        const auto *name = part->attribute("part");
+        if (name && *name == id) return part;
+      }
+      return nullptr;
+    };
+    auto *inner_part = part_by_key("node:group@inner");
+    auto *middle_part = part_by_key("node:group@middle");
+    check_not_null(inner_part); check_not_null(middle_part);
+    if (!inner_part || !middle_part) return;
+
+    check_true(static_cast<bool>(document->remove_group("middle")));
+    box.update();
+    check(box.last_widget_part_error() == flexUI::BoxWidgetPartError::None);
+    check_equal(box.owned_element_count(), base_count - 2U);
+    check_equal(graph->child_count(), 14U);
+    check_null(part_by_key("node:group@middle"));
+    check_null(part_by_key("port:middle-out"));
+    check(part_by_key("node:group@inner") == inner_part);
+    check_equal(group_by_id(*document, "inner")->parent_group_id, "outer");
+
+    check_true(static_cast<bool>(document->undo()));
+    box.update();
+    check_equal(box.owned_element_count(), base_count);
+    check_equal(graph->child_count(), 16U);
+    check(part_by_key("node:group@inner") == inner_part);
+    auto *restored_middle = part_by_key("node:group@middle");
+    check_not_null(restored_middle);
+    if (!restored_middle) return;
+
+    // A focused leaf is borrowed even after the logical GroupId disappears.
+    box.set_focus(restored_middle);
+    check_true(static_cast<bool>(document->remove_group("middle")));
+    box.update();
+    check(box.last_widget_part_error() ==
+          flexUI::BoxWidgetPartError::BorrowedPart);
+    check_equal(box.owned_element_count(), base_count);
+    check(box.focused_element() == restored_middle);
+    box.set_focus(nullptr);
+    box.update();
+    check(box.last_widget_part_error() == flexUI::BoxWidgetPartError::None);
+    check_equal(box.owned_element_count(), base_count - 2U);
+    check_equal(graph->child_count(), 14U);
+    check(part_by_key("node:group@inner") == inner_part);
+  }
+}
+
 spec("GraphCanvas M2g keyboard node deletion through one Box owner") {
   it("handles real Delete/Backspace and Ctrl-Z/Y with stable surviving parts") {
     auto doc = std::make_shared<GraphEditDocument>();
