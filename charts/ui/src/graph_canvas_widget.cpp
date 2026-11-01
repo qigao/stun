@@ -82,6 +82,13 @@ const GraphEditNode *find_node(const GraphEditSnapshot &snapshot,
   return nullptr;
 }
 
+bool is_group_proxy(const GraphEditDocument &model,
+                    std::string_view id) {
+  for (const auto &group : model.snapshot().groups)
+    if (group.collapsed && id == "group@" + group.id) return true;
+  return false;
+}
+
 bool node_rect(const GraphEditNode &node, const Interaction &interaction,
                const GraphEditDocument &document, double &x, double &y,
                double &w, double &h) {
@@ -232,14 +239,20 @@ void sync_semantic_parts(const GraphEditDocument &model,
     }
   };
 
+  const auto set_visibility = [](flexUI::Element &part, bool visible) {
+    const std::string desired = visible ? "false" : "true";
+    const auto *current = part.attribute("aria-hidden");
+    if (!current || *current != desired)
+      part.set_attribute("aria-hidden", desired);
+  };
   for (const auto &slot : state.semantic_nodes) {
     const auto *node = find_node(snapshot, slot.id);
     if (!node) {
       update_bounds(*slot.element, 0.0, 0.0, 0.0, 0.0);
-      slot.element->set_attribute("aria-hidden", "true");
+      set_visibility(*slot.element, false);
       continue;
     }
-    slot.element->set_attribute("aria-hidden", "false");
+    set_visibility(*slot.element, true);
     double x, y, w, h;
     if (!node_rect(*node, state, model, x, y, w, h)) continue;
     update_bounds(*slot.element, x, y, w, h);
@@ -261,7 +274,7 @@ void sync_semantic_parts(const GraphEditDocument &model,
     for (const auto &port : snapshot.ports) {
       if (port.id != slot.id) continue;
       found = true;
-      slot.element->set_attribute("aria-hidden", "false");
+      set_visibility(*slot.element, true);
       double x, y;
       if (port_anchor(model, snapshot, port, state, x, y))
         update_bounds(*slot.element, x - 7.0, y - 7.0, 14.0, 14.0);
@@ -269,7 +282,7 @@ void sync_semantic_parts(const GraphEditDocument &model,
     }
     if (!found) {
       update_bounds(*slot.element, 0.0, 0.0, 0.0, 0.0);
-      slot.element->set_attribute("aria-hidden", "true");
+      set_visibility(*slot.element, false);
     }
   }
   const auto *old_routing = host.attribute("data-routing");
@@ -351,7 +364,7 @@ void paint_canvas(const GraphEditDocument &model, const Interaction &interaction
     commands.draw_rect(static_cast<float>(x), static_cast<float>(y),
                        static_cast<float>(w), static_cast<float>(h), 6.0F,
                        fill, outline, selected ? 2.0F : 1.0F);
-    const bool proxy = node.id.rfind("group@", 0) == 0;
+    const bool proxy = is_group_proxy(model, node.id);
     commands.draw_text(proxy ? "GROUP " + node.id.substr(6) + " [+]" : node.id,
                        static_cast<float>(x + 12.0),
                        static_cast<float>(y + 26.0), "Arial", 12.0F, true, light);
@@ -529,7 +542,7 @@ bool handle_input(Interaction &state, GraphEditDocument &model,
       return true;
     }
     if (const auto node = hit_node(model, state, x, y)) {
-      if (node->id.rfind("group@", 0) == 0) {
+      if (is_group_proxy(model, node->id)) {
         const auto result = model.set_group_collapsed(node->id.substr(6), false);
         state.selected_node.clear();
         state.status_message = result ? "" : result.message;
