@@ -1359,6 +1359,206 @@ bool Box::retire_structural_subtree_impl(
   }
 }
 
+// M2e: the linked Widget owns only semantic LEAF identities; the Box owns
+// their Element storage and the single live topology. This does not relax
+// compiled XML subtree/Widget teardown guards (#298/#375).
+BoxWidgetPartError Box::reconcile_widget_parts(
+    Widget &widget,
+    const std::vector<WidgetSemanticPart> &desired) noexcept {
+  if (std::this_thread::get_id() != owning_thread_)
+    return BoxWidgetPartError::WrongThread;
+  if (events_.is_dispatching() || borrowed_tree_depth_ != 0)
+    return BoxWidgetPartError::Busy;
+  constexpr std::size_t kMaximumParts = 1024;
+  if (desired.size() > kMaximumParts)
+    return BoxWidgetPartError::CapacityExceeded;
+
+  try {
+    Element *host = widget.host_element_;
+    if (!host || !owns_element(host) || host->widget != &widget ||
+        !host->parent_elem() ||
+        std::find_if(widgets_.begin(), widgets_.end(),
+                     [&](const std::unique_ptr<Widget> &ptr) {
+                       return ptr.get() == &widget;
+                     }) == widgets_.end() ||
+        std::find(active_widgets_.begin(), active_widgets_.end(), host) ==
+            active_widgets_.end() ||
+        host->is_widget_owned() ||
+        host->child_count() != widget.parts_.size())
+      return BoxWidgetPartError::InvalidHost;
+
+    // The host must actually be mounted. A staged (or retired) host must
+    // never admit a new Widget part by pointer identity alone.
+    Element *ancestor = host;
+    std::size_t hops = 0;
+    while (ancestor != root_) {
+      if (!ancestor || ++hops > elements_.size())
+        return BoxWidgetPartError::InvalidHost;
+      ancestor = ancestor->parent_elem();
+    }
+
+    std::unordered_set<Element *> original;
+    original.reserve(widget.parts_.size());
+    for (const auto &[key, part] : widget.parts_) {
+      if (!part || !original.insert(part).second ||
+          part->owner_box_ != this || part->parent_elem() != host ||
+          !part->is_widget_owned() || part->widget ||
+          !part->id().empty() || part->child_count() != 0 ||
+          !part->attribute("part") ||
+          Symbol(*part->attribute("part")) != key)
+        return BoxWidgetPartError::InvalidHost;
+    }
+    for (auto *item : host->children())
+      if (!original.count(static_cast<Element *>(item)))
+        return BoxWidgetPartError::InvalidHost;
+
+    const auto safe_name = [](const std::string &name, std::size_t maximum) {
+      if (name.empty() || name.size() > maximum) return false;
+      for (const unsigned char ch : name)
+        if (ch < 0x20 || ch == 0x7f) return false;
+      return true;
+    };
+    const auto safe_tag = [](const std::string &tag) {
+      if (tag.empty() || tag.size() > 48) return false;
+      for (const char ch : tag)
+        if (!((ch >= 'a' && ch <= 'z') ||
+              (ch >= '0' && ch <= '9') || ch == '-')) return false;
+      return true;
+    };
+    std::unordered_map<Symbol, Element *, SymbolHash> next;
+    next.reserve(desired.size());
+    std::vector<std::unique_ptr<Element>> staged;
+    staged.reserve(desired.size());
+    std::vector<flex::Node::RawPtr> children;
+    children.reserve(desired.size());
+    std::unordered_set<Element *> retained;
+    retained.reserve(desired.size());
+    for (const auto &spec : desired) {
+      if (!safe_name(spec.name, 128) || !safe_tag(spec.tag) ||
+          spec.attributes.size() > 16)
+        return BoxWidgetPartError::InvalidSpec;
+      std::unordered_set<std::string> attribute_names;
+      attribute_names.reserve(spec.attributes.size());
+      for (const auto &[name, value] : spec.attributes) {
+        if (!safe_name(name, 64) || value.size() > 512 ||
+            !(name == "role" || name.rfind("data-", 0) == 0 ||
+              name.rfind("aria-", 0) == 0) ||
+            !attribute_names.insert(name).second)
+          return BoxWidgetPartError::InvalidSpec;
+      }
+      const Symbol key(spec.name);
+      Element *part = nullptr;
+      if (const auto found = widget.parts_.find(key);
+          found != widget.parts_.end()) {
+        part = found->second;
+        // Stable name cannot silently change widget semantic role/tag.
+        if (!part || part->tag() != spec.tag)
+          return BoxWidgetPartError::InvalidSpec;
+        retained.insert(part);
+      } else {
+        auto fresh = std::make_unique<Element>();
+        fresh->set_tag(spec.tag);
+        fresh->ownership_ = ElementOwnership::Widget;
+        fresh->set_attribute("part", spec.name);
+        fresh->set_attribute("aria-hidden", "true");
+        for (const auto &[name, value] : spec.attributes)
+          fresh->set_attribute(name, value);
+        part = fresh.get();
+        staged.push_back(std::move(fresh));
+      }
+      if (!next.emplace(key, part).second)
+        return BoxWidgetPartError::InvalidSpec;
+      children.push_back(part);
+    }
+
+    // The event dispatcher, compiled Binding evaluator and layout/render
+    // may borrow a leaf even when the Widget itself has no pointer capture.
+    // Fail CLOSED; never fake safe unmount by hiding the part.
+    std::unordered_set<Element *> retiring;
+    retiring.reserve(widget.parts_.size());
+    for (const auto &[name, part] : widget.parts_) {
+      if (retained.count(part)) continue;
+      if (part->is_focus() || part->is_hover() || part->is_active() ||
+          part->click_callback() || bindings_.has_binding_target(part) ||
+          keyed_repeater_hosts_.count(part) != 0 ||
+          part == events_.focused_element() ||
+          part == events_.hovered_element() ||
+          part == events_.active_element() ||
+          part == events_.capturing_element())
+        return BoxWidgetPartError::BorrowedPart;
+      static constexpr const char *handlers[] = {
+          "data-flexui-on-click", "data-flexui-on-mouse_move",
+          "data-flexui-on-mouse_down", "data-flexui-on-mouse_up",
+          "data-flexui-on-key_down", "data-flexui-on-key_up",
+          "data-flexui-on-focus_in", "data-flexui-on-focus_out"};
+      for (const char *handler : handlers)
+        if (part->has_attribute(handler))
+          return BoxWidgetPartError::BorrowedPart;
+      retiring.insert(part);
+    }
+    // Rebuild full ownership maps before touching the active tree. Failure
+    // here retains the entire old topology and Widget::parts_ map.
+    if (elements_.size() > elements_.max_size() - staged.size())
+      return BoxWidgetPartError::CapacityExceeded;
+    elements_.reserve(elements_.size() + staged.size());
+
+    // The underlying Group replacement preallocates its child vector and
+    // swaps ONLY after the allocation succeeded, preserving old topology
+    // across bad_alloc. New nodes are still local unique_ptrs until success.
+    for (auto &item : staged) item->owner_box_ = this;
+    host->flex::Group::replace_children_prevalidated(children);
+    for (auto &item : staged) elements_.push_back(std::move(item));
+    widget.parts_.swap(next);
+    // No external application callback, CMake/DLL runtime or new
+    // allocation is invoked while retiring the old, unborrowed leaves.
+    for (Element *part : retiring) {
+      const auto address = reinterpret_cast<std::uintptr_t>(part);
+      transitions_.clear_element(address);
+      animations_.clear_element(address);
+      styled_elements_.erase(address);
+      container_widths_.erase(part);
+      style_engine_.forget_element(part);
+    }
+    elements_.erase(
+        std::remove_if(elements_.begin(), elements_.end(),
+                       [&](const std::unique_ptr<Element> &element) {
+                         return retiring.count(element.get()) != 0;
+                       }), elements_.end());
+    host->mark_tree_structure_dirty();
+    host->mark_paint_dirty();
+    return BoxWidgetPartError::None;
+  } catch (...) {
+    return BoxWidgetPartError::AllocationFailed;
+  }
+}
+
+void Box::refresh_dynamic_widget_parts() noexcept {
+  if (std::this_thread::get_id() != owning_thread_ ||
+      borrowed_tree_depth_ != 0 || events_.is_dispatching() ||
+      refreshing_widget_parts_ || !root_) return;
+  refreshing_widget_parts_ = true;
+  // callbacks are trusted LINKED widgets; their descriptors are copied
+  // before the owner commits anything. Never call them from the mutation
+  // itself, so no incomplete Widget parts can become externally visible.
+  for (Element *host : active_widgets_) {
+    if (!host || !host->widget) continue;
+    Widget &widget = *host->widget;
+    try {
+      const auto epoch = widget.dynamic_parts_revision();
+      if (!epoch || epoch == widget.last_semantic_part_revision_) continue;
+      const auto desired = widget.desired_dynamic_parts();
+      if (widget.dynamic_parts_revision() != epoch) continue;
+      const auto status = reconcile_widget_parts(widget, desired);
+      widget_part_error_ = status;
+      if (status == BoxWidgetPartError::None)
+        widget.last_semantic_part_revision_ = epoch;
+    } catch (...) {
+      widget_part_error_ = BoxWidgetPartError::AllocationFailed;
+    }
+  }
+  refreshing_widget_parts_ = false;
+}
+
 Element* Box::create(const std::string& tag, const std::string& id) {
   auto elem = std::make_unique<Element>();
   elem->set_tag(tag);
@@ -1591,13 +1791,17 @@ bool Box::style_state_affects_selectors(Symbol state) const {
 }
 
 void Box::update() {
-  struct TreeBorrowScope {
-    std::size_t &depth;
-    explicit TreeBorrowScope(std::size_t &value) noexcept : depth(value) { ++depth; }
-    ~TreeBorrowScope() { --depth; }
-  } guard(borrowed_tree_depth_);
-  bindings_.update();
-  pipeline_->update(*this);
+  refresh_dynamic_widget_parts();
+  {
+    struct TreeBorrowScope {
+      std::size_t &depth;
+      explicit TreeBorrowScope(std::size_t &value) noexcept : depth(value) { ++depth; }
+      ~TreeBorrowScope() { --depth; }
+    } guard(borrowed_tree_depth_);
+    bindings_.update();
+    pipeline_->update(*this);
+  }
+  refresh_dynamic_widget_parts();
 }
 
 ViewLifecycleState Box::lifecycle_state() const {
@@ -1610,31 +1814,31 @@ void Box::invalidate() {
 
 void Box::dispatch_event(Event& event) {
   events_.dispatch(event, root_);
+  refresh_dynamic_widget_parts();
 }
 
 void Box::update_time(float delta_ms) {
-  // Widget::update() is application-extensible and may synchronously attempt
-  // mutation while active_widgets_ and animation state borrow pointers.
-  struct TreeBorrowScope {
-    std::size_t &depth;
-    explicit TreeBorrowScope(std::size_t &value) noexcept : depth(value) { ++depth; }
-    ~TreeBorrowScope() { --depth; }
-  } guard(borrowed_tree_depth_);
-  time_ms_ += delta_ms;
-  transitions_.update(time_ms_);
-  animations_.update(time_ms_);
-  for (size_t i = 0; i < active_widgets_.size(); ++i) {
-    auto* elem = active_widgets_[i];
-    if (elem && !is_visible_in_tree(elem)) {
-      continue;
+  // The reconciliation may retire Widget-owned leaves only AFTER the frame
+  // loop releases every borrowed host/part pointer.
+  {
+    struct TreeBorrowScope {
+      std::size_t &depth;
+      explicit TreeBorrowScope(std::size_t &value) noexcept : depth(value) { ++depth; }
+      ~TreeBorrowScope() { --depth; }
+    } guard(borrowed_tree_depth_);
+    time_ms_ += delta_ms;
+    transitions_.update(time_ms_);
+    animations_.update(time_ms_);
+    for (size_t i = 0; i < active_widgets_.size(); ++i) {
+      auto* elem = active_widgets_[i];
+      if (elem && !is_visible_in_tree(elem)) continue;
+      if (elem && elem->widget && elem->widget->needs_frame_update(*elem))
+        elem->widget->update(delta_ms, *elem);
     }
-    if (elem && elem->widget && elem->widget->needs_frame_update(*elem)) {
-      elem->widget->update(delta_ms, *elem);
-    }
+    if (transitions_.has_any_active() || animations_.has_any_active(time_ms_))
+      mark_visible_active_effects_dirty(root_, transitions_, animations_, time_ms_);
   }
-  if (transitions_.has_any_active() || animations_.has_any_active(time_ms_)) {
-    mark_visible_active_effects_dirty(root_, transitions_, animations_, time_ms_);
-  }
+  refresh_dynamic_widget_parts();
 }
 
 void Box::register_active_widget(Element* elem) {
