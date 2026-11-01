@@ -187,6 +187,17 @@ public:
   GraphEditStatus group_nodes(std::string group_id,
                               std::vector<std::string> node_ids,
                               double padding = 16.0);
+  // M2j: explicit measured boundary authoring. Original PortIds and the
+  // actual group-local edge coordinates must be supplied by the caller,
+  // never synthesized by GraphLayout or nearest-obstacle inference.
+  // The bulk setter admits every crossing port in ONE atomic transaction.
+  GraphEditStatus set_group_boundary_ports(
+      std::string_view group_id,
+      std::vector<GraphEditGroupProxyPort> bindings);
+  GraphEditStatus upsert_group_boundary_port(
+      std::string_view group_id, GraphEditGroupProxyPort binding);
+  GraphEditStatus remove_group_boundary_port(
+      std::string_view group_id, std::string_view proxy_port_id);
   // Ungroup one nested group atomically. Direct child groups are reparented
   // with world-space geometry preserved; direct original leaves inherit the
   // parent, or become ungrouped at root. One full native-route validation
