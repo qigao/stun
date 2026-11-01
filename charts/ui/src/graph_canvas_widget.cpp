@@ -18,8 +18,9 @@ namespace {
 constexpr double kMinZoom = 0.5;
 constexpr double kMaxZoom = 3.0;
 constexpr double kPortHitRadiusPx = 11.0;
+constexpr double kDragStartThresholdPx = 4.0;
 
-enum class GestureMode { Idle, MoveNode, Connect, Pan };
+enum class GestureMode { Idle, ArmedNode, MoveNode, Connect, Pan };
 
 struct Interaction {
   GraphCanvasViewport view;
@@ -270,11 +271,15 @@ bool handle_input(Interaction &state, GraphEditDocument &model,
     }
     if (const auto *node = hit_node(model, state, x, y)) {
       state.selected_node = node->id;
-      const auto status = model.begin_move(node->id);
-      state.status_message = status ? "" : status.message;
-      if (status) {
-        state.mode = GestureMode::MoveNode;
+      if (!node->locked) {
+        // Reserve capture for the gesture, but do NOT begin a document
+        // transaction until the pointer moves beyond the CSS-pixel threshold.
+        // A normal click must not generate an Undo entry or dirty routes.
+        state.mode = GestureMode::ArmedNode;
+        state.status_message.clear();
         widget.request_pointer_capture();
+      } else {
+        state.status_message = "Node is locked";
       }
       element.mark_paint_dirty();
       return true;
@@ -291,10 +296,24 @@ bool handle_input(Interaction &state, GraphEditDocument &model,
       state.view.pan_y += y - state.previous_y;
       state.previous_x = x;
       state.previous_y = y;
-    } else if (state.mode == GestureMode::MoveNode) {
+    } else if (state.mode == GestureMode::ArmedNode ||
+               state.mode == GestureMode::MoveNode) {
+      const double dx = x - state.press_x, dy = y - state.press_y;
+      if (state.mode == GestureMode::ArmedNode) {
+        if (dx * dx + dy * dy <=
+            kDragStartThresholdPx * kDragStartThresholdPx) {
+          return true; // Still a click, not a graph-document preview.
+        }
+        const auto started = model.begin_move(state.selected_node);
+        if (!started) {
+          state.status_message = started.message;
+          cancel(state, model, widget, element);
+          return true;
+        }
+        state.mode = GestureMode::MoveNode;
+      }
       const auto status = model.preview_move(
-          (x - state.press_x) / state.view.zoom,
-          (y - state.press_y) / state.view.zoom);
+          dx / state.view.zoom, dy / state.view.zoom);
       if (!status) state.status_message = status.message;
     }
     element.mark_paint_dirty();

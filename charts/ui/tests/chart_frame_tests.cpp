@@ -683,8 +683,27 @@ spec("GraphCanvas M0 uses real FlexUI Box-owned XML and EventDispatcher") {
     check_not_null(native);
     if (!native) return;
 
+    // An ordinary click and sub-threshold drift never create a preview,
+    // route recomputation, or Undo transaction.
+    const auto click_revision = model->snapshot().revision;
+    auto click_down = flexUI::Event::mouse_down(85, 56);
+    box.dispatch_event(click_down);
+    check_true(click_down.handled);
+    check(box.capturing_element() == graph);
+    auto micro_move = flexUI::Event::mouse_move(87, 57);
+    box.dispatch_event(micro_move);
+    check_true(micro_move.handled);
+    check_false(model->has_preview());
+    auto click_up = flexUI::Event::mouse_up(87, 57);
+    box.dispatch_event(click_up);
+    check_true(click_up.handled);
+    check_null(box.capturing_element());
+    check_equal(model->snapshot().revision, click_revision);
+    check_equal(model->undo_count(), 0U);
+
     auto down = flexUI::Event::mouse_down(85, 56);
     box.dispatch_event(down);
+    check_false(model->has_preview());
     check_true(down.handled);
     check(box.capturing_element() == graph);
     auto move = flexUI::Event::mouse_move(117, 70);
@@ -701,9 +720,10 @@ spec("GraphCanvas M0 uses real FlexUI Box-owned XML and EventDispatcher") {
 
     auto cancel_down = flexUI::Event::mouse_down(110, 70);
     box.dispatch_event(cancel_down);
-    check_true(model->has_preview());
+    check_false(model->has_preview());
     auto cancel_move = flexUI::Event::mouse_move(130, 90);
     box.dispatch_event(cancel_move);
+    check_true(model->has_preview());
     auto esc = flexUI::Event::key_down(flexUI::KeyCode::Escape);
     box.dispatch_event(esc);
     check_true(esc.handled);
@@ -713,6 +733,9 @@ spec("GraphCanvas M0 uses real FlexUI Box-owned XML and EventDispatcher") {
 
     auto blur_down = flexUI::Event::mouse_down(110, 70);
     box.dispatch_event(blur_down);
+    check_false(model->has_preview());
+    auto blur_move = flexUI::Event::mouse_move(135, 80);
+    box.dispatch_event(blur_move);
     check_true(model->has_preview());
     box.set_focus(nullptr);
     check_false(model->has_preview());
@@ -735,5 +758,71 @@ spec("GraphCanvas M0 uses real FlexUI Box-owned XML and EventDispatcher") {
     flexUI::RenderCommandList render(flex::RendererCapabilities{});
     native->emit_render_commands(*graph, render);
     check_true(render.commands().size() > 6);
+  }
+
+  it("isolates two mounted native GraphCanvas models and capture owners") {
+    auto first = std::make_shared<GraphEditDocument>();
+    auto second = std::make_shared<GraphEditDocument>();
+    check_true(static_cast<bool>(first->initialize(example(false))));
+    check_true(static_cast<bool>(second->initialize(example(false))));
+    auto registry_a = flexUI::WidgetRegistry::builtins();
+    auto registry_b = flexUI::WidgetRegistry::builtins();
+    check_false(static_cast<bool>(charts::ui::register_graph_canvas_widget(
+        registry_a, first)));
+    check_false(static_cast<bool>(charts::ui::register_graph_canvas_widget(
+        registry_b, second)));
+    const auto compiled = flexUI::compile_ui_xml(
+        "<ui name=\"TwoGraphs\"><main id=\"root\">"
+        "<native-graph id=\"graph\" /></main></ui>");
+    check_true(static_cast<bool>(compiled));
+    if (!compiled) return;
+    flexUI::Box box_a(nullptr), box_b(nullptr);
+    check_true(static_cast<bool>(flexUI::UiDocumentInstantiator::instantiate(
+        box_a, *compiled.program, registry_a)));
+    check_true(static_cast<bool>(flexUI::UiDocumentInstantiator::instantiate(
+        box_b, *compiled.program, registry_b)));
+    auto *a = box_a.get_by_id("graph"), *b = box_b.get_by_id("graph");
+    check_not_null(a);
+    check_not_null(b);
+    if (!a || !b) return;
+    for (auto *elem : {a, b}) elem->set_layout_bounds(0, 0, 832, 160);
+    box_a.get_by_id("root")->set_layout_bounds(0, 0, 832, 160);
+    box_b.get_by_id("root")->set_layout_bounds(0, 0, 832, 160);
+
+    auto down_a = flexUI::Event::mouse_down(85, 56);
+    box_a.dispatch_event(down_a);
+    auto move_a = flexUI::Event::mouse_move(117, 70);
+    box_a.dispatch_event(move_a);
+    check_true(first->has_preview());
+    check_false(second->has_preview());
+    check(box_a.capturing_element() == a);
+    check_null(box_b.capturing_element());
+
+    auto down_b = flexUI::Event::mouse_down(85, 56);
+    box_b.dispatch_event(down_b);
+    auto move_b = flexUI::Event::mouse_move(105, 64);
+    box_b.dispatch_event(move_b);
+    check_true(second->has_preview());
+    check(box_b.capturing_element() == b);
+    check_equal(first->snapshot().revision, std::uint64_t{1});
+    check_equal(second->snapshot().revision, std::uint64_t{1});
+
+    auto esc_a = flexUI::Event::key_down(flexUI::KeyCode::Escape);
+    box_a.dispatch_event(esc_a);
+    check_true(esc_a.handled);
+    check_false(first->has_preview());
+    check_true(second->has_preview());
+    check_null(box_a.capturing_element());
+    check(box_b.capturing_element() == b);
+
+    auto up_b = flexUI::Event::mouse_up(105, 64);
+    box_b.dispatch_event(up_b);
+    check_true(up_b.handled);
+    check_false(second->has_preview());
+    check_null(box_b.capturing_element());
+    check_equal(node_by_id(*first, "alpha")->x, 55.0);
+    check_equal(node_by_id(*second, "alpha")->x, 75.0);
+    check_equal(first->undo_count(), 0U);
+    check_equal(second->undo_count(), 1U);
   }
 }
