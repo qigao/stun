@@ -1369,6 +1369,204 @@ GraphEditSnapshot sibling_group_fixture() {
 // M2e: real linked Box/WidgetRegistry after the original XML mount.
 // The only mutable semantic Element arena is the original Box; repeated
 // NodeId/PortId/GroupId insert/delete must not grow it indefinitely.
+// M2f: actual editor-native Node/Port topology transactions. JSON document
+// replacement from M2d remains an import operation and intentionally clears
+// history; these mutations preserve the SAME GraphEditDocument Undo/Redo.
+spec("GraphCanvas M2f in-place topology edits and history") {
+  it("adds one node with measured ports atomically and prunes connected ports") {
+    GraphEditDocument doc;
+    check_true(static_cast<bool>(doc.initialize(example(false))));
+    const auto baseline = doc.snapshot();
+    const GraphEditNode gamma{"gamma", 740.0, 36.0, 80.0, 72.0, false};
+    const std::vector<charts::ui::GraphEditPort> gamma_ports = {
+        {"gamma-in", "gamma", gl::Side::West, 0.0, 36.0, false},
+        {"gamma-out", "gamma", gl::Side::East, 80.0, 36.0, true}};
+    check_true(static_cast<bool>(doc.add_node(gamma, gamma_ports)));
+    check_equal(doc.snapshot().nodes.size(), 3U);
+    check_equal(doc.snapshot().ports.size(), 4U);
+    check_equal(doc.undo_count(), 1U); // node + both ports, ONE transaction
+    check_equal(doc.snapshot().revision, baseline.revision + 1);
+
+    check_true(static_cast<bool>(doc.add_port(
+        {"beta-out", "beta", gl::Side::East, 120.0, 36.0, true})));
+    check_true(static_cast<bool>(
+        doc.connect("beta-out", "gamma-in", "bridge")));
+    check_equal(doc.snapshot().edges.size(), 1U);
+    check_equal(doc.snapshot().routes.size(), 1U);
+    const auto original_route = doc.snapshot().routes.front();
+
+    check_true(static_cast<bool>(doc.remove_port("gamma-in")));
+    check_equal(doc.snapshot().edges.size(), 0U);
+    check_equal(doc.snapshot().routes.size(), 0U);
+    check_equal(doc.snapshot().ports.size(), 4U);
+    check_equal(doc.undo_count(), 4U);
+    check_true(static_cast<bool>(doc.undo()));
+    check_equal(doc.snapshot().ports.size(), 5U);
+    check_equal(doc.snapshot().edges.size(), 1U);
+    check_true(route_points_identical(
+        doc.snapshot().routes.front(), original_route));
+    check_true(static_cast<bool>(doc.redo()));
+    check_equal(doc.snapshot().edges.size(), 0U);
+
+    check_true(static_cast<bool>(doc.undo()));
+    check_true(static_cast<bool>(doc.undo()));
+    check_true(static_cast<bool>(doc.undo()));
+    check_equal(doc.snapshot().nodes.size(), baseline.nodes.size());
+    check_equal(doc.snapshot().ports.size(), baseline.ports.size());
+    check_equal(doc.snapshot().edges.size(), baseline.edges.size());
+    check_equal(doc.undo_count(), 0U);
+  }
+
+  it("cascades node deletion through a collapsed group proxy with one Undo") {
+    GraphEditDocument doc;
+    check_true(static_cast<bool>(doc.initialize(example(false))));
+    check_true(static_cast<bool>(doc.add_node(
+        {"gamma", 740.0, 36.0, 80.0, 72.0, false},
+        {{"gamma-out", "gamma", gl::Side::East, 80.0, 36.0, true}})));
+    charts::ui::GraphEditGroup group;
+    group.id = "pack";
+    group.x = 710.0; group.y = 20.0;
+    group.width = 160.0; group.height = 110.0;
+    group.member_node_ids = {"gamma"};
+    group.proxy_ports.push_back(
+        {"pack-out", "gamma-out", gl::Side::East, 160.0, 52.0});
+    check_true(static_cast<bool>(doc.add_group(group)));
+    check_true(static_cast<bool>(doc.set_group_collapsed("pack", true)));
+    GraphEditSnapshot prior = doc.snapshot();
+    const auto before = doc.undo_count();
+    check_equal(prior.nodes.size(), 3U);
+    check_equal(prior.groups.front().proxy_ports.size(), 1U);
+    check_true(static_cast<bool>(doc.remove_node("gamma")));
+    check_equal(doc.undo_count(), before + 1U);
+    check_equal(doc.snapshot().nodes.size(), 2U);
+    check_equal(doc.snapshot().ports.size(), 2U);
+    check_equal(doc.snapshot().groups.size(), 1U);
+    check_equal(doc.snapshot().groups.front().id, "pack");
+    check_true(doc.snapshot().groups.front().collapsed);
+    check_equal(doc.snapshot().groups.front().member_node_ids.size(), 0U);
+    check_equal(doc.snapshot().groups.front().proxy_ports.size(), 0U);
+    GraphEditSnapshot visible;
+    check_true(static_cast<bool>(doc.visible_snapshot(visible)));
+    check_equal(visible.nodes.size(), 3U); // two originals + empty proxy
+    check_equal(visible.ports.size(), 2U);
+
+    check_true(static_cast<bool>(doc.undo()));
+    check_equal(doc.snapshot().nodes.size(), 3U);
+    check_equal(doc.snapshot().ports.size(), 3U);
+    check_equal(doc.snapshot().groups.front().proxy_ports.size(), 1U);
+    check_equal(doc.snapshot().groups.front().member_node_ids[0], "gamma");
+    check_true(static_cast<bool>(doc.redo()));
+    check_equal(doc.snapshot().nodes.size(), 2U);
+  }
+
+  it("rejects duplicate IDs, unknown ports and locked edits with no publication") {
+    GraphEditDocument doc;
+    check_true(static_cast<bool>(doc.initialize(example(false))));
+    const auto baseline = doc.snapshot();
+    auto bad = doc.add_node(
+        {"alpha", 710.0, 36.0, 80.0, 72.0, false});
+    check_false(static_cast<bool>(bad));
+    check(bad.error == GraphEditError::InvalidInput);
+    bad = doc.add_node(
+        {"gamma", 710.0, 36.0, 80.0, 72.0, false},
+        {{"gamma-in", "beta", gl::Side::West, 0.0, 36.0, false}});
+    check_false(static_cast<bool>(bad));
+    check(bad.error == GraphEditError::InvalidInput);
+    bad = doc.add_port({"orphan", "missing", gl::Side::East, 0.0, 0.0, true});
+    check_false(static_cast<bool>(bad));
+    check(bad.error == GraphEditError::MissingNode);
+    bad = doc.remove_node("missing");
+    check_false(static_cast<bool>(bad));
+    check(bad.error == GraphEditError::MissingNode);
+    bad = doc.remove_port("missing");
+    check_false(static_cast<bool>(bad));
+    check(bad.error == GraphEditError::InvalidInput);
+    check_equal(doc.snapshot().revision, baseline.revision);
+    check_equal(doc.undo_count(), 0U);
+    check_equal(doc.snapshot().nodes.size(), 2U);
+
+    check_true(static_cast<bool>(doc.begin_move("alpha")));
+    bad = doc.add_node({"gamma", 700.0, 36.0, 80.0, 72.0, false});
+    check_false(static_cast<bool>(bad));
+    check(bad.error == GraphEditError::Busy);
+    bad = doc.remove_node("beta");
+    check_false(static_cast<bool>(bad));
+    check(bad.error == GraphEditError::Busy);
+    doc.cancel_move();
+    auto locked = example(false);
+    for (auto &node : locked.nodes)
+      if (node.id == "beta") node.locked = true;
+    check_true(static_cast<bool>(doc.initialize(std::move(locked))));
+    bad = doc.add_port({"beta-out", "beta", gl::Side::East, 120.0, 36.0, true});
+    check_false(static_cast<bool>(bad));
+    check(bad.error == GraphEditError::LockedNode);
+    bad = doc.remove_node("beta");
+    check_false(static_cast<bool>(bad));
+    check(bad.error == GraphEditError::LockedNode);
+  }
+
+  it("refuses old async routing after one live topology transaction") {
+    GraphEditDocument doc;
+    check_true(static_cast<bool>(doc.initialize(example(false))));
+    charts::ui::GraphRouteWorker worker;
+    check_true(static_cast<bool>(worker.submit_move(
+        doc, "alpha", 24.0, 10.0, 101)));
+    check_true(static_cast<bool>(doc.add_node(
+        {"gamma", 740.0, 36.0, 80.0, 72.0, false},
+        {{"gamma-in", "gamma", gl::Side::West, 0.0, 36.0, false}})));
+    const auto revision = doc.snapshot().revision;
+    worker.wait();
+    auto result = worker.poll();
+    check_true(static_cast<bool>(result));
+    if (!result) return;
+    const auto rejected = doc.accept_prepared_move(std::move(*result), 101);
+    check_false(static_cast<bool>(rejected));
+    check(rejected.error == GraphEditError::Conflict);
+    check_equal(doc.snapshot().revision, revision);
+    check_equal(node_by_id(doc, "alpha")->x, 55.0);
+    check_equal(doc.undo_count(), 1U);
+  }
+
+  it("materializes live Node/Port semantic leaves without import history reset") {
+    auto doc = std::make_shared<GraphEditDocument>();
+    check_true(static_cast<bool>(doc->initialize(example(false))));
+    auto registry = flexUI::WidgetRegistry::builtins();
+    check_false(static_cast<bool>(
+        charts::ui::register_graph_canvas_widget(registry, doc)));
+    auto compiled = flexUI::compile_ui_xml(
+        "<ui name=\"GraphTopologyLive\"><main id=\"root\">"
+        "<native-graph id=\"graph\" /></main></ui>");
+    check_true(static_cast<bool>(compiled));
+    if (!compiled) return;
+    flexUI::Box box(nullptr);
+    check_true(static_cast<bool>(flexUI::UiDocumentInstantiator::instantiate(
+        box, *compiled.program, registry)));
+    auto *graph = box.get_by_id("graph");
+    if (!graph) return;
+    box.update();
+    const auto baseline = box.owned_element_count();
+    auto *stable = static_cast<flexUI::Element *>(graph->children()[0]);
+    check_true(static_cast<bool>(doc->add_node(
+        {"gamma", 740.0, 36.0, 80.0, 72.0, false},
+        {{"gamma-in", "gamma", gl::Side::West, 0.0, 36.0, false}})));
+    box.update();
+    check_equal(box.owned_element_count(), baseline + 2U);
+    check_equal(graph->child_count(), 6U);
+    check(graph->children()[0] == stable);
+    check_equal(doc->undo_count(), 1U);
+    check_true(static_cast<bool>(doc->undo()));
+    box.update();
+    check_equal(box.owned_element_count(), baseline);
+    check_equal(graph->child_count(), 4U);
+    check(graph->children()[0] == stable);
+    check_true(static_cast<bool>(doc->redo()));
+    box.update();
+    check_equal(box.owned_element_count(), baseline + 2U);
+    check_equal(doc->undo_count(), 1U);
+    check(box.last_widget_part_error() == flexUI::BoxWidgetPartError::None);
+  }
+}
+
 spec("GraphCanvas M2e dynamic Box-owned semantic leaf reconciliation") {
   it("adds and physically retires graph nodes and ports with stable siblings") {
     auto document = std::make_shared<GraphEditDocument>();
