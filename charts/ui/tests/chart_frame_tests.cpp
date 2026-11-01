@@ -493,6 +493,46 @@ GraphEditSnapshot example(bool connected = true) {
   return data;
 }
 
+GraphEditSnapshot swept_obstacle_graph(bool include_lower_edge = true) {
+  GraphEditSnapshot data;
+  // Two independent routes. The top route initially crosses x=300 at y=70.
+  // An unconnected node moves from y=210 to y=30 and blocks that top route;
+  // bottom route y=380 stays outside the complete swept obstacle envelope.
+  data.nodes = {
+      {"top-left", 30, 30, 100, 80, false},
+      {"top-right", 540, 30, 100, 80, false},
+      {"lower-left", 30, 340, 100, 80, false},
+      {"lower-right", 540, 340, 100, 80, false},
+      {"blocker", 300, 210, 110, 60, false}};
+  data.ports = {
+      {"top-out", "top-left", gl::Side::East, 100, 40, true},
+      {"top-in", "top-right", gl::Side::West, 0, 40, false},
+      {"lower-out", "lower-left", gl::Side::East, 100, 40, true},
+      {"lower-in", "lower-right", gl::Side::West, 0, 40, false}};
+  data.edges = {{"top-route", "top-out", "top-in"}};
+  if (include_lower_edge)
+    data.edges.push_back({"lower-route", "lower-out", "lower-in"});
+  return data;
+}
+
+const charts::ui::GraphEditRoute *route_by_id(
+    const GraphEditSnapshot &snapshot, const std::string &edge_id) {
+  for (const auto &route : snapshot.routes)
+    if (route.edge_id == edge_id) return &route;
+  return nullptr;
+}
+
+bool route_points_identical(const charts::ui::GraphEditRoute &a,
+                            const charts::ui::GraphEditRoute &b) {
+  if (a.edge_id != b.edge_id || a.points.size() != b.points.size())
+    return false;
+  for (std::size_t i = 0; i < a.points.size(); ++i) {
+    if (a.points[i].x != b.points[i].x || a.points[i].y != b.points[i].y)
+      return false;
+  }
+  return true;
+}
+
 const charts::ui::GraphEditNode *node_by_id(const GraphEditDocument &model,
                                              const std::string &id) {
   for (const auto &node : model.snapshot().nodes)
@@ -655,6 +695,127 @@ spec("GraphCanvas M0 application-owned graph editing") {
                              std::numeric_limits<double>::infinity()));
     check_true(view.to_world(70.0, 30.0, wx, wy));
     check_within(wx, 70.0, 0.00001);
+  }
+}
+
+spec("GraphCanvas M1a uses conservative bounded incremental orthogonal routing") {
+  it("reroutes an UNRELATED path when a moved obstacle sweeps its clearance envelope") {
+    GraphEditDocument model;
+    check_true(static_cast<bool>(model.initialize(swept_obstacle_graph())));
+    const auto baseline = model.snapshot();
+    check_equal(baseline.routes.size(), 2U);
+    check_equal(model.last_route_update().rerouted, 2U);
+    check_true(model.last_route_update().full_rebuild);
+    const auto *old_top = route_by_id(baseline, "top-route");
+    const auto *old_bottom = route_by_id(baseline, "lower-route");
+    check_not_null(old_top);
+    check_not_null(old_bottom);
+    if (!old_top || !old_bottom) return;
+
+    check_true(static_cast<bool>(model.begin_move("blocker")));
+    check_true(static_cast<bool>(model.preview_move(0, -180)));
+    check_equal(model.snapshot().revision, baseline.revision);
+    check_true(static_cast<bool>(model.commit_move()));
+    check_equal(model.snapshot().revision, baseline.revision + 1);
+    const auto *new_top = route_by_id(model.snapshot(), "top-route");
+    const auto *new_bottom = route_by_id(model.snapshot(), "lower-route");
+    check_not_null(new_top);
+    check_not_null(new_bottom);
+    if (!new_top || !new_bottom) return;
+    check_false(route_points_identical(*old_top, *new_top));
+    check_true(route_points_identical(*old_bottom, *new_bottom));
+    const auto committed_top = *new_top; // not a dangling snapshot pointer after Undo
+    check_equal(node_by_id(model, "top-left")->x, 30.0);
+    check_equal(node_by_id(model, "lower-right")->y, 340.0);
+    const auto &stats = model.last_route_update();
+    check_equal(stats.committed_revision, model.snapshot().revision);
+    check_equal(stats.total_routes, 2U);
+    check_equal(stats.rerouted, 1U);
+    check_equal(stats.reused, 1U);
+    check_equal(stats.incident_invalidated, 0U);
+    check_equal(stats.obstacle_invalidated, 1U);
+    check_false(stats.full_rebuild);
+
+    // Independent whole-graph routing from scratch is a reference for the
+    // genuinely dirty path, while the unrelated lower path is byte-for-byte
+    // preserved. No smaller obstacle layout was used by the partial search.
+    GraphEditDocument full;
+    auto replay = model.snapshot();
+    replay.routes.clear();
+    check_true(static_cast<bool>(full.initialize(std::move(replay))));
+    const auto *expected_top = route_by_id(full.snapshot(), "top-route");
+    check_not_null(expected_top);
+    if (expected_top) check_true(route_points_identical(*expected_top, *new_top));
+
+    check_true(static_cast<bool>(model.undo()));
+    const auto *undone = route_by_id(model.snapshot(), "top-route");
+    check_not_null(undone);
+    if (undone) check_true(route_points_identical(*old_top, *undone));
+    check_equal(node_by_id(model, "blocker")->y, 210.0);
+    check_equal(model.last_route_update().rerouted, 0U);
+    check_true(static_cast<bool>(model.redo()));
+    const auto *redone = route_by_id(model.snapshot(), "top-route");
+    check_not_null(redone);
+    if (redone) check_true(route_points_identical(committed_top, *redone));
+    check_equal(node_by_id(model, "blocker")->y, 30.0);
+    check_equal(model.snapshot().document_revision, model.snapshot().revision);
+    check_equal(model.snapshot().geometry_revision, model.snapshot().revision);
+  }
+
+  it("reroutes only the newly CONNECTED edge while keeping old paths intact") {
+    GraphEditDocument model;
+    check_true(static_cast<bool>(model.initialize(swept_obstacle_graph(false))));
+    const auto old = model.snapshot();
+    check_equal(old.routes.size(), 1U);
+    check_true(static_cast<bool>(
+        model.connect("lower-out", "lower-in", "lower-route")));
+    const auto *before = route_by_id(old, "top-route");
+    const auto *after = route_by_id(model.snapshot(), "top-route");
+    check_not_null(before);
+    check_not_null(after);
+    if (before && after) check_true(route_points_identical(*before, *after));
+    check_equal(model.last_route_update().rerouted, 1U);
+    check_equal(model.last_route_update().reused, 1U);
+    check_equal(model.last_route_update().incident_invalidated, 1U);
+    check_equal(model.last_route_update().obstacle_invalidated, 0U);
+    check_false(model.last_route_update().full_rebuild);
+  }
+
+  it("keeps revision, route cache and history unchanged after rejected geometry") {
+    GraphEditDocument model;
+    check_true(static_cast<bool>(model.initialize(swept_obstacle_graph())));
+    const auto before = model.snapshot();
+    const auto stats = model.last_route_update();
+    check_true(static_cast<bool>(model.begin_move("blocker")));
+    check_true(static_cast<bool>(model.preview_move(-270, -180)));
+    const auto rejected = model.commit_move(); // overlaps top-left
+    check_false(static_cast<bool>(rejected));
+    check(rejected.error == GraphEditError::InvalidGeometry);
+    check_equal(model.snapshot().revision, before.revision);
+    check_equal(model.snapshot().routes.size(), before.routes.size());
+    check_equal(model.undo_count(), 0U);
+    check_equal(model.last_route_update().committed_revision,
+                stats.committed_revision);
+    check_equal(model.last_route_update().rerouted, stats.rerouted);
+    for (const auto &route : before.routes) {
+      const auto *unchanged = route_by_id(model.snapshot(), route.edge_id);
+      check_not_null(unchanged);
+      if (unchanged) check_true(route_points_identical(route, *unchanged));
+    }
+  }
+
+  it("invalidates incident edges but never moves a different node") {
+    GraphEditDocument model;
+    check_true(static_cast<bool>(model.initialize(example())));
+    check_true(static_cast<bool>(model.begin_move("alpha")));
+    check_true(static_cast<bool>(model.preview_move(32, 14)));
+    check_true(static_cast<bool>(model.commit_move()));
+    check_equal(model.last_route_update().rerouted, 1U);
+    check_equal(model.last_route_update().reused, 0U);
+    check_equal(model.last_route_update().incident_invalidated, 1U);
+    check_equal(model.last_route_update().obstacle_invalidated, 0U);
+    check_equal(node_by_id(model, "beta")->x, 440.0);
+    check_false(model.last_route_update().full_rebuild);
   }
 }
 

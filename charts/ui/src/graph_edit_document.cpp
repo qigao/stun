@@ -6,6 +6,7 @@
 #include <cmath>
 #include <limits>
 #include <map>
+#include <set>
 #include <utility>
 
 namespace charts::ui {
@@ -45,6 +46,63 @@ void set_committed_revisions(GraphEditSnapshot &snapshot,
   snapshot.geometry_revision = revision;
 }
 
+
+struct SweptObstacle {
+  // Conservative broad-phase union of OLD and NEW clearance-inflated bounds.
+  // Touching a boundary may over-invalidate but never silently reuse an edge
+  // that the moved obstacle could block at the committed destination.
+  double left = 0.0, top = 0.0, right = 0.0, bottom = 0.0;
+};
+
+SweptObstacle swept_clearance(const GraphEditNode &old_node,
+                              const GraphEditNode &new_node,
+                              double clearance) noexcept {
+  return {std::min(old_node.x, new_node.x) - clearance,
+          std::min(old_node.y, new_node.y) - clearance,
+          std::max(old_node.x + old_node.width,
+                   new_node.x + new_node.width) + clearance,
+          std::max(old_node.y + old_node.height,
+                   new_node.y + new_node.height) + clearance};
+}
+
+bool route_touches_swept_obstacle(const GraphEditRoute &route,
+                                 const SweptObstacle &region) noexcept {
+  // Earlier committed paths were certified orthogonal; a malformed cache
+  // has to be recomputed rather than trusted.
+  if (route.points.size() < 2) return true;
+  for (std::size_t i = 1; i < route.points.size(); ++i) {
+    const auto a = route.points[i - 1], b = route.points[i];
+    if (!std::isfinite(a.x) || !std::isfinite(a.y) ||
+        !std::isfinite(b.x) || !std::isfinite(b.y) ||
+        (a.x != b.x && a.y != b.y)) return true;
+    if (std::max(a.x, b.x) >= region.left &&
+        std::min(a.x, b.x) <= region.right &&
+        std::max(a.y, b.y) >= region.top &&
+        std::min(a.y, b.y) <= region.bottom) return true;
+  }
+  return false;
+}
+
+bool same_route_schema(const GraphEditSnapshot &a,
+                       const GraphEditSnapshot &b) noexcept {
+  // Dynamic node/port insertion and dimension/port changes are NOT M1a.
+  // Rebuild all on such changes; do not reuse routes with stale anchors.
+  if (a.nodes.size() != b.nodes.size() ||
+      a.ports.size() != b.ports.size()) return false;
+  for (std::size_t i = 0; i < a.nodes.size(); ++i) {
+    const auto &x = a.nodes[i], &y = b.nodes[i];
+    if (x.id != y.id || x.width != y.width || x.height != y.height)
+      return false;
+  }
+  for (std::size_t i = 0; i < a.ports.size(); ++i) {
+    const auto &x = a.ports[i], &y = b.ports[i];
+    if (x.id != y.id || x.node_id != y.node_id ||
+        x.side != y.side || x.local_x != y.local_x ||
+        x.local_y != y.local_y || x.output != y.output) return false;
+  }
+  return true;
+}
+
 GraphEditError routing_error(gl::RouteError error) {
   switch (error) {
   case gl::RouteError::CapacityExceeded: return GraphEditError::CapacityExceeded;
@@ -56,7 +114,10 @@ GraphEditError routing_error(gl::RouteError error) {
 
 } // namespace
 
-GraphEditStatus GraphEditDocument::validate_and_route(GraphEditSnapshot &next) {
+GraphEditStatus GraphEditDocument::validate_and_route(
+    GraphEditSnapshot &next, const GraphEditSnapshot *previous,
+    GraphRouteUpdateStats &stats) {
+  stats = {};
   // The existing geometric router's bounds remain hard constraints, even if
   // the caller could draw a larger graph without routing any connectors.
   if (next.nodes.size() > 256 || next.edges.size() > 1024 ||
@@ -143,32 +204,123 @@ GraphEditStatus GraphEditDocument::validate_and_route(GraphEditSnapshot &next) {
     requests.push_back({from->port, to->port});
   }
 
-  next.routes.clear();
-  if (requests.empty()) return {};
+  stats.total_routes = next.edges.size();
+  const bool reuse_allowed =
+      previous && previous->revision != 0 && same_route_schema(*previous, next) &&
+      previous->routes.size() == previous->edges.size();
+  stats.full_rebuild = !reuse_allowed;
 
-  gl::Routes calculated;
-  const auto status = gl::route_orthogonal(layout, requests, calculated);
-  if (!status) {
-    return reject(routing_error(status.error), "graph routing rejected: " + status.message);
+  // M1a: retain the original validated committed routes only if endpoints
+  // and every swept obstacle dependency are unchanged. A deterministic
+  // bounded segment scan is preferable to a premature parallel spatial
+  // index. Route geometry never leaves the document owner thread.
+  std::set<std::string> moved_nodes;
+  std::vector<SweptObstacle> swept_obstacles;
+  std::map<std::string, const GraphEditEdge *> old_edges;
+  std::map<std::string, const GraphEditRoute *> old_routes;
+  if (reuse_allowed) {
+    for (std::size_t i = 0; i < next.nodes.size(); ++i) {
+      const auto &before = previous->nodes[i], &after = next.nodes[i];
+      if (before.x == after.x && before.y == after.y) continue;
+      moved_nodes.insert(after.id);
+      swept_obstacles.push_back(swept_clearance(before, after, 8.0));
+    }
+    for (const auto &edge : previous->edges) old_edges.emplace(edge.id, &edge);
+    for (const auto &route : previous->routes)
+      old_routes.emplace(route.edge_id, &route);
   }
-  const auto checked = gl::validate_orthogonal_routes(layout, requests, calculated);
-  if (!checked || calculated.edges.size() != next.edges.size()) {
+
+  std::vector<std::size_t> dirty_indices;
+  std::vector<gl::RouteRequest> dirty_requests;
+  gl::Routes combined;
+  combined.edges.resize(next.edges.size());
+  for (std::size_t i = 0; i < next.edges.size(); ++i) {
+    const auto &edge = next.edges[i];
+    bool incident = !reuse_allowed;
+    const GraphEditRoute *prior_route = nullptr;
+    if (reuse_allowed) {
+      const auto prior_edge = old_edges.find(edge.id);
+      const auto route = old_routes.find(edge.id);
+      incident = prior_edge == old_edges.end() ||
+                 prior_edge->second->source_port != edge.source_port ||
+                 prior_edge->second->target_port != edge.target_port ||
+                 route == old_routes.end();
+      if (!incident) {
+        const auto *from = port_by_id.at(edge.source_port);
+        const auto *to = port_by_id.at(edge.target_port);
+        incident = moved_nodes.count(from->node_id) != 0 ||
+                   moved_nodes.count(to->node_id) != 0;
+      }
+      if (!incident) prior_route = route->second;
+    }
+
+    bool obstructed = false;
+    if (prior_route) {
+      for (const auto &region : swept_obstacles) {
+        if (route_touches_swept_obstacle(*prior_route, region)) {
+          obstructed = true;
+          break;
+        }
+      }
+    }
+    if (incident || obstructed) {
+      dirty_indices.push_back(i);
+      dirty_requests.push_back(requests[i]);
+      if (incident) ++stats.incident_invalidated;
+      else ++stats.obstacle_invalidated;
+    } else {
+      // Reuse the exact prior polyline in request-index order. This is only
+      // provisional; the full combined postcondition is checked below.
+      combined.edges[i].points = prior_route->points;
+      ++stats.reused;
+    }
+  }
+
+  if (!dirty_requests.empty()) {
+    // IMPORTANT: same full layout, all of the new obstacle rectangles.
+    // Never remove distant obstacles to make a partial route "succeed".
+    gl::Routes rerouted;
+    const auto status = gl::route_orthogonal(layout, dirty_requests, rerouted);
+    if (!status) {
+      return reject(routing_error(status.error),
+                    "incremental route rejected: " + status.message);
+    }
+    if (rerouted.edges.size() != dirty_indices.size()) {
+      return reject(GraphEditError::InternalInvariant,
+                    "incremental router returned an incomplete edge batch");
+    }
+    for (std::size_t j = 0; j < dirty_indices.size(); ++j) {
+      combined.edges[dirty_indices[j]] = std::move(rerouted.edges[j]);
+    }
+  }
+  stats.rerouted = dirty_indices.size();
+
+  // Mandatory complete-graph proof for every reused AND new route before
+  // publishing any new positions, routes or Undo history. A missed dependency
+  // fails the transaction; there is no silent full reroute/straight fallback.
+  const auto checked = gl::validate_orthogonal_routes(layout, requests, combined);
+  if (!checked) {
     return reject(GraphEditError::InvalidGeometry,
-                  "graph route failed independent obstacle/terminal validation");
+                  "combined graph route validation failed at edge " +
+                  std::to_string(checked.route_index) + ": " + checked.message);
   }
+  next.routes.clear();
   next.routes.reserve(next.edges.size());
   for (std::size_t i = 0; i < next.edges.size(); ++i) {
-    next.routes.push_back({next.edges[i].id, std::move(calculated.edges[i].points)});
+    next.routes.push_back({next.edges[i].id, std::move(combined.edges[i].points)});
   }
   return {};
 }
 
 GraphEditStatus GraphEditDocument::initialize(GraphEditSnapshot initial) {
   if (move_) return reject(GraphEditError::Busy, "cannot replace an active edit");
-  const auto status = validate_and_route(initial);
+  GraphRouteUpdateStats prepared_stats;
+  const auto status = validate_and_route(initial, nullptr, prepared_stats);
   if (!status) return status;
   set_committed_revisions(initial, 1);
+  prepared_stats.committed_revision = initial.revision;
   committed_ = std::move(initial);
+  route_stats_ = prepared_stats;
   undo_.clear();
   redo_.clear();
   return {};
@@ -211,7 +363,8 @@ GraphEditStatus GraphEditDocument::publish(GraphEditSnapshot candidate) {
   if (committed_.revision == std::numeric_limits<std::uint64_t>::max()) {
     return reject(GraphEditError::CapacityExceeded, "graph revision exhausted");
   }
-  const auto status = validate_and_route(candidate);
+  GraphRouteUpdateStats prepared_stats;
+  const auto status = validate_and_route(candidate, &committed_, prepared_stats);
   if (!status) return status;
   // All potentially failing validation runs before replacing the committed
   // document. History is bounded and stores complete validated snapshots.
@@ -219,7 +372,9 @@ GraphEditStatus GraphEditDocument::publish(GraphEditSnapshot candidate) {
   if (undo_.size() > kMaxHistory) undo_.erase(undo_.begin());
   redo_.clear();
   set_committed_revisions(candidate, committed_.revision + 1);
+  prepared_stats.committed_revision = candidate.revision;
   committed_ = std::move(candidate);
+  route_stats_ = prepared_stats;
   return {};
 }
 
@@ -263,6 +418,8 @@ GraphEditStatus GraphEditDocument::undo() {
   undo_.pop_back();
   set_committed_revisions(previous, committed_.revision + 1);
   committed_ = std::move(previous);
+  route_stats_ = {committed_.revision, committed_.routes.size(),
+                  0, committed_.routes.size(), 0, 0, false};
   return {};
 }
 
@@ -278,6 +435,8 @@ GraphEditStatus GraphEditDocument::redo() {
   redo_.pop_back();
   set_committed_revisions(next, committed_.revision + 1);
   committed_ = std::move(next);
+  route_stats_ = {committed_.revision, committed_.routes.size(),
+                  0, committed_.routes.size(), 0, 0, false};
   return {};
 }
 
