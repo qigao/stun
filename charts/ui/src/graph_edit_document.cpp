@@ -65,24 +65,6 @@ SweptObstacle swept_clearance(const GraphEditNode &old_node,
                    new_node.y + new_node.height) + clearance};
 }
 
-bool route_touches_swept_obstacle(const GraphEditRoute &route,
-                                 const SweptObstacle &region) noexcept {
-  // Earlier committed paths were certified orthogonal; a malformed cache
-  // has to be recomputed rather than trusted.
-  if (route.points.size() < 2) return true;
-  for (std::size_t i = 1; i < route.points.size(); ++i) {
-    const auto a = route.points[i - 1], b = route.points[i];
-    if (!std::isfinite(a.x) || !std::isfinite(a.y) ||
-        !std::isfinite(b.x) || !std::isfinite(b.y) ||
-        (a.x != b.x && a.y != b.y)) return true;
-    if (std::max(a.x, b.x) >= region.left &&
-        std::min(a.x, b.x) <= region.right &&
-        std::max(a.y, b.y) >= region.top &&
-        std::min(a.y, b.y) <= region.bottom) return true;
-  }
-  return false;
-}
-
 bool same_route_schema(const GraphEditSnapshot &a,
                        const GraphEditSnapshot &b) noexcept {
   // Dynamic node/port insertion and dimension/port changes are NOT M1a.
@@ -114,8 +96,53 @@ GraphEditError routing_error(gl::RouteError error) {
 
 } // namespace
 
+GraphEditStatus GraphEditDocument::build_route_index(
+    const GraphEditSnapshot &snapshot,
+    std::vector<IndexedRouteSegment> &index) {
+  // Fail closed above a fixed bend budget instead of unbounded allocations.
+  // This does NOT increase the native GraphOrthogonal 256/1024 caps.
+  constexpr std::size_t kMaximumSegments = 131072;
+  index.clear();
+  for (const auto &route : snapshot.routes) {
+    if (route.points.size() < 2)
+      return reject(GraphEditError::InternalInvariant,
+                    "indexed committed route is empty");
+    for (std::size_t j = 1; j < route.points.size(); ++j) {
+      const auto a = route.points[j - 1], b = route.points[j];
+      if (!std::isfinite(a.x) || !std::isfinite(a.y) ||
+          !std::isfinite(b.x) || !std::isfinite(b.y) ||
+          (a.x != b.x && a.y != b.y) ||
+          (a.x == b.x && a.y == b.y)) {
+        return reject(GraphEditError::InternalInvariant,
+                      "invalid indexed orthogonal segment");
+      }
+      if (index.size() == kMaximumSegments)
+        return reject(GraphEditError::CapacityExceeded,
+                      "bounded route segment index exceeded capacity");
+      index.push_back({route.edge_id, std::min(a.x, b.x),
+                       std::max(a.x, b.x), std::min(a.y, b.y),
+                       std::max(a.y, b.y), 0.0});
+    }
+  }
+  std::sort(index.begin(), index.end(),
+            [](const IndexedRouteSegment &a, const IndexedRouteSegment &b) {
+              if (a.left != b.left) return a.left < b.left;
+              if (a.right != b.right) return a.right < b.right;
+              if (a.top != b.top) return a.top < b.top;
+              if (a.bottom != b.bottom) return a.bottom < b.bottom;
+              return a.edge_id < b.edge_id;
+            });
+  double maximum = -std::numeric_limits<double>::infinity();
+  for (auto &segment : index) {
+    maximum = std::max(maximum, segment.right);
+    segment.prefix_max_right = maximum;
+  }
+  return {};
+}
+
 GraphEditStatus GraphEditDocument::validate_and_route(
     GraphEditSnapshot &next, const GraphEditSnapshot *previous,
+    const std::vector<IndexedRouteSegment> *previous_index,
     GraphRouteUpdateStats &stats) {
   stats = {};
   // The existing geometric router's bounds remain hard constraints, even if
@@ -206,18 +233,19 @@ GraphEditStatus GraphEditDocument::validate_and_route(
 
   stats.total_routes = next.edges.size();
   const bool reuse_allowed =
-      previous && previous->revision != 0 && same_route_schema(*previous, next) &&
+      previous && previous_index && previous->revision != 0 &&
+      same_route_schema(*previous, next) &&
       previous->routes.size() == previous->edges.size();
   stats.full_rebuild = !reuse_allowed;
 
-  // M1a: retain the original validated committed routes only if endpoints
-  // and every swept obstacle dependency are unchanged. A deterministic
-  // bounded segment scan is preferable to a premature parallel spatial
-  // index. Route geometry never leaves the document owner thread.
+  // The immutable previous-revision index narrows swept-obstacle tests by
+  // x using prefix maximum-right bounds, followed by inclusive y overlap.
+  // All cached and newly routed paths still receive full postcondition checks.
   std::set<std::string> moved_nodes;
   std::vector<SweptObstacle> swept_obstacles;
   std::map<std::string, const GraphEditEdge *> old_edges;
   std::map<std::string, const GraphEditRoute *> old_routes;
+  std::set<std::string> swept_dirty_edges;
   if (reuse_allowed) {
     for (std::size_t i = 0; i < next.nodes.size(); ++i) {
       const auto &before = previous->nodes[i], &after = next.nodes[i];
@@ -228,6 +256,25 @@ GraphEditStatus GraphEditDocument::validate_and_route(
     for (const auto &edge : previous->edges) old_edges.emplace(edge.id, &edge);
     for (const auto &route : previous->routes)
       old_routes.emplace(route.edge_id, &route);
+    for (const auto &region : swept_obstacles) {
+      ++stats.index_queries;
+      const auto upper = std::upper_bound(
+          previous_index->begin(), previous_index->end(), region.right,
+          [](double right, const IndexedRouteSegment &seg) {
+            return right < seg.left;
+          });
+      const auto lower = std::lower_bound(
+          previous_index->begin(), upper, region.left,
+          [](const IndexedRouteSegment &seg, double left) {
+            return seg.prefix_max_right < left;
+          });
+      for (auto it = lower; it != upper; ++it) {
+        ++stats.segment_candidates;
+        if (it->right >= region.left &&
+            it->bottom >= region.top && it->top <= region.bottom)
+          swept_dirty_edges.insert(it->edge_id);
+      }
+    }
   }
 
   std::vector<std::size_t> dirty_indices;
@@ -254,15 +301,8 @@ GraphEditStatus GraphEditDocument::validate_and_route(
       if (!incident) prior_route = route->second;
     }
 
-    bool obstructed = false;
-    if (prior_route) {
-      for (const auto &region : swept_obstacles) {
-        if (route_touches_swept_obstacle(*prior_route, region)) {
-          obstructed = true;
-          break;
-        }
-      }
-    }
+    const bool obstructed = prior_route &&
+                            swept_dirty_edges.count(edge.id) != 0;
     if (incident || obstructed) {
       dirty_indices.push_back(i);
       dirty_requests.push_back(requests[i]);
@@ -315,12 +355,18 @@ GraphEditStatus GraphEditDocument::validate_and_route(
 GraphEditStatus GraphEditDocument::initialize(GraphEditSnapshot initial) {
   if (move_) return reject(GraphEditError::Busy, "cannot replace an active edit");
   GraphRouteUpdateStats prepared_stats;
-  const auto status = validate_and_route(initial, nullptr, prepared_stats);
+  const auto status = validate_and_route(initial, nullptr, nullptr, prepared_stats);
   if (!status) return status;
+  std::vector<IndexedRouteSegment> index;
+  const auto indexed = build_route_index(initial, index);
+  if (!indexed) return indexed;
   set_committed_revisions(initial, 1);
   prepared_stats.committed_revision = initial.revision;
+  prepared_stats.indexed_segments = index.size();
   committed_ = std::move(initial);
   route_stats_ = prepared_stats;
+  route_segments_.swap(index);
+  route_index_revision_ = committed_.revision;
   undo_.clear();
   redo_.clear();
   return {};
@@ -364,8 +410,13 @@ GraphEditStatus GraphEditDocument::publish(GraphEditSnapshot candidate) {
     return reject(GraphEditError::CapacityExceeded, "graph revision exhausted");
   }
   GraphRouteUpdateStats prepared_stats;
-  const auto status = validate_and_route(candidate, &committed_, prepared_stats);
+  const auto *index =
+      route_index_revision_ == committed_.revision ? &route_segments_ : nullptr;
+  const auto status = validate_and_route(candidate, &committed_, index, prepared_stats);
   if (!status) return status;
+  std::vector<IndexedRouteSegment> next_index;
+  const auto indexed = build_route_index(candidate, next_index);
+  if (!indexed) return indexed;
   // All potentially failing validation runs before replacing the committed
   // document. History is bounded and stores complete validated snapshots.
   undo_.push_back(committed_);
@@ -373,8 +424,11 @@ GraphEditStatus GraphEditDocument::publish(GraphEditSnapshot candidate) {
   redo_.clear();
   set_committed_revisions(candidate, committed_.revision + 1);
   prepared_stats.committed_revision = candidate.revision;
+  prepared_stats.indexed_segments = next_index.size();
   committed_ = std::move(candidate);
   route_stats_ = prepared_stats;
+  route_segments_.swap(next_index);
+  route_index_revision_ = committed_.revision;
   return {};
 }
 
@@ -412,6 +466,9 @@ GraphEditStatus GraphEditDocument::undo() {
   if (committed_.revision == std::numeric_limits<std::uint64_t>::max()) {
     return reject(GraphEditError::CapacityExceeded, "graph revision exhausted");
   }
+  std::vector<IndexedRouteSegment> restored_index;
+  const auto indexed = build_route_index(undo_.back(), restored_index);
+  if (!indexed) return indexed;
   redo_.push_back(committed_);
   if (redo_.size() > kMaxHistory) redo_.erase(redo_.begin());
   auto previous = std::move(undo_.back());
@@ -420,6 +477,9 @@ GraphEditStatus GraphEditDocument::undo() {
   committed_ = std::move(previous);
   route_stats_ = {committed_.revision, committed_.routes.size(),
                   0, committed_.routes.size(), 0, 0, false};
+  route_segments_.swap(restored_index);
+  route_index_revision_ = committed_.revision;
+  route_stats_.indexed_segments = route_segments_.size();
   return {};
 }
 
@@ -429,6 +489,9 @@ GraphEditStatus GraphEditDocument::redo() {
   if (committed_.revision == std::numeric_limits<std::uint64_t>::max()) {
     return reject(GraphEditError::CapacityExceeded, "graph revision exhausted");
   }
+  std::vector<IndexedRouteSegment> restored_index;
+  const auto indexed = build_route_index(redo_.back(), restored_index);
+  if (!indexed) return indexed;
   undo_.push_back(committed_);
   if (undo_.size() > kMaxHistory) undo_.erase(undo_.begin());
   auto next = std::move(redo_.back());
@@ -437,6 +500,9 @@ GraphEditStatus GraphEditDocument::redo() {
   committed_ = std::move(next);
   route_stats_ = {committed_.revision, committed_.routes.size(),
                   0, committed_.routes.size(), 0, 0, false};
+  route_segments_.swap(restored_index);
+  route_index_revision_ = committed_.revision;
+  route_stats_.indexed_segments = route_segments_.size();
   return {};
 }
 

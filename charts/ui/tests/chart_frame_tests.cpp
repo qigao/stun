@@ -735,6 +735,9 @@ spec("GraphCanvas M1a uses conservative bounded incremental orthogonal routing")
     check_equal(stats.incident_invalidated, 0U);
     check_equal(stats.obstacle_invalidated, 1U);
     check_false(stats.full_rebuild);
+    check_equal(stats.index_queries, 1U);
+    check_true(stats.indexed_segments >= 2U);
+    check_true(stats.segment_candidates <= stats.indexed_segments);
 
     // Independent whole-graph routing from scratch is a reference for the
     // genuinely dirty path, while the unrelated lower path is byte-for-byte
@@ -760,6 +763,74 @@ spec("GraphCanvas M1a uses conservative bounded incremental orthogonal routing")
     check_equal(node_by_id(model, "blocker")->y, 30.0);
     check_equal(model.snapshot().document_revision, model.snapshot().revision);
     check_equal(model.snapshot().geometry_revision, model.snapshot().revision);
+  }
+
+  it("uses a sorted segment index to exclude far-away route intervals") {
+    GraphEditDocument model;
+    auto graph = swept_obstacle_graph();
+    graph.nodes.push_back({"far-start", 1800, 340, 100, 80, false});
+    graph.nodes.push_back({"far-end", 2200, 340, 100, 80, false});
+    graph.ports.push_back({"far-out", "far-start", gl::Side::East, 100, 40, true});
+    graph.ports.push_back({"far-in", "far-end", gl::Side::West, 0, 40, false});
+    graph.edges.push_back({"far-route", "far-out", "far-in"});
+    check_true(static_cast<bool>(model.initialize(std::move(graph))));
+    const auto old = model.snapshot();
+    const auto *far_before = route_by_id(old, "far-route");
+    check_not_null(far_before);
+    if (!far_before) return;
+    check_true(model.last_route_update().indexed_segments >= 3U);
+
+    check_true(static_cast<bool>(model.begin_move("blocker")));
+    check_true(static_cast<bool>(model.preview_move(0, -180)));
+    check_true(static_cast<bool>(model.commit_move()));
+    const auto &stats = model.last_route_update();
+    check_false(stats.full_rebuild);
+    check_equal(stats.index_queries, 1U);
+    check_equal(stats.obstacle_invalidated, 1U);
+    check_equal(stats.rerouted, 1U);
+    check_equal(stats.reused, 2U);
+    check_true(stats.segment_candidates < stats.indexed_segments);
+    const auto *far_after = route_by_id(model.snapshot(), "far-route");
+    check_not_null(far_after);
+    if (far_after) check_true(route_points_identical(*far_before, *far_after));
+
+    // Undo restores the indexed old revision. A subsequent NEW move must
+    // query that revision's index, rather than stale segments from Redo.
+    check_true(static_cast<bool>(model.undo()));
+    check_equal(model.last_route_update().indexed_segments,
+                model.snapshot().routes[0].points.size() - 1 +
+                model.snapshot().routes[1].points.size() - 1 +
+                model.snapshot().routes[2].points.size() - 1);
+    check_true(static_cast<bool>(model.begin_move("blocker")));
+    check_true(static_cast<bool>(model.preview_move(0, -180)));
+    check_true(static_cast<bool>(model.commit_move()));
+    check_equal(model.last_route_update().rerouted, 1U);
+    check_equal(model.last_route_update().reused, 2U);
+  }
+
+  it("keeps routing budgets for 100, 500 and 1000 node documents") {
+    GraphEditDocument model;
+    GraphEditSnapshot data;
+    for (int i = 0; i < 100; ++i) {
+      data.nodes.push_back({"scale-" + std::to_string(i),
+                            static_cast<double>(i) * 110.0,
+                            10.0, 72.0, 38.0, false});
+    }
+    check_true(static_cast<bool>(model.initialize(data)));
+    check_equal(model.snapshot().nodes.size(), 100U);
+    check_equal(model.last_route_update().indexed_segments, 0U);
+    for (const int count : {500, 1000}) {
+      data.nodes.clear();
+      for (int i = 0; i < count; ++i)
+        data.nodes.push_back({"scale-" + std::to_string(i),
+                              static_cast<double>(i) * 110.0,
+                              10.0, 72.0, 38.0, false});
+      const auto status = model.initialize(data);
+      check_false(static_cast<bool>(status));
+      check(status.error == GraphEditError::CapacityExceeded);
+      check_equal(model.snapshot().nodes.size(), 100U);
+      check_equal(model.snapshot().revision, std::uint64_t{1});
+    }
   }
 
   it("reroutes only the newly CONNECTED edge while keeping old paths intact") {

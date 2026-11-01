@@ -85,6 +85,10 @@ struct GraphRouteUpdateStats {
   std::size_t incident_invalidated = 0;
   std::size_t obstacle_invalidated = 0;
   bool full_rebuild = false;
+  // Counts reflect the actual sorted-interval segment index, not GPU draws.
+  std::size_t indexed_segments = 0;
+  std::size_t segment_candidates = 0;
+  std::size_t index_queries = 0;
 };
 
 // One owner-thread edit session. M1a reuses previously validated paths only
@@ -122,13 +126,29 @@ private:
     double y = 0.0;
   };
 
+  // M1b keeps one *committed-revision-owned* sorted interval index. It is
+  // rebuilt from already-validated route geometry before any snapshot
+  // publication, so an old revision can never supply a new route's index.
+  // The prefix maximum permits binary search to skip all segments ending
+  // strictly left of a swept obstacle.
+  struct IndexedRouteSegment {
+    std::string edge_id;
+    double left = 0.0, right = 0.0, top = 0.0, bottom = 0.0;
+    double prefix_max_right = 0.0;
+  };
+  static GraphEditStatus build_route_index(
+      const GraphEditSnapshot &snapshot,
+      std::vector<IndexedRouteSegment> &index);
   static GraphEditStatus validate_and_route(
       GraphEditSnapshot &next, const GraphEditSnapshot *previous,
+      const std::vector<IndexedRouteSegment> *previous_index,
       GraphRouteUpdateStats &stats);
   GraphEditStatus publish(GraphEditSnapshot candidate);
 
   GraphEditSnapshot committed_;
   GraphRouteUpdateStats route_stats_;
+  std::vector<IndexedRouteSegment> route_segments_;
+  std::uint64_t route_index_revision_ = 0;
   std::optional<MovePreview> move_;
   std::vector<GraphEditSnapshot> undo_;
   std::vector<GraphEditSnapshot> redo_;
