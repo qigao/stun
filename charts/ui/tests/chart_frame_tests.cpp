@@ -988,7 +988,9 @@ GraphEditSnapshot nested_group_fixture() {
 const charts::ui::GraphEditGroup *group_by_id(
     const GraphEditDocument &doc, std::string_view id) {
   for (const auto &group : doc.snapshot().groups)
-    if (group.id == id) return &group;
+    if (group.id.size() == id.size() &&
+        std::equal(group.id.begin(), group.id.end(), id.begin()))
+      return &group;
   return nullptr;
 }
 } // namespace
@@ -1025,7 +1027,7 @@ spec("GraphCanvas M2c nested hierarchy, local origins and outermost proxy") {
     check_equal(inner_view.edges[1].id, "cd");
     check_equal(doc.snapshot().edges[1].source_port, "b-out");
     check_within(doc.snapshot().routes[0].points.front().x, 270.0, 1e-6);
-    check_false(doc.group_is_visible("inner") == false);
+    check_true(doc.group_is_visible("inner"));
     check_equal(doc.snapshot().nodes.size(), 4U);
 
     check_true(static_cast<bool>(doc.set_group_collapsed("middle", true)));
