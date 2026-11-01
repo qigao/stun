@@ -426,6 +426,16 @@ spec("FlexUI linked native canvas widget uses the one XML and Box event path") {
     flexUI::RenderCommandList commands(flex::RendererCapabilities{});
     native->emit_render_commands(*canvas, commands);
     check_equal(counters->paints, 1);
+
+    // FocusOut must clear both the widget request AND the host's capture
+    // pointer before any new event. Otherwise the old widget still receives
+    // the next mouse move after a document/tool switch.
+    auto second_down = flexUI::Event::mouse_down(20.0F, 20.0F);
+    box.dispatch_event(second_down);
+    check(box.capturing_element() == canvas);
+    box.set_focus(nullptr);
+    check_false(native->wants_mouse_capture());
+    check_null(box.capturing_element());
   }
 
   it("rejects a missing native paint callback before publishing the tree") {

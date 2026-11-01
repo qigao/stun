@@ -7,6 +7,7 @@
 #include <flexUI/native_canvas_widget.h>
 #include <flexUI/render_command.h>
 #include <flexUI/ui_document.h>
+#include <flexUI/ui_xml.h>
 
 #include <tinytest.hpp>
 
