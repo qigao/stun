@@ -23,6 +23,7 @@
 #include <flexUI/render_manager.h>
 #include <flexUI/widget.h>
 #include <tinytest.hpp>
+#include <nlohmann/json.hpp>
 
 #include <cmath>
 #include <cstdint>
@@ -1364,6 +1365,178 @@ GraphEditSnapshot sibling_group_fixture() {
   return data;
 }
 } // namespace
+
+// M2e: real linked Box/WidgetRegistry after the original XML mount.
+// The only mutable semantic Element arena is the original Box; repeated
+// NodeId/PortId/GroupId insert/delete must not grow it indefinitely.
+spec("GraphCanvas M2e dynamic Box-owned semantic leaf reconciliation") {
+  it("adds and physically retires graph nodes and ports with stable siblings") {
+    auto document = std::make_shared<GraphEditDocument>();
+    check_true(static_cast<bool>(document->initialize(example(false))));
+    auto registry = flexUI::WidgetRegistry::builtins();
+    check_false(static_cast<bool>(
+        charts::ui::register_graph_canvas_widget(registry, document)));
+    auto compiled = flexUI::compile_ui_xml(
+        "<ui name=\"GraphSemanticDynamic\"><main id=\"root\">"
+        "<native-graph id=\"graph\" /></main></ui>");
+    check_true(static_cast<bool>(compiled));
+    if (!compiled) return;
+    flexUI::Box box(nullptr);
+    check_true(static_cast<bool>(flexUI::UiDocumentInstantiator::instantiate(
+        box, *compiled.program, registry)));
+    auto *graph = box.get_by_id("graph");
+    auto *root = box.get_by_id("root");
+    if (!graph || !root) return;
+    root->set_layout_bounds(0, 0, 900, 220);
+    graph->set_layout_bounds(0, 0, 900, 220);
+    box.update();
+    check_equal(graph->child_count(), 4U);
+    const auto old_count = box.owned_element_count();
+    flexUI::Element *stable_alpha = nullptr;
+    for (auto *child : graph->children()) {
+      auto *part = static_cast<flexUI::Element *>(child);
+      if (part->attribute("part") &&
+          *part->attribute("part") == "node:alpha")
+        stable_alpha = part;
+    }
+    check_not_null(stable_alpha);
+    if (!stable_alpha) return;
+
+    std::string initial;
+    check_true(static_cast<bool>(document->save_json(initial)));
+    auto extra = nlohmann::json::parse(initial);
+    extra["nodes"].push_back({{"id", "gamma"}, {"x", 740.0},
+        {"y", 38.0}, {"width", 80.0}, {"height", 64.0},
+        {"locked", false}});
+    extra["ports"].push_back({{"id", "gamma-output"},
+        {"node", "gamma"}, {"side", "east"}, {"x", 80.0},
+        {"y", 32.0}, {"output", true}});
+    const auto extra_bytes = extra.dump();
+
+    for (int pass = 0; pass < 12; ++pass) {
+      check_true(static_cast<bool>(document->load_json(extra_bytes)));
+      box.update(); // calls owner-safe reconciliation BEFORE layout.
+      check(box.last_widget_part_error() == flexUI::BoxWidgetPartError::None);
+      check_equal(graph->child_count(), 6U);
+      check_equal(box.owned_element_count(), old_count + 2U);
+      check_true(stable_alpha->parent_elem() == graph);
+      auto parts = box.query_selector_all("#graph > graph-node");
+      check_equal(parts.size(), 3U);
+      flexUI::Element *dynamic = nullptr;
+      for (auto *child : graph->children()) {
+        auto *part = static_cast<flexUI::Element *>(child);
+        if (part->attribute("part") &&
+            *part->attribute("part") == "node:gamma") dynamic = part;
+      }
+      check_not_null(dynamic);
+      if (dynamic) {
+        check_equal(*dynamic->attribute("data-node-id"), "gamma");
+        check_equal(*dynamic->attribute("aria-hidden"), "false");
+      }
+      check_true(static_cast<bool>(document->load_json(initial)));
+      box.update();
+      check(box.last_widget_part_error() == flexUI::BoxWidgetPartError::None);
+      check_equal(graph->child_count(), 4U);
+      check_equal(box.owned_element_count(), old_count);
+      check_true(stable_alpha->parent_elem() == graph);
+      check_equal(box.query_selector_all("#graph > graph-node").size(), 2U);
+    }
+  }
+
+  it("refuses borrowed part retirement, then reclaims only after focus exits") {
+    auto document = std::make_shared<GraphEditDocument>();
+    check_true(static_cast<bool>(document->initialize(example(false))));
+    auto registry = flexUI::WidgetRegistry::builtins();
+    check_false(static_cast<bool>(
+        charts::ui::register_graph_canvas_widget(registry, document)));
+    const auto compiled = flexUI::compile_ui_xml(
+        "<ui name=\"GraphSemanticLease\"><main id=\"root\">"
+        "<native-graph id=\"graph\" /></main></ui>");
+    check_true(static_cast<bool>(compiled));
+    if (!compiled) return;
+    flexUI::Box box(nullptr);
+    check_true(static_cast<bool>(flexUI::UiDocumentInstantiator::instantiate(
+        box, *compiled.program, registry)));
+    auto *graph = box.get_by_id("graph");
+    if (!graph) return;
+    box.update();
+    const auto baseline = box.owned_element_count();
+    std::string original;
+    check_true(static_cast<bool>(document->save_json(original)));
+    auto extra = nlohmann::json::parse(original);
+    extra["nodes"].push_back({{"id", "gamma"}, {"x", 740.0},
+        {"y", 38.0}, {"width", 80.0}, {"height", 64.0},
+        {"locked", false}});
+    check_true(static_cast<bool>(document->load_json(extra.dump())));
+    box.update();
+    flexUI::Element *gamma = nullptr;
+    for (auto *raw : graph->children()) {
+      auto *part = static_cast<flexUI::Element *>(raw);
+      if (part->attribute("part") &&
+          *part->attribute("part") == "node:gamma") gamma = part;
+    }
+    check_not_null(gamma);
+    if (!gamma) return;
+    box.set_focus(gamma);
+    check_true(static_cast<bool>(document->load_json(original)));
+    box.update();
+    check(box.last_widget_part_error() ==
+          flexUI::BoxWidgetPartError::BorrowedPart);
+    check_equal(box.owned_element_count(), baseline + 1U);
+    check(gamma->parent_elem() == graph);
+    check(box.focused_element() == gamma);
+
+    box.set_focus(nullptr);
+    box.update();
+    check(box.last_widget_part_error() ==
+          flexUI::BoxWidgetPartError::None);
+    check_equal(box.owned_element_count(), baseline);
+    check_equal(graph->child_count(), 4U);
+    check_null(box.focused_element());
+    check_true(box.get_by_id("graph") == graph);
+  }
+
+  it("keeps two linked canvas instances independent during group insertion") {
+    auto document = std::make_shared<GraphEditDocument>();
+    check_true(static_cast<bool>(document->initialize(example(false))));
+    auto registry = flexUI::WidgetRegistry::builtins();
+    check_false(static_cast<bool>(
+        charts::ui::register_graph_canvas_widget(registry, document)));
+    auto compiled = flexUI::compile_ui_xml(
+        "<ui name=\"GraphSemanticTwins\"><main id=\"root\">"
+        "<native-graph id=\"left\" /><native-graph id=\"right\" />"
+        "</main></ui>");
+    check_true(static_cast<bool>(compiled));
+    if (!compiled) return;
+    flexUI::Box box(nullptr);
+    check_true(static_cast<bool>(flexUI::UiDocumentInstantiator::instantiate(
+        box, *compiled.program, registry)));
+    auto *left = box.get_by_id("left");
+    auto *right = box.get_by_id("right");
+    if (!left || !right) return;
+    box.update();
+    const auto baseline = box.owned_element_count();
+    check_equal(left->child_count(), 4U);
+    check_equal(right->child_count(), 4U);
+    charts::ui::GraphEditGroup group;
+    group.id = "pack";
+    group.x = 40; group.y = 24; group.width = 170; group.height = 130;
+    group.member_node_ids = {"alpha"};
+    group.proxy_ports.push_back(
+        {"pack-out", "source", gl::Side::East, 170, 48});
+    check_true(static_cast<bool>(document->add_group(group)));
+    box.update();
+    check_equal(left->child_count(), 6U);
+    check_equal(right->child_count(), 6U);
+    check_equal(box.owned_element_count(), baseline + 4U);
+    check(left->child_at(4) != right->child_at(4));
+    check_true(static_cast<bool>(document->remove_group("pack")));
+    box.update();
+    check_equal(left->child_count(), 4U);
+    check_equal(right->child_count(), 4U);
+    check_equal(box.owned_element_count(), baseline);
+  }
+}
 
 spec("GraphCanvas M2d sibling crossing and canonical logical persistence") {
   it("routes sibling boundary ports without losing original node or edge IDs") {
