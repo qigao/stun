@@ -14,8 +14,8 @@ target_include_directories(
          $<BUILD_INTERFACE:${FLEX_ENGINE_ROOT}/../vendor/tinyfsm>
          $<INSTALL_INTERFACE:include>
          $<INSTALL_INTERFACE:include/flex/vendor>
-  PRIVATE ${Stb_INCLUDE_DIR}
-          $<BUILD_INTERFACE:${FLEX_ENGINE_ROOT}/../vendor/mir>
+         $<BUILD_INTERFACE:${Stb_INCLUDE_DIR}>
+  PRIVATE $<BUILD_INTERFACE:${FLEX_ENGINE_ROOT}/../vendor/mir>
           $<BUILD_INTERFACE:${FLEX_ENGINE_ROOT}/../vendor/miniblas>)
 target_compile_features(flex_runtime PUBLIC cxx_std_17)
 
