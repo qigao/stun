@@ -846,6 +846,109 @@ int run_topology_smoke(
   return EXIT_SUCCESS;
 }
 
+// M2g: user-facing keyboard deletion on the same real OpenGL/PluginHost
+// desktop editor, not a separate Widget/GraphLayout or test executable.
+int run_delete_smoke(
+    flexUI::GCanvasPluginWindowHost &host,
+    const std::shared_ptr<charts::ui::GraphEditDocument> &model) {
+  auto pumped = host.pump_once(0.0);
+  if (!pumped) return fail("delete initial frame", pumped.error.message);
+  auto &box = host.application().box();
+  auto *graph = box.get_by_id("graph");
+  if (!graph || !graph->widget || graph->child_count() != 4 ||
+      model->snapshot().edges.size() != 1 ||
+      model->snapshot().routes.size() != 1)
+    return fail("delete source", "connected native GraphCanvas was not mounted");
+  const auto find_part = [&](std::string_view key) -> flexUI::Element * {
+    for (auto *raw : graph->children()) {
+      auto *part = static_cast<flexUI::Element *>(raw);
+      const auto *name = part->attribute("part");
+      if (name && *name == key) return part;
+    }
+    return nullptr;
+  };
+  auto *beta = find_part("node:beta");
+  if (!beta) return fail("delete baseline", "stable surviving node not found");
+  const auto original_owned = box.owned_element_count();
+  const auto original_revision = model->snapshot().revision;
+  const float gx = graph->absolute_x(), gy = graph->absolute_y();
+
+  const auto select_alpha = [&]() -> bool {
+    auto down = flexUI::Event::mouse_down(gx + 85.0F, gy + 56.0F);
+    auto up = flexUI::Event::mouse_up(gx + 85.0F, gy + 56.0F);
+    return host.application().dispatch_event(down) && down.handled &&
+           host.application().dispatch_event(up) && up.handled &&
+           box.capturing_element() == nullptr;
+  };
+  if (!select_alpha())
+    return fail("delete select", "native pointer event did not select alpha");
+  auto del = flexUI::Event::key_down(flexUI::KeyCode::Delete);
+  if (!host.application().dispatch_event(del) || !del.handled)
+    return fail("delete keyboard", "Delete was not handled by GraphCanvas");
+  box.update();
+  if (model->snapshot().revision != original_revision + 1 ||
+      model->snapshot().nodes.size() != 1 ||
+      model->snapshot().ports.size() != 1 ||
+      !model->snapshot().edges.empty() || !model->snapshot().routes.empty() ||
+      model->undo_count() != 1 ||
+      graph->child_count() != 2 ||
+      box.owned_element_count() != original_owned - 2 ||
+      find_part("node:beta") != beta)
+    return fail("delete atomic topology", "Delete lost original graph identity");
+
+  auto undo = flexUI::Event::key_down(
+      flexUI::KeyCode::Z, static_cast<int>(flexUI::KeyMod::Control));
+  auto redo = flexUI::Event::key_down(
+      flexUI::KeyCode::Y, static_cast<int>(flexUI::KeyMod::Control));
+  if (!host.application().dispatch_event(undo) || !undo.handled)
+    return fail("delete Undo input", "Ctrl-Z not dispatched");
+  box.update();
+  if (model->snapshot().nodes.size() != 2 ||
+      model->snapshot().ports.size() != 2 ||
+      model->snapshot().edges.size() != 1 ||
+      model->snapshot().routes.size() != 1 ||
+      graph->child_count() != 4 ||
+      box.owned_element_count() != original_owned ||
+      find_part("node:beta") != beta)
+    return fail("delete Undo restore", "native graph route/semantics not restored");
+  if (!host.application().dispatch_event(redo) || !redo.handled)
+    return fail("delete Redo input", "Ctrl-Y not dispatched");
+  box.update();
+  if (model->snapshot().nodes.size() != 1 ||
+      graph->child_count() != 2 ||
+      box.owned_element_count() != original_owned - 2)
+    return fail("delete Redo", "native deletion was not replayed");
+  if (!model->undo()) return fail("delete restore", "Undo after Redo failed");
+  box.update();
+  if (!select_alpha())
+    return fail("delete Backspace select", "pointer could not select restored node");
+  auto backspace = flexUI::Event::key_down(flexUI::KeyCode::Backspace);
+  if (!host.application().dispatch_event(backspace) || !backspace.handled)
+    return fail("delete Backspace", "Backspace was not consumed");
+  box.update();
+  if (model->snapshot().nodes.size() != 1 ||
+      model->snapshot().edges.size() != 0 ||
+      box.owned_element_count() != original_owned - 2 ||
+      find_part("node:beta") != beta)
+    return fail("delete Backspace result", "second gesture leaked semantics");
+
+  box.invalidate();
+  pumped = host.pump_once(0.0);
+  if (!pumped) return fail("delete paint", pumped.error.message);
+  auto *save = box.get_by_id("save");
+  if (!save) return fail("delete Save lookup", "real service UI absent");
+  const auto clicked = dispatch_save_click(host.application(), *save);
+  if (!clicked) return fail("delete Save click", clicked.error.message);
+  std::string error;
+  if (!pump_until_saved(host, *save, error))
+    return fail("delete Save service", error);
+  const auto stopped = host.shutdown(kShutdownTimeout);
+  if (!stopped) return fail("delete shutdown", stopped.error.message);
+  std::cout << "FlexUI desktop editor delete smoke passed: "
+            << save->text() << '\n';
+  return EXIT_SUCCESS;
+}
+
 } // namespace
 
 int main(int argc, char **argv) {
@@ -855,6 +958,7 @@ int main(int argc, char **argv) {
   bool hierarchy_smoke = false;
   bool semantic_smoke = false;
   bool topology_smoke = false;
+  bool delete_smoke = false;
   if (argc == 2 && std::string_view(argv[1]) == "--smoke") {
     smoke = true;
   } else if (argc == 2 && std::string_view(argv[1]) == "--smoke-async") {
@@ -872,9 +976,12 @@ int main(int argc, char **argv) {
   } else if (argc == 2 && std::string_view(argv[1]) == "--smoke-topology") {
     smoke = true;
     topology_smoke = true;
+  } else if (argc == 2 && std::string_view(argv[1]) == "--smoke-delete") {
+    smoke = true;
+    delete_smoke = true;
   } else if (argc != 1) {
     return fail("arguments",
-                "usage: flexui_desktop_editor [--smoke|--smoke-async|--smoke-group|--smoke-hierarchy|--smoke-semantic|--smoke-topology]");
+                "usage: flexui_desktop_editor [--smoke|--smoke-async|--smoke-group|--smoke-hierarchy|--smoke-semantic|--smoke-topology|--smoke-delete]");
   }
 
   std::error_code path_error;
@@ -904,6 +1011,8 @@ int main(int argc, char **argv) {
   initial_graph.ports = {
       {"sink", "beta", stun::graphlayout::Side::West, 0.0, 36.0, false},
       {"source", "alpha", stun::graphlayout::Side::East, 125.0, 36.0, true}};
+  if (delete_smoke)
+    initial_graph.edges.push_back({"edge-1", "source", "sink"});
   if (group_smoke) {
     charts::ui::GraphEditGroup group;
     group.id = "pack";
@@ -968,6 +1077,7 @@ int main(int argc, char **argv) {
     return fail("runtime composition", built.error.message);
   }
 
+  if (delete_smoke) return run_delete_smoke(*built.host, graph_model);
   if (topology_smoke) return run_topology_smoke(*built.host, graph_model);
   if (semantic_smoke) return run_semantic_smoke(*built.host, graph_model);
   if (hierarchy_smoke) return run_hierarchy_smoke(*built.host, graph_model);
