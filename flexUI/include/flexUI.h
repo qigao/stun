@@ -12,6 +12,7 @@
 #include "flexUI/event.h"
 #include "flexUI/element.h"
 #include "flexUI/widget.h"
+#include "flexUI/native_canvas_widget.h"
 #include "flexUI/widget_registry.h"
 #include "flexUI/box.h"
 #include "flexUI/binding_runtime.h"
