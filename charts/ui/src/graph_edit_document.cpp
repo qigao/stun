@@ -1218,6 +1218,89 @@ GraphEditStatus GraphEditDocument::group_nodes(
   return publish(std::move(candidate));
 }
 
+GraphEditStatus GraphEditDocument::set_group_boundary_ports(
+    std::string_view group_id,
+    std::vector<GraphEditGroupProxyPort> bindings) {
+  if (move_) return reject(GraphEditError::Busy,
+                            "cannot edit measured group ports during drag");
+  GraphEditSnapshot candidate = committed_;
+  const auto group = std::find_if(candidate.groups.begin(),
+                                  candidate.groups.end(),
+      [&](const GraphEditGroup &g) { return g.id == group_id; });
+  if (group == candidate.groups.end())
+    return reject(GraphEditError::MissingGroup, "unknown stable GroupId");
+  if (bindings.size() > 4096)
+    return reject(GraphEditError::CapacityExceeded,
+                  "measured group proxy-port budget exceeded");
+  std::sort(bindings.begin(), bindings.end(),
+      [](const auto &a, const auto &b) { return a.id < b.id; });
+  bool identical = bindings.size() == group->proxy_ports.size();
+  if (identical)
+    for (std::size_t i = 0; i < bindings.size(); ++i) {
+      const auto &a = bindings[i], &b = group->proxy_ports[i];
+      if (a.id != b.id || a.original_port_id != b.original_port_id ||
+          a.side != b.side || a.local_x != b.local_x ||
+          a.local_y != b.local_y) {
+        identical = false;
+        break;
+      }
+    }
+  if (identical) return {}; // A repeated measurement is not an Undo entry.
+  group->proxy_ports = std::move(bindings);
+  // The original GraphOrthogonal binder checks side/exact boundary point,
+  // original descendant PortId, uniqueness, capacity and any collapsed
+  // crossing links before changing the committed graph or route indexes.
+  return publish(std::move(candidate));
+}
+
+GraphEditStatus GraphEditDocument::upsert_group_boundary_port(
+    std::string_view group_id, GraphEditGroupProxyPort binding) {
+  if (move_) return reject(GraphEditError::Busy,
+                            "cannot edit measured group ports during drag");
+  const auto it = std::find_if(committed_.groups.begin(),
+                               committed_.groups.end(),
+      [&](const GraphEditGroup &group) { return group.id == group_id; });
+  if (it == committed_.groups.end())
+    return reject(GraphEditError::MissingGroup, "unknown stable GroupId");
+  auto bindings = it->proxy_ports;
+  const auto matching = std::find_if(bindings.begin(), bindings.end(),
+      [&](const GraphEditGroupProxyPort &port) {
+        return port.original_port_id == binding.original_port_id;
+      });
+  if (matching != bindings.end()) {
+    // Existing visible port identity must survive a measured reposition.
+    // Rename/retirement are separate explicit transactions with history.
+    if (matching->id != binding.id)
+      return reject(GraphEditError::InvalidInput,
+                    "cannot rename a stable measured proxy PortId");
+    *matching = std::move(binding);
+  } else {
+    bindings.push_back(std::move(binding));
+  }
+  return set_group_boundary_ports(group_id, std::move(bindings));
+}
+
+GraphEditStatus GraphEditDocument::remove_group_boundary_port(
+    std::string_view group_id, std::string_view proxy_port_id) {
+  if (move_) return reject(GraphEditError::Busy,
+                            "cannot remove measured group ports during drag");
+  const auto it = std::find_if(committed_.groups.begin(),
+                               committed_.groups.end(),
+      [&](const GraphEditGroup &group) { return group.id == group_id; });
+  if (it == committed_.groups.end())
+    return reject(GraphEditError::MissingGroup, "unknown stable GroupId");
+  auto bindings = it->proxy_ports;
+  const auto old_size = bindings.size();
+  bindings.erase(std::remove_if(bindings.begin(), bindings.end(),
+      [&](const GraphEditGroupProxyPort &port) {
+        return port.id == proxy_port_id;
+      }), bindings.end());
+  if (bindings.size() == old_size)
+    return reject(GraphEditError::InvalidInput,
+                  "unknown stable measured boundary PortId");
+  return set_group_boundary_ports(group_id, std::move(bindings));
+}
+
 GraphEditStatus GraphEditDocument::remove_group(std::string_view group_id) {
   if (move_) return reject(GraphEditError::Busy, "cannot ungroup during drag");
   GraphEditSnapshot candidate = committed_;
