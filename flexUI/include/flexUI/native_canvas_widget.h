@@ -28,6 +28,10 @@ public:
     using Mount = std::function<void(NativeCanvasWidget &, Element &)>;
     using Sync = std::function<void(NativeCanvasWidget &, Element &)>;
     using PartPaint = std::function<bool(std::string_view)>;
+    // Linked C++ only. The callback MUST NOT modify Box or the document;
+    // Box queries it after current EventDispatcher/frame/layout borrow exits.
+    using PartRevision = std::function<std::uint64_t()>;
+    using Parts = std::function<std::vector<WidgetSemanticPart>()>;
 
     Paint paint;
     Input input;
@@ -36,6 +40,8 @@ public:
     Mount mount;
     Sync sync_semantics;
     PartPaint owns_part_paint;
+    PartRevision parts_revision;
+    Parts desired_parts;
   };
 
   explicit NativeCanvasWidget(Callbacks callbacks) : callbacks_(std::move(callbacks)) {
@@ -62,6 +68,13 @@ public:
   }
 
   bool wants_mouse_capture() const override { return pointer_capture_; }
+  std::uint64_t dynamic_parts_revision() const override {
+    return callbacks_.parts_revision ? callbacks_.parts_revision() : 0;
+  }
+  std::vector<WidgetSemanticPart> desired_dynamic_parts() const override {
+    return callbacks_.desired_parts ? callbacks_.desired_parts()
+                                    : std::vector<WidgetSemanticPart>{};
+  }
   bool paints_part_box(std::string_view part_name) const override {
     return callbacks_.owns_part_paint && callbacks_.owns_part_paint(part_name);
   }
