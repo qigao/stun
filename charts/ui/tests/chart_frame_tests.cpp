@@ -1372,6 +1372,140 @@ GraphEditSnapshot sibling_group_fixture() {
 // M2f: actual editor-native Node/Port topology transactions. JSON document
 // replacement from M2d remains an import operation and intentionally clears
 // history; these mutations preserve the SAME GraphEditDocument Undo/Redo.
+spec("GraphCanvas M2g keyboard node deletion through one Box owner") {
+  it("handles real Delete/Backspace and Ctrl-Z/Y with stable surviving parts") {
+    auto doc = std::make_shared<GraphEditDocument>();
+    check_true(static_cast<bool>(doc->initialize(example())));
+    auto registry = flexUI::WidgetRegistry::builtins();
+    check_false(static_cast<bool>(
+        charts::ui::register_graph_canvas_widget(registry, doc)));
+    const auto compiled = flexUI::compile_ui_xml(
+        "<ui name=\"GraphKeyboardDelete\"><main id=\"root\">"
+        "<native-graph id=\"graph\" /></main></ui>");
+    check_true(static_cast<bool>(compiled));
+    if (!compiled) return;
+    flexUI::Box box(nullptr);
+    check_true(static_cast<bool>(flexUI::UiDocumentInstantiator::instantiate(
+        box, *compiled.program, registry)));
+    auto *root = box.get_by_id("root");
+    auto *graph = box.get_by_id("graph");
+    check_not_null(root);
+    check_not_null(graph);
+    if (!root || !graph) return;
+    root->set_layout_bounds(0, 0, 832, 160);
+    graph->set_layout_bounds(0, 0, 832, 160);
+    box.update();
+    check_equal(graph->child_count(), 4U);
+    const auto baseline = box.owned_element_count();
+    const auto revision = doc->snapshot().revision;
+    flexUI::Element *stable_beta = nullptr;
+    for (auto *raw : graph->children()) {
+      auto *part = static_cast<flexUI::Element *>(raw);
+      const auto *key = part->attribute("part");
+      if (key && *key == "node:beta") stable_beta = part;
+    }
+    check_not_null(stable_beta);
+    if (!stable_beta) return;
+    check_true(graph->attribute("aria-keyshortcuts") &&
+               graph->attribute("aria-keyshortcuts")->find("Delete") !=
+                   std::string::npos);
+
+    auto down = flexUI::Event::mouse_down(85, 56);
+    auto up = flexUI::Event::mouse_up(85, 56);
+    box.dispatch_event(down);
+    box.dispatch_event(up);
+    check_true(up.handled);
+    check_null(box.capturing_element());
+    auto remove = flexUI::Event::key_down(flexUI::KeyCode::Delete);
+    box.dispatch_event(remove);
+    check_true(remove.handled);
+    box.update();
+    check_equal(doc->snapshot().revision, revision + 1);
+    check_equal(doc->snapshot().nodes.size(), 1U);
+    check_equal(doc->snapshot().ports.size(), 1U);
+    check_equal(doc->snapshot().edges.size(), 0U);
+    check_equal(doc->snapshot().routes.size(), 0U);
+    check_equal(doc->undo_count(), 1U);
+    check_equal(graph->child_count(), 2U);
+    check_equal(box.owned_element_count(), baseline - 2U);
+    check(stable_beta->parent_elem() == graph);
+
+    auto undo = flexUI::Event::key_down(
+        flexUI::KeyCode::Z, static_cast<int>(flexUI::KeyMod::Control));
+    box.dispatch_event(undo);
+    check_true(undo.handled);
+    box.update();
+    check_equal(doc->snapshot().nodes.size(), 2U);
+    check_equal(doc->snapshot().ports.size(), 2U);
+    check_equal(doc->snapshot().edges.size(), 1U);
+    check_equal(doc->snapshot().routes.size(), 1U);
+    check_equal(graph->child_count(), 4U);
+    check_equal(box.owned_element_count(), baseline);
+    check(stable_beta->parent_elem() == graph);
+
+    auto redo = flexUI::Event::key_down(
+        flexUI::KeyCode::Y, static_cast<int>(flexUI::KeyMod::Control));
+    box.dispatch_event(redo);
+    box.update();
+    check_true(redo.handled);
+    check_equal(doc->snapshot().nodes.size(), 1U);
+    check_equal(graph->child_count(), 2U);
+    check_true(static_cast<bool>(doc->undo()));
+    box.update();
+    down = flexUI::Event::mouse_down(85, 56);
+    up = flexUI::Event::mouse_up(85, 56);
+    box.dispatch_event(down);
+    box.dispatch_event(up);
+    auto backspace = flexUI::Event::key_down(flexUI::KeyCode::Backspace);
+    box.dispatch_event(backspace);
+    box.update();
+    check_true(backspace.handled);
+    check_equal(doc->snapshot().nodes.size(), 1U);
+    check_equal(graph->child_count(), 2U);
+    check(stable_beta->parent_elem() == graph);
+    check(box.last_widget_part_error() ==
+          flexUI::BoxWidgetPartError::None);
+  }
+
+  it("preserves a locked selected node when Delete is rejected") {
+    auto source = example(false);
+    for (auto &node : source.nodes)
+      if (node.id == "alpha") node.locked = true;
+    auto doc = std::make_shared<GraphEditDocument>();
+    check_true(static_cast<bool>(doc->initialize(std::move(source))));
+    auto registry = flexUI::WidgetRegistry::builtins();
+    check_false(static_cast<bool>(
+        charts::ui::register_graph_canvas_widget(registry, doc)));
+    const auto compiled = flexUI::compile_ui_xml(
+        "<ui name=\"GraphLockedDelete\"><main id=\"root\">"
+        "<native-graph id=\"graph\" /></main></ui>");
+    check_true(static_cast<bool>(compiled));
+    if (!compiled) return;
+    flexUI::Box box(nullptr);
+    check_true(static_cast<bool>(flexUI::UiDocumentInstantiator::instantiate(
+        box, *compiled.program, registry)));
+    auto *root = box.get_by_id("root");
+    auto *graph = box.get_by_id("graph");
+    if (!root || !graph) return;
+    root->set_layout_bounds(0, 0, 832, 160);
+    graph->set_layout_bounds(0, 0, 832, 160);
+    box.update();
+    const auto revision = doc->snapshot().revision;
+    auto down = flexUI::Event::mouse_down(85, 56);
+    auto up = flexUI::Event::mouse_up(85, 56);
+    box.dispatch_event(down);
+    box.dispatch_event(up);
+    auto remove = flexUI::Event::key_down(flexUI::KeyCode::Delete);
+    box.dispatch_event(remove);
+    check_true(remove.handled);
+    check_equal(doc->snapshot().revision, revision);
+    check_equal(doc->snapshot().nodes.size(), 2U);
+    check_equal(doc->snapshot().ports.size(), 2U);
+    check_equal(doc->undo_count(), 0U);
+    check_equal(graph->child_count(), 4U);
+  }
+}
+
 spec("GraphCanvas M2f in-place topology edits and history") {
   it("adds one node with measured ports atomically and prunes connected ports") {
     GraphEditDocument doc;
