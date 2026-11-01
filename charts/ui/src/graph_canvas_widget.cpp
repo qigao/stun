@@ -31,11 +31,6 @@ std::atomic<std::uint64_t> next_graph_mount_generation{1};
 
 enum class GestureMode { Idle, ArmedNode, MoveNode, ArmedGroup, MoveGroup, Connect, Pan };
 
-struct SemanticPart {
-  std::string id;
-  flexUI::Element *element = nullptr; // Borrowed; Box owns the only Element tree.
-};
-
 struct Interaction {
   std::weak_ptr<GraphEditDocument> document;
   GraphCanvasViewport view;
@@ -56,8 +51,6 @@ struct Interaction {
   double cursor_x = 0.0;
   double cursor_y = 0.0;
   std::uint64_t edge_sequence = 1;
-  std::vector<SemanticPart> semantic_nodes;
-  std::vector<SemanticPart> semantic_ports;
 
   ~Interaction() {
     // Cancel the worker before the Box can retire this widget; the worker
@@ -174,7 +167,6 @@ void build_semantic_parts(flexUI::NativeCanvasWidget &widget,
     part->set_attribute("data-node-id", node.id);
     part->set_attribute("aria-current", "false");
     part->set_attribute("data-state", "idle");
-    state.semantic_nodes.push_back({node.id, part});
   }
 
   for (const auto &port : snapshot.ports) {
@@ -190,7 +182,6 @@ void build_semantic_parts(flexUI::NativeCanvasWidget &widget,
     part->set_attribute("data-port-id", port.id);
     part->set_attribute("data-node-id", port.node_id);
     part->set_attribute("data-direction", port.output ? "output" : "input");
-    state.semantic_ports.push_back({port.id, part});
   }
   // Predeclare existing compound proxies in this Box's single semantic tree.
   // Runtime group insertion/removal still needs the separate scoped dynamic
@@ -207,7 +198,6 @@ void build_semantic_parts(flexUI::NativeCanvasWidget &widget,
     part->set_attribute("aria-current", "false");
     part->set_attribute("data-state", "idle");
     part->set_attribute("aria-hidden", "true");
-    state.semantic_nodes.push_back({proxy, part});
     for (const auto &bound : group.proxy_ports) {
       const auto port_name = "port:" + bound.id;
       auto *port_part = widget.declare_semantic_part(
@@ -220,11 +210,13 @@ void build_semantic_parts(flexUI::NativeCanvasWidget &widget,
       port_part->set_attribute("data-port-id", bound.id);
       port_part->set_attribute("data-node-id", proxy);
       port_part->set_attribute("aria-hidden", "true");
-      state.semantic_ports.push_back({bound.id, port_part});
     }
   }
 }
 
+// The single Box child list is the sole semantic ownership source. Never
+// hold Element* in an application-side cache: dynamic removals can physically
+// retire a part between owner frames, invalidating any borrowed old pointer.
 void sync_semantic_parts(const GraphEditDocument &model,
                          const Interaction &state, flexUI::Element &host) {
   GraphEditSnapshot snapshot;
@@ -236,60 +228,107 @@ void sync_semantic_parts(const GraphEditDocument &model,
     const auto px = static_cast<float>(x), py = static_cast<float>(y);
     const auto pw = static_cast<float>(w), ph = static_cast<float>(h);
     if (part.x() != px || part.y() != py ||
-        part.width() != pw || part.height() != ph) {
+        part.width() != pw || part.height() != ph)
       part.set_layout_bounds(px, py, pw, ph);
-    }
+  };
+  const auto set_attr = [](flexUI::Element &part,
+                           const char *name, const std::string &value) {
+    const auto *current = part.attribute(name);
+    if (!current || *current != value) part.set_attribute(name, value);
+  };
+  const auto hidden = [&](flexUI::Element &part) {
+    update_bounds(part, 0.0, 0.0, 0.0, 0.0);
+    set_attr(part, "aria-hidden", "true");
   };
 
-  const auto set_visibility = [](flexUI::Element &part, bool visible) {
-    const std::string desired = visible ? "false" : "true";
-    const auto *current = part.attribute("aria-hidden");
-    if (!current || *current != desired)
-      part.set_attribute("aria-hidden", desired);
-  };
-  for (const auto &slot : state.semantic_nodes) {
-    const auto *node = find_node(snapshot, slot.id);
-    if (!node) {
-      update_bounds(*slot.element, 0.0, 0.0, 0.0, 0.0);
-      set_visibility(*slot.element, false);
+  for (auto *raw : host.children()) {
+    auto *part = dynamic_cast<flexUI::Element *>(raw);
+    if (!part || !part->is_widget_owned()) continue;
+    const auto *name = part->attribute("part");
+    if (!name) continue;
+    if (name->rfind("node:", 0) == 0) {
+      const std::string id = name->substr(5);
+      const auto *node = find_node(snapshot, id);
+      if (!node) { hidden(*part); continue; }
+      double x, y, w, h;
+      if (!node_rect(*node, state, model, x, y, w, h)) {
+        hidden(*part);
+        continue;
+      }
+      update_bounds(*part, x, y, w, h);
+      set_attr(*part, "aria-hidden", "false");
+      set_attr(*part, "data-node-id", id);
+      set_attr(*part, "aria-current",
+               state.selected_node == id ? "true" : "false");
+      set_attr(*part, "data-state",
+               node->locked ? "locked" :
+               state.selected_node == id ? "selected" : "idle");
       continue;
     }
-    set_visibility(*slot.element, true);
-    double x, y, w, h;
-    if (!node_rect(*node, state, model, x, y, w, h)) continue;
-    update_bounds(*slot.element, x, y, w, h);
-    const bool selected = state.selected_node == slot.id;
-    const std::string current = selected ? "true" : "false";
-    const std::string status =
-        node->locked ? "locked" : selected ? "selected" : "idle";
-    if (!slot.element->attribute("aria-current") ||
-        *slot.element->attribute("aria-current") != current) {
-      slot.element->set_attribute("aria-current", current);
-    }
-    if (!slot.element->attribute("data-state") ||
-        *slot.element->attribute("data-state") != status) {
-      slot.element->set_attribute("data-state", status);
-    }
-  }
-  for (const auto &slot : state.semantic_ports) {
-    bool found = false;
-    for (const auto &port : snapshot.ports) {
-      if (port.id != slot.id) continue;
-      found = true;
-      set_visibility(*slot.element, true);
+    if (name->rfind("port:", 0) == 0) {
+      const std::string id = name->substr(5);
+      const auto it = std::find_if(
+          snapshot.ports.begin(), snapshot.ports.end(),
+          [&](const GraphEditPort &port) { return port.id == id; });
+      if (it == snapshot.ports.end()) { hidden(*part); continue; }
       double x, y;
-      if (port_anchor(model, snapshot, port, state, x, y))
-        update_bounds(*slot.element, x - 7.0, y - 7.0, 14.0, 14.0);
-      break;
-    }
-    if (!found) {
-      update_bounds(*slot.element, 0.0, 0.0, 0.0, 0.0);
-      set_visibility(*slot.element, false);
+      if (!port_anchor(model, snapshot, *it, state, x, y)) {
+        hidden(*part);
+        continue;
+      }
+      update_bounds(*part, x - 7.0, y - 7.0, 14.0, 14.0);
+      set_attr(*part, "aria-hidden", "false");
+      set_attr(*part, "data-port-id", it->id);
+      set_attr(*part, "data-node-id", it->node_id);
+      set_attr(*part, "data-direction", it->output ? "output" : "input");
     }
   }
-  const auto *old_routing = host.attribute("data-routing");
-  if (!old_routing || *old_routing != state.routing_state)
-    host.set_attribute("data-routing", state.routing_state);
+  set_attr(host, "data-routing", state.routing_state);
+}
+
+std::vector<flexUI::WidgetSemanticPart>
+desired_graph_semantics(const GraphEditDocument &model) {
+  const auto &snapshot = model.snapshot();
+  std::size_t total = snapshot.nodes.size() + snapshot.ports.size() +
+                      snapshot.groups.size();
+  for (const auto &group : snapshot.groups)
+    total += group.proxy_ports.size();
+  if (total > kMaxSemanticParts)
+    throw std::length_error("GraphCanvas dynamic part budget exceeded");
+  std::vector<flexUI::WidgetSemanticPart> desired;
+  desired.reserve(total);
+  for (const auto &node : snapshot.nodes) {
+    desired.push_back({"node:" + node.id, "graph-node",
+        {{"role", "group"}, {"aria-label", "Graph node " + node.id},
+         {"data-slot", "graph-node"}, {"data-node-id", node.id},
+         {"aria-current", "false"}, {"data-state", "idle"},
+         {"aria-hidden", "true"}}});
+  }
+  for (const auto &port : snapshot.ports) {
+    desired.push_back({"port:" + port.id, "graph-port",
+        {{"role", "group"},
+         {"aria-label", (port.output ? "Output " : "Input ") + port.id +
+                             " on graph node " + port.node_id},
+         {"data-slot", "graph-port"}, {"data-port-id", port.id},
+         {"data-node-id", port.node_id},
+         {"data-direction", port.output ? "output" : "input"},
+         {"aria-hidden", "true"}}});
+  }
+  for (const auto &group : snapshot.groups) {
+    const std::string node = "group@" + group.id;
+    desired.push_back({"node:" + node, "graph-node",
+        {{"role", "group"}, {"aria-label", "Graph group " + group.id},
+         {"data-slot", "graph-node"}, {"data-node-id", node},
+         {"aria-current", "false"}, {"data-state", "idle"},
+         {"aria-hidden", "true"}}});
+    for (const auto &port : group.proxy_ports) {
+      desired.push_back({"port:" + port.id, "graph-port",
+          {{"role", "group"}, {"aria-label", "Group boundary " + port.id},
+           {"data-slot", "graph-port"}, {"data-port-id", port.id},
+           {"data-node-id", node}, {"aria-hidden", "true"}}});
+    }
+  }
+  return desired;
 }
 
 void paint_canvas(const GraphEditDocument &model, const Interaction &interaction,
@@ -804,6 +843,15 @@ flexUI::WidgetRegistryError register_graph_canvas_widget(
         callbacks.sync_semantics = [document, state](flexUI::NativeCanvasWidget &,
                                                      flexUI::Element &host) {
           sync_semantic_parts(*document, *state, host);
+        };
+        // The Box alone reconciles dynamic semantic leaves after
+        // EventDispatcher/frame/layout borrowers retire. No Element* or
+        // renderer handles cross this immutable document callback.
+        callbacks.parts_revision = [document] {
+          return document->snapshot().revision;
+        };
+        callbacks.desired_parts = [document] {
+          return desired_graph_semantics(*document);
         };
         callbacks.owns_part_paint = [](std::string_view name) {
           // The draw commands paint nodes/ports; their Box Elements provide
