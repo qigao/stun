@@ -1,6 +1,8 @@
 name: Stun native GUI screenshot E2E
 
 # One Linux software-OpenGL runner only for actual desktop-editor changes.
+# Include the real GraphCanvas source/Widget contract: this app links both,
+# and source-only edits must still qualify native OpenGL/X11 interaction.
 # This is a genuine visible-window test, NOT hidden --smoke or Tk fixtures.
 on:
   pull_request:
@@ -15,9 +17,6 @@ on:
       - '.github/scripts/restore-flexui-tango-sdk.py'
       - '.github/scripts/tests/test_restore_flexui_tango_sdk.py'
       - 'flexUI/examples/desktop_editor/**'
-      # Real desktop editor links this GraphCanvas implementation directly.
-      # Source-only changes must still requalify physical mouse/keyboard,
-      # semantic Box ownership, and the native visible screenshot.
       - 'charts/ui/src/graph_canvas_widget.cpp'
       - 'charts/ui/src/graph_edit_document.cpp'
       - 'charts/ui/include/charts/ui/graph_canvas_widget.h'
