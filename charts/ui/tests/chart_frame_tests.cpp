@@ -1411,6 +1411,7 @@ spec("GraphCanvas M2f in-place topology edits and history") {
     check_true(static_cast<bool>(doc.undo()));
     check_true(static_cast<bool>(doc.undo()));
     check_true(static_cast<bool>(doc.undo()));
+    check_true(static_cast<bool>(doc.undo()));
     check_equal(doc.snapshot().nodes.size(), baseline.nodes.size());
     check_equal(doc.snapshot().ports.size(), baseline.ports.size());
     check_equal(doc.snapshot().edges.size(), baseline.edges.size());
