@@ -609,7 +609,7 @@ GraphEditStatus GraphEditDocument::begin_move(std::string_view id) {
   for (const auto &group : committed_.groups)
     if (group.collapsed &&
         std::find(group.member_node_ids.begin(),
-                  group.member_node_ids.end(), id) !=
+                  group.member_node_ids.end(), std::string(id)) !=
             group.member_node_ids.end())
       return reject(GraphEditError::LockedNode,
                     "node is hidden behind a collapsed group proxy");
