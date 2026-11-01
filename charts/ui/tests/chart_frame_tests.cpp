@@ -1377,6 +1377,243 @@ GraphEditSnapshot sibling_group_fixture() {
 // original topology and measured named boundaries before Undo publication.
 // M2i: multi-node selection is view-local only; GroupId authoring edits the
 // ONE logical GraphEditDocument and never infers a hidden route proxy.
+// M2j: all group boundary locations and original PortIds are explicitly
+// measured and selected. No nearest-node/edge inference is permitted.
+spec("GraphCanvas M2j explicit measured group boundary port editing") {
+  it("authors a nested external port before collapsing a selected child group") {
+    GraphEditDocument doc;
+    check_true(static_cast<bool>(doc.initialize(nested_group_fixture())));
+    check_true(static_cast<bool>(
+        doc.group_nodes("pair", {"a", "b"}, 8.0)));
+    const auto before = doc.snapshot();
+    const auto missing = doc.set_group_collapsed("pair", true);
+    check_false(static_cast<bool>(missing));
+    check(missing.error == GraphEditError::InvalidInput);
+    check_equal(doc.snapshot().revision, before.revision);
+    check_equal(doc.undo_count(), 1U);
+
+    const charts::ui::GraphEditGroupProxyPort authored{
+        "pair-out", "b-out", gl::Side::East, 154.0, 26.0};
+    auto status = doc.upsert_group_boundary_port("pair", authored);
+    check_true(static_cast<bool>(status));
+    if (!status) return;
+    check_equal(doc.undo_count(), 2U);
+    const auto *pair = group_by_id(doc, "pair");
+    check_not_null(pair);
+    if (!pair) return;
+    check_equal(pair->proxy_ports.size(), 1U);
+    check_equal(pair->proxy_ports[0].id, "pair-out");
+    check_equal(pair->proxy_ports[0].original_port_id, "b-out");
+    const auto rev = doc.snapshot().revision;
+    status = doc.set_group_boundary_ports("pair", {authored});
+    check_true(static_cast<bool>(status));
+    check_equal(doc.snapshot().revision, rev); // identical measured schema
+    check_equal(doc.undo_count(), 2U);
+
+    check_true(static_cast<bool>(doc.set_group_collapsed("pair", true)));
+    GraphEditSnapshot view;
+    check_true(static_cast<bool>(doc.visible_snapshot(view)));
+    check_equal(view.edges.size(), 2U); // ab internal; bc and cd external
+    check_equal(view.edges[0].id, "bc");
+    check_equal(view.edges[0].source_port, "pair-out");
+    check_equal(view.edges[0].target_port, "c-in");
+    check_equal(doc.snapshot().edges.size(), 3U);
+    check_equal(doc.snapshot().edges[1].source_port, "b-out");
+    check_equal(doc.snapshot().routes.size(), 2U);
+    check_within(doc.snapshot().routes[0].points.front().x, 226.0, 1e-6);
+    check_within(doc.snapshot().routes[0].points.front().y, 113.0, 1e-6);
+
+    check_true(static_cast<bool>(doc.undo())); // Expand group.
+    check_true(static_cast<bool>(doc.undo())); // Retire binding.
+    check_equal(group_by_id(doc, "pair")->proxy_ports.size(), 0U);
+    check_equal(doc.snapshot().routes.size(), 3U);
+    check_true(static_cast<bool>(doc.redo())); // Restore same PortId.
+    check_equal(group_by_id(doc, "pair")->proxy_ports[0].id, "pair-out");
+    check_true(static_cast<bool>(doc.redo())); // Collapse again.
+    check_equal(doc.snapshot().routes.size(), 2U);
+  }
+
+  it("refuses removing a binding while a collapsed crossing depends on it") {
+    GraphEditDocument doc;
+    check_true(static_cast<bool>(doc.initialize(sibling_group_fixture())));
+    const auto original = doc.snapshot();
+    check_true(static_cast<bool>(
+        doc.set_group_collapsed("left-group", true)));
+    const auto collapsed = doc.snapshot();
+    auto status = doc.remove_group_boundary_port(
+        "left-group", "left-group-out");
+    check_false(static_cast<bool>(status));
+    check(status.error == GraphEditError::InvalidInput);
+    check_equal(doc.snapshot().revision, collapsed.revision);
+    check_equal(doc.snapshot().routes.size(), collapsed.routes.size());
+    check_equal(doc.undo_count(), 1U);
+    check_true(route_points_identical(
+        doc.snapshot().routes.front(), collapsed.routes.front()));
+
+    check_true(static_cast<bool>(doc.undo()));
+    status = doc.remove_group_boundary_port(
+        "left-group", "left-group-out");
+    check_true(static_cast<bool>(status));
+    check_equal(group_by_id(doc, "left-group")->proxy_ports.size(), 0U);
+    const auto revision = doc.snapshot().revision;
+    status = doc.set_group_collapsed("left-group", true);
+    check_false(static_cast<bool>(status));
+    check(status.error == GraphEditError::InvalidInput);
+    check_equal(doc.snapshot().revision, revision);
+    check_true(static_cast<bool>(doc.undo()));
+    check_equal(group_by_id(doc, "left-group")->proxy_ports.size(), 1U);
+    check_equal(doc.snapshot().routes.size(), original.routes.size());
+  }
+
+  it("rejects a wrong original PortId, wrong measured side, rename and duplicate IDs") {
+    GraphEditDocument doc;
+    check_true(static_cast<bool>(doc.initialize(sibling_group_fixture())));
+    const auto original = doc.snapshot();
+    auto status = doc.upsert_group_boundary_port(
+        "left-group", {"wrong", "outside-in", gl::Side::East, 180.0, 50.0});
+    check_false(static_cast<bool>(status));
+    check(status.error == GraphEditError::InvalidInput);
+    status = doc.upsert_group_boundary_port(
+        "left-group", {"wrong", "left-out", gl::Side::West, 180.0, 50.0});
+    check_false(static_cast<bool>(status));
+    check(status.error == GraphEditError::InvalidGeometry);
+    status = doc.upsert_group_boundary_port(
+        "left-group", {"renamed", "left-out", gl::Side::East, 180.0, 50.0});
+    check_false(static_cast<bool>(status));
+    check(status.error == GraphEditError::InvalidInput);
+    status = doc.set_group_boundary_ports(
+        "left-group",
+        {{"dup", "left-out", gl::Side::East, 180.0, 50.0},
+         {"dup", "left-out", gl::Side::East, 180.0, 58.0}});
+    check_false(static_cast<bool>(status));
+    check(status.error == GraphEditError::InvalidInput);
+    status = doc.set_group_boundary_ports("missing", {});
+    check_false(static_cast<bool>(status));
+    check(status.error == GraphEditError::MissingGroup);
+    status = doc.remove_group_boundary_port("left-group", "unknown");
+    check_false(static_cast<bool>(status));
+    check(status.error == GraphEditError::InvalidInput);
+    check_equal(doc.snapshot().revision, original.revision);
+    check_equal(doc.undo_count(), 0U);
+    for (std::size_t i = 0; i < original.routes.size(); ++i)
+      check_true(route_points_identical(
+          doc.snapshot().routes[i], original.routes[i]));
+
+    check_true(static_cast<bool>(doc.begin_move("left")));
+    status = doc.upsert_group_boundary_port(
+        "left-group", {"left-group-out", "left-out",
+                        gl::Side::East, 180.0, 60.0});
+    check_false(static_cast<bool>(status));
+    check(status.error == GraphEditError::Busy);
+    doc.cancel_move();
+  }
+
+  it("uses real Ctrl+Alt port-to-group-border capture and preserves PortIds") {
+    auto data = example();
+    charts::ui::GraphEditGroup group;
+    group.id = "pack";
+    group.x = 40.0; group.y = 24.0;
+    group.width = 170.0; group.height = 130.0;
+    group.member_node_ids = {"alpha"};
+    // Crossing output has NO inferred group port at mount.
+    data.groups.push_back(group);
+    auto doc = std::make_shared<GraphEditDocument>();
+    check_true(static_cast<bool>(doc->initialize(std::move(data))));
+    auto registry = flexUI::WidgetRegistry::builtins();
+    check_false(static_cast<bool>(
+        charts::ui::register_graph_canvas_widget(registry, doc)));
+    const auto compiled = flexUI::compile_ui_xml(
+        "<ui name=\"GraphBoundaryAuthor\"><main id=\"root\">"
+        "<native-graph id=\"graph\" /></main></ui>");
+    check_true(static_cast<bool>(compiled));
+    if (!compiled) return;
+    flexUI::Box box(nullptr);
+    check_true(static_cast<bool>(flexUI::UiDocumentInstantiator::instantiate(
+        box, *compiled.program, registry)));
+    auto *root = box.get_by_id("root");
+    auto *graph = box.get_by_id("graph");
+    check_not_null(root); check_not_null(graph);
+    if (!root || !graph) return;
+    root->set_layout_bounds(0, 0, 832, 180);
+    graph->set_layout_bounds(0, 0, 832, 180);
+    box.update();
+    check_equal(graph->child_count(), 5U);
+    const auto baseline_owned = box.owned_element_count();
+    const auto baseline_revision = doc->snapshot().revision;
+
+    // Click the group header: missing b-out-style crossing mapping keeps
+    // it expanded and selected. This is a rejected, history-free collapse.
+    auto header_down = flexUI::Event::mouse_down(60, 30);
+    auto header_up = flexUI::Event::mouse_up(60, 30);
+    box.dispatch_event(header_down);
+    box.dispatch_event(header_up);
+    check_true(header_up.handled);
+    check_equal(doc->snapshot().revision, baseline_revision);
+    check_false(group_by_id(*doc, "pack")->collapsed);
+    check_equal(doc->undo_count(), 0U);
+
+    const int mods = static_cast<int>(flexUI::KeyMod::Control) |
+                     static_cast<int>(flexUI::KeyMod::Alt);
+    auto start = flexUI::Event::mouse_down(180, 72);
+    start.mods = mods;
+    box.dispatch_event(start);
+    check_true(start.handled);
+    check(box.capturing_element() == graph);
+    auto move = flexUI::Event::mouse_move(210, 72);
+    move.mods = mods;
+    box.dispatch_event(move);
+    auto release = flexUI::Event::mouse_up(210, 72);
+    release.mods = mods;
+    box.dispatch_event(release);
+    check_true(release.handled);
+    check_null(box.capturing_element());
+    const auto *edited = group_by_id(*doc, "pack");
+    check_not_null(edited);
+    if (!edited) return;
+    check_equal(edited->proxy_ports.size(), 1U);
+    check_equal(edited->proxy_ports[0].original_port_id, "source");
+    check(edited->proxy_ports[0].side == gl::Side::East);
+    check_equal(edited->proxy_ports[0].local_x, 170.0);
+    check_equal(edited->proxy_ports[0].local_y, 48.0);
+    check_equal(doc->undo_count(), 1U);
+    check_equal(doc->snapshot().edges[0].source_port, "source");
+    box.update();
+    check_equal(graph->child_count(), 6U);
+    check_equal(box.owned_element_count(), baseline_owned + 1U);
+
+    // Rejected interior release must not silently guess the nearest side.
+    const auto bound_revision = doc->snapshot().revision;
+    start = flexUI::Event::mouse_down(180, 72);
+    start.mods = mods;
+    box.dispatch_event(start);
+    release = flexUI::Event::mouse_up(150, 72);
+    release.mods = mods;
+    box.dispatch_event(release);
+    check_equal(doc->snapshot().revision, bound_revision);
+    check_equal(group_by_id(*doc, "pack")->proxy_ports[0].local_x, 170.0);
+
+    header_down = flexUI::Event::mouse_down(60, 30);
+    header_up = flexUI::Event::mouse_up(60, 30);
+    box.dispatch_event(header_down);
+    box.dispatch_event(header_up);
+    check_true(group_by_id(*doc, "pack")->collapsed);
+    GraphEditSnapshot visible;
+    check_true(static_cast<bool>(doc->visible_snapshot(visible)));
+    check_equal(visible.edges.size(), 1U);
+    check_equal(visible.edges[0].source_port,
+                group_by_id(*doc, "pack")->proxy_ports[0].id);
+    check_equal(doc->snapshot().edges[0].source_port, "source");
+    check_within(doc->snapshot().routes[0].points.front().x, 210.0, 1e-6);
+    check_true(static_cast<bool>(doc->undo())); // Expand.
+    check_true(static_cast<bool>(doc->undo())); // Remove measured binding.
+    check_equal(group_by_id(*doc, "pack")->proxy_ports.size(), 0U);
+    box.update();
+    check_equal(graph->child_count(), 5U);
+    check_true(static_cast<bool>(doc->redo()));
+    check_equal(group_by_id(*doc, "pack")->proxy_ports.size(), 1U);
+  }
+}
+
 spec("GraphCanvas M2i measured multi-selection group authoring") {
   it("groups two original leaves as one native Undo transaction") {
     GraphEditDocument doc;
