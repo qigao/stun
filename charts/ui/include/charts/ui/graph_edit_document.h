@@ -74,14 +74,30 @@ struct GraphEditStatus {
   explicit operator bool() const noexcept { return error == GraphEditError::None; }
 };
 
-// One owner-thread edit session. Every committed geometry snapshot is
-// independently routed and validated by the existing Stun::GraphOrthogonal
-// algorithm, rather than guessed from the previous frame. Incremental route
-// invalidation is a separate M1 milestone (#378), not claimed here.
+// Per-commit accounting counts real A* routes, not the full obstacle/route
+// postcondition validation (which M1a deliberately retains on the full graph).
+// No UI or GPU pointers are stored with these application-owned diagnostics.
+struct GraphRouteUpdateStats {
+  std::uint64_t committed_revision = 0;
+  std::size_t total_routes = 0;
+  std::size_t rerouted = 0;
+  std::size_t reused = 0;
+  std::size_t incident_invalidated = 0;
+  std::size_t obstacle_invalidated = 0;
+  bool full_rebuild = false;
+};
+
+// One owner-thread edit session. M1a reuses previously validated paths only
+// after conservative swept-obstacle invalidation and independent complete-graph
+// postcondition validation. No asynchronous solver, cache server, or second
+// GraphLayout engine is introduced.
 class GraphEditDocument {
 public:
   GraphEditStatus initialize(GraphEditSnapshot initial);
   const GraphEditSnapshot &snapshot() const noexcept { return committed_; }
+  const GraphRouteUpdateStats &last_route_update() const noexcept {
+    return route_stats_;
+  }
 
   GraphEditStatus begin_move(std::string_view id);
   GraphEditStatus preview_move(double dx, double dy);
@@ -106,10 +122,13 @@ private:
     double y = 0.0;
   };
 
-  static GraphEditStatus validate_and_route(GraphEditSnapshot &next);
+  static GraphEditStatus validate_and_route(
+      GraphEditSnapshot &next, const GraphEditSnapshot *previous,
+      GraphRouteUpdateStats &stats);
   GraphEditStatus publish(GraphEditSnapshot candidate);
 
   GraphEditSnapshot committed_;
+  GraphRouteUpdateStats route_stats_;
   std::optional<MovePreview> move_;
   std::vector<GraphEditSnapshot> undo_;
   std::vector<GraphEditSnapshot> redo_;
