@@ -152,7 +152,7 @@ void build_semantic_parts(flexUI::NativeCanvasWidget &widget,
 
   host.set_attribute("role", "region");
   host.set_attribute("aria-label", "Interactive graph editor");
-  host.set_attribute("aria-keyshortcuts", "Control+Z Control+Y ArrowUp ArrowDown ArrowLeft ArrowRight Delete Backspace");
+  host.set_attribute("aria-keyshortcuts", "Control+Z Control+Y Control+Shift+G ArrowUp ArrowDown ArrowLeft ArrowRight Delete Backspace");
   host.set_attribute("data-slot", "graph-canvas");
   host.set_attribute("data-routing", state.routing_state);
 
@@ -509,6 +509,23 @@ bool handle_input(Interaction &state, GraphEditDocument &model,
     // Escape/FocusOut can revoke it, and the frame callback drains it.
     if (state.routing_mode == GraphCanvasRoutingMode::AsyncCommit &&
         state.worker.pending()) return true;
+    if (state.mode == GestureMode::Idle &&
+        (event.mods & static_cast<int>(flexUI::KeyMod::Control)) &&
+        (event.mods & static_cast<int>(flexUI::KeyMod::Shift)) &&
+        event.key == KeyCode::G) {
+      // M2h: the existing GraphCanvas pointer selection identifies one
+      // stable GroupId. Ungroup through the SAME native document owner;
+      // only a successful reparent/route/Undo transaction clears selection.
+      if (state.selected_group.empty()) return false;
+      const auto result = model.remove_group(state.selected_group);
+      if (result) {
+        state.selected_group.clear();
+        state.selected_node.clear();
+      }
+      state.status_message = result ? "" : result.message;
+      element.mark_paint_dirty();
+      return true;
+    }
     if (state.mode == GestureMode::Idle && (event.mods & static_cast<int>(flexUI::KeyMod::Control))) {
       GraphEditStatus result;
       if (event.key == KeyCode::Z) result = model.undo();
@@ -638,6 +655,7 @@ bool handle_input(Interaction &state, GraphEditDocument &model,
         return true;
       }
       state.selected_node = node->id;
+      state.selected_group.clear(); // A node click supersedes prior group selection.
       if (!node->locked) {
         // Reserve capture for the gesture, but do NOT begin a document
         // transaction until the pointer moves beyond the CSS-pixel threshold.
@@ -652,6 +670,7 @@ bool handle_input(Interaction &state, GraphEditDocument &model,
       return true;
     }
     state.selected_node.clear();
+    state.selected_group.clear();
     element.mark_paint_dirty();
     return true;
   }
