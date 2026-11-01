@@ -1561,7 +1561,10 @@ spec("GraphCanvas M2i measured multi-selection group authoring") {
     check_true(up.handled);
     auto shifted = flexUI::Event::mouse_down(480, 56);
     shifted.mods = static_cast<int>(flexUI::KeyMod::Shift);
+    auto shift_up = flexUI::Event::mouse_up(480, 56);
+    shift_up.mods = shifted.mods;
     box.dispatch_event(shifted);
+    box.dispatch_event(shift_up); // Release the real Box active-pointer lease.
     box.update();
     check_true(shifted.handled);
     check_null(box.capturing_element());
