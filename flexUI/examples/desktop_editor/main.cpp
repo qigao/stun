@@ -446,12 +446,188 @@ int run_smoke(flexUI::GCanvasPluginWindowHost &host,
   return EXIT_SUCCESS;
 }
 
+// M2c: real linked OpenGL/PluginHost/Box, not a mock group graph or second
+// standalone consumer. This follows one native frame and EventDispatcher
+// through parent-local nested collapse, group drag, owner semantic updates,
+// Undo/Redo and the same application Save service.
+int run_hierarchy_smoke(
+    flexUI::GCanvasPluginWindowHost &host,
+    const std::shared_ptr<charts::ui::GraphEditDocument> &model) {
+  auto pumped = host.pump_once(0.0);
+  if (!pumped) return fail("hierarchy initial frame", pumped.error.message);
+  auto *graph = host.application().box().get_by_id("graph");
+  if (!graph || !graph->widget)
+    return fail("hierarchy lookup", "real GraphCanvas is not mounted");
+  const float gx = graph->absolute_x(), gy = graph->absolute_y();
+  const auto find_node = [&](std::string_view id)
+      -> const charts::ui::GraphEditNode * {
+    for (const auto &node : model->snapshot().nodes)
+      if (node.id == id) return &node;
+    return nullptr;
+  };
+  const auto find_group = [&](std::string_view id)
+      -> const charts::ui::GraphEditGroup * {
+    for (const auto &group : model->snapshot().groups)
+      if (group.id == id) return &group;
+    return nullptr;
+  };
+  if (model->snapshot().groups.size() != 3 ||
+      model->snapshot().routes.size() != 3)
+    return fail("hierarchy source", "three-level original source did not route");
+  charts::ui::GraphEditNode inner;
+  if (!model->group_world_rect("inner", inner) ||
+      inner.x != 70.0 || inner.y != 70.0)
+    return fail("hierarchy local transform", "nested world resolution mismatch");
+  const auto first_revision = model->snapshot().revision;
+
+  // Choose the *inner* header. Its ancestors are expanded, but their larger
+  // rectangles must not steal this child's capture.
+  auto down = flexUI::Event::mouse_down(gx + 90.0F, gy + 78.0F);
+  auto move = flexUI::Event::mouse_move(gx + 114.0F, gy + 86.0F);
+  auto up = flexUI::Event::mouse_up(gx + 114.0F, gy + 86.0F);
+  if (!host.application().dispatch_event(down) || !down.handled ||
+      host.application().box().capturing_element() != graph ||
+      !host.application().dispatch_event(move) || !move.handled ||
+      !model->has_preview() ||
+      model->snapshot().revision != first_revision)
+    return fail("hierarchy preview", "nested child failed real Box capture");
+  double px = 0, py = 0;
+  if (!model->preview_position("group@inner", px, py) ||
+      px != 94.0 || py != 78.0 ||
+      !model->preview_position("a", px, py) ||
+      px != 104.0 || py != 103.0 ||
+      !host.application().dispatch_event(up) || !up.handled ||
+      host.application().box().capturing_element() != nullptr ||
+      model->has_preview() ||
+      model->snapshot().revision != first_revision + 1)
+    return fail("hierarchy child commit", "single-group motion was not atomic");
+  const auto *inner_group = find_group("inner");
+  const auto *middle_group = find_group("middle");
+  const auto *outer_group = find_group("outer");
+  if (!inner_group || !middle_group || !outer_group ||
+      inner_group->x != 44.0 || inner_group->y != 28.0 ||
+      middle_group->x != 30.0 || outer_group->x != 20.0 ||
+      !find_node("a") || find_node("a")->x != 104.0 ||
+      !find_node("b") || find_node("b")->x != 194.0 ||
+      !find_node("c") || find_node("c")->x != 340.0)
+    return fail("hierarchy child isolation", "parent-local coordinates mutated");
+  pumped = host.pump_once(0.0);
+  if (!pumped) return fail("hierarchy child frame", pumped.error.message);
+
+  // Collapse child; (a,b) and logical ab persist, but bc departs from the
+  // precisely measured inner proxy boundary at x=294 (original x=270+24).
+  auto child_down = flexUI::Event::mouse_down(gx + 110.0F, gy + 80.0F);
+  auto child_up = flexUI::Event::mouse_up(gx + 110.0F, gy + 80.0F);
+  if (!host.application().dispatch_event(child_down) ||
+      !host.application().dispatch_event(child_up) || !child_up.handled ||
+      !find_group("inner")->collapsed ||
+      model->snapshot().routes.size() != 2 ||
+      model->snapshot().routes[0].points.front().x != 294.0 ||
+      model->snapshot().edges.size() != 3 ||
+      model->snapshot().edges[1].source_port != "b-out")
+    return fail("hierarchy inner collapse", "stable boundary remap failed");
+  pumped = host.pump_once(0.0);
+  if (!pumped) return fail("hierarchy inner frame", pumped.error.message);
+  bool has_inner_proxy = false;
+  for (auto *child : graph->children()) {
+    auto *part = static_cast<flexUI::Element *>(child);
+    const auto *name = part->attribute("part");
+    if (name && *name == "node:group@inner" &&
+        part->x() == 94.0f && part->attribute("aria-hidden") &&
+        *part->attribute("aria-hidden") == "false")
+      has_inner_proxy = true;
+  }
+  if (!has_inner_proxy)
+    return fail("hierarchy semantic proxy", "real Box did not publish child proxy");
+
+  // Collapse outer: the child proxy must no longer be visible and logical
+  // cd must originate from outer's explicit c-out mapping.
+  auto outer_down = flexUI::Event::mouse_down(gx + 36.0F, gy + 28.0F);
+  auto outer_up = flexUI::Event::mouse_up(gx + 36.0F, gy + 28.0F);
+  if (!host.application().dispatch_event(outer_down) ||
+      !host.application().dispatch_event(outer_up) || !outer_up.handled ||
+      !find_group("outer")->collapsed ||
+      model->group_is_visible("inner") ||
+      model->snapshot().routes.size() != 1 ||
+      model->snapshot().routes[0].edge_id != "cd" ||
+      model->snapshot().routes[0].points.front().x != 440.0)
+    return fail("hierarchy outer collapse", "outermost proxy choice failed");
+
+  // The expanded descendants cannot steal a drag from the collapsed outer
+  // proxy. Move the parent and verify all original descendants plus route.
+  auto parent_down = flexUI::Event::mouse_down(gx + 80.0F, gy + 55.0F);
+  auto parent_move = flexUI::Event::mouse_move(gx + 96.0F, gy + 63.0F);
+  auto parent_up = flexUI::Event::mouse_up(gx + 96.0F, gy + 63.0F);
+  const auto collapsed_revision = model->snapshot().revision;
+  if (!host.application().dispatch_event(parent_down) ||
+      !host.application().dispatch_event(parent_move) ||
+      !model->has_preview() ||
+      model->snapshot().revision != collapsed_revision ||
+      !host.application().dispatch_event(parent_up) || !parent_up.handled ||
+      model->has_preview() ||
+      model->snapshot().revision != collapsed_revision + 1 ||
+      find_group("outer")->x != 36.0 ||
+      find_group("middle")->x != 30.0 ||
+      find_group("inner")->x != 44.0 ||
+      find_node("a")->x != 120.0 ||
+      find_node("b")->x != 210.0 ||
+      find_node("c")->x != 356.0 ||
+      find_node("d")->x != 560.0 ||
+      model->snapshot().routes[0].points.front().x != 456.0)
+    return fail("hierarchy parent drag", "descendant world motion was not atomic");
+  pumped = host.pump_once(0.0);
+  if (!pumped) return fail("hierarchy parent frame", pumped.error.message);
+  bool has_outer_proxy = false;
+  for (auto *child : graph->children()) {
+    auto *part = static_cast<flexUI::Element *>(child);
+    const auto *name = part->attribute("part");
+    if (name && *name == "node:group@outer" &&
+        part->x() == 36.0f && part->attribute("aria-hidden") &&
+        *part->attribute("aria-hidden") == "false")
+      has_outer_proxy = true;
+  }
+  if (!has_outer_proxy)
+    return fail("hierarchy outer semantics", "real owner frame missed proxy motion");
+
+  // Undo parent drag and both collapses, then child movement. All source
+  // topology and local/world coordinates return exactly to the baseline.
+  for (int i = 0; i < 4; ++i) {
+    const auto undone = model->undo();
+    if (!undone) return fail("hierarchy Undo", undone.message);
+  }
+  if (model->snapshot().nodes.size() != 4 ||
+      model->snapshot().edges.size() != 3 ||
+      model->snapshot().routes.size() != 3 ||
+      find_group("inner")->collapsed ||
+      find_group("outer")->collapsed ||
+      find_group("inner")->x != 20.0 ||
+      find_group("outer")->x != 20.0 ||
+      find_node("a")->x != 80.0 ||
+      find_node("c")->x != 340.0)
+    return fail("hierarchy history", "exact original topology was not restored");
+
+  // Retain the genuine PluginHost document Save check on this new source.
+  auto *save = host.application().box().get_by_id("save");
+  if (!save) return fail("hierarchy Save lookup", "no real #save element");
+  const auto clicked = dispatch_save_click(host.application(), *save);
+  if (!clicked) return fail("hierarchy Save click", clicked.error.message);
+  std::string pump_error;
+  if (!pump_until_saved(host, *save, pump_error))
+    return fail("hierarchy Save service", pump_error);
+  const auto stopped = host.shutdown(kShutdownTimeout);
+  if (!stopped) return fail("hierarchy shutdown", stopped.error.message);
+  std::cout << "FlexUI desktop editor hierarchy smoke passed: "
+            << save->text() << '\n';
+  return EXIT_SUCCESS;
+}
+
 } // namespace
 
 int main(int argc, char **argv) {
   bool smoke = false;
   bool async_routing = false;
   bool group_smoke = false;
+  bool hierarchy_smoke = false;
   if (argc == 2 && std::string_view(argv[1]) == "--smoke") {
     smoke = true;
   } else if (argc == 2 && std::string_view(argv[1]) == "--smoke-async") {
@@ -460,9 +636,12 @@ int main(int argc, char **argv) {
   } else if (argc == 2 && std::string_view(argv[1]) == "--smoke-group") {
     smoke = true;
     group_smoke = true;
+  } else if (argc == 2 && std::string_view(argv[1]) == "--smoke-hierarchy") {
+    smoke = true;
+    hierarchy_smoke = true;
   } else if (argc != 1) {
     return fail("arguments",
-                "usage: flexui_desktop_editor [--smoke|--smoke-async|--smoke-group]");
+                "usage: flexui_desktop_editor [--smoke|--smoke-async|--smoke-group|--smoke-hierarchy]");
   }
 
   std::error_code path_error;
@@ -502,6 +681,47 @@ int main(int argc, char **argv) {
         {"pack-out", "source", stun::graphlayout::Side::East, 170.0, 48.0});
     initial_graph.groups.push_back(std::move(group));
   }
+  if (hierarchy_smoke) {
+    // All original leaf nodes/ports remain world-space; nested groups are
+    // parent-local. These are the SAME bounded C++ source types that the
+    // existing ChartUiTest uses, not a parallel smoke-only graph runtime.
+    using stun::graphlayout::Side;
+    initial_graph.nodes = {{"a", 80, 95, 48, 36, false},
+                           {"b", 170, 95, 48, 36, false},
+                           {"c", 340, 95, 48, 36, false},
+                           {"d", 560, 95, 48, 36, false}};
+    initial_graph.ports = {
+        {"a-out", "a", Side::East, 48, 18, true},
+        {"b-in", "b", Side::West, 0, 18, false},
+        {"b-out", "b", Side::East, 48, 18, true},
+        {"c-in", "c", Side::West, 0, 18, false},
+        {"c-out", "c", Side::East, 48, 18, true},
+        {"d-in", "d", Side::West, 0, 18, false}};
+    initial_graph.edges = {{"ab", "a-out", "b-in"},
+                           {"bc", "b-out", "c-in"},
+                           {"cd", "c-out", "d-in"}};
+    charts::ui::GraphEditGroup outer;
+    outer.id = "outer";
+    outer.x = 20; outer.y = 20; outer.width = 420; outer.height = 240;
+    outer.member_node_ids = {"c"};
+    outer.proxy_ports.push_back(
+        {"outer-out", "c-out", Side::East, 420, 93});
+    charts::ui::GraphEditGroup middle;
+    middle.id = "middle";
+    middle.parent_group_id = "outer";
+    middle.x = 30; middle.y = 30; middle.width = 270; middle.height = 180;
+    middle.proxy_ports.push_back(
+        {"middle-out", "b-out", Side::East, 270, 63});
+    charts::ui::GraphEditGroup inner;
+    inner.id = "inner";
+    inner.parent_group_id = "middle";
+    inner.x = 20; inner.y = 20; inner.width = 200; inner.height = 115;
+    inner.member_node_ids = {"a", "b"};
+    inner.proxy_ports.push_back(
+        {"inner-out", "b-out", Side::East, 200, 43});
+    initial_graph.groups = {std::move(outer), std::move(middle),
+                            std::move(inner)};
+  }
   if (const auto status = graph_model->initialize(std::move(initial_graph)); !status) {
     return fail("graph source", status.message);
   }
@@ -515,6 +735,7 @@ int main(int argc, char **argv) {
     return fail("runtime composition", built.error.message);
   }
 
+  if (hierarchy_smoke) return run_hierarchy_smoke(*built.host, graph_model);
   if (smoke) {
     return run_smoke(*built.host, timeline_model, graph_model,
                      async_routing, group_smoke);
