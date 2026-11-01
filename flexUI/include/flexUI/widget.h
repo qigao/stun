@@ -12,6 +12,8 @@
 #include <string_view>
 #include <unordered_map>
 #include <utility>
+#include <vector>
+#include <cstdint>
 
 namespace flexUI {
 
@@ -19,6 +21,15 @@ namespace flexUI {
 class Element;
 struct Event;
 class RenderCommandList;
+
+// One Box-owned, linked Widget part declaration. Names are stable per
+// mounted Widget, not global DOM IDs. Only semantic attributes are supported;
+// compiled handlers, executable callbacks and arbitrary styles are excluded.
+struct WidgetSemanticPart {
+  std::string name;
+  std::string tag;
+  std::vector<std::pair<std::string, std::string>> attributes;
+};
 
 /**
  * Widget - 所有 UI 组件的基类
@@ -141,6 +152,13 @@ public:
    * delegating atomic leaf drawing (glyphs, carets, selection fragments) to
    * the owning widget.
    */
+  // Optional LINKED semantic-part reconciliation, performed only by Box at
+  // its safe owner boundary, never inside layout/event/frame callbacks.
+  // A zero revision or empty default implementation opts out.
+  virtual std::uint64_t dynamic_parts_revision() const { return 0; }
+  virtual std::vector<WidgetSemanticPart> desired_dynamic_parts() const {
+    return {};
+  }
   virtual bool paints_part_box(std::string_view part_name) const {
     (void)part_name;
     return false;
@@ -206,6 +224,8 @@ protected:
   bool dirty_ = true;
 
 private:
+  friend class Box;
+  std::uint64_t last_semantic_part_revision_ = 0;
   Element* host_element_ = nullptr;
   bool semantic_tree_rendering_ = false;
   std::unordered_map<Symbol, Element*, SymbolHash> parts_;
