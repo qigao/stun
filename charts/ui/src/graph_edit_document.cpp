@@ -38,6 +38,13 @@ bool overlap(const GraphEditNode &a, const GraphEditNode &b) {
          a.y < b.y + b.height && b.y < a.y + a.height;
 }
 
+void set_committed_revisions(GraphEditSnapshot &snapshot,
+                             std::uint64_t revision) noexcept {
+  snapshot.revision = revision;
+  snapshot.document_revision = revision;
+  snapshot.geometry_revision = revision;
+}
+
 GraphEditError routing_error(gl::RouteError error) {
   switch (error) {
   case gl::RouteError::CapacityExceeded: return GraphEditError::CapacityExceeded;
@@ -160,7 +167,7 @@ GraphEditStatus GraphEditDocument::initialize(GraphEditSnapshot initial) {
   if (move_) return reject(GraphEditError::Busy, "cannot replace an active edit");
   const auto status = validate_and_route(initial);
   if (!status) return status;
-  initial.revision = 1;
+  set_committed_revisions(initial, 1);
   committed_ = std::move(initial);
   undo_.clear();
   redo_.clear();
@@ -211,7 +218,7 @@ GraphEditStatus GraphEditDocument::publish(GraphEditSnapshot candidate) {
   undo_.push_back(committed_);
   if (undo_.size() > kMaxHistory) undo_.erase(undo_.begin());
   redo_.clear();
-  candidate.revision = committed_.revision + 1;
+  set_committed_revisions(candidate, committed_.revision + 1);
   committed_ = std::move(candidate);
   return {};
 }
@@ -254,7 +261,7 @@ GraphEditStatus GraphEditDocument::undo() {
   if (redo_.size() > kMaxHistory) redo_.erase(redo_.begin());
   auto previous = std::move(undo_.back());
   undo_.pop_back();
-  previous.revision = committed_.revision + 1;
+  set_committed_revisions(previous, committed_.revision + 1);
   committed_ = std::move(previous);
   return {};
 }
@@ -269,7 +276,7 @@ GraphEditStatus GraphEditDocument::redo() {
   if (undo_.size() > kMaxHistory) undo_.erase(undo_.begin());
   auto next = std::move(redo_.back());
   redo_.pop_back();
-  next.revision = committed_.revision + 1;
+  set_committed_revisions(next, committed_.revision + 1);
   committed_ = std::move(next);
   return {};
 }

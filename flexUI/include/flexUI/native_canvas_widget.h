@@ -5,6 +5,7 @@
 
 #include <functional>
 #include <stdexcept>
+#include <string_view>
 #include <utility>
 
 namespace flexUI {
@@ -23,11 +24,18 @@ public:
     using Input = std::function<bool(NativeCanvasWidget &, const Event &, Element &)>;
     using Frame = std::function<void(float, Element &)>;
     using Measure = std::function<bool(const Element &, float, float, float &, float &)>;
+    // Linked-only semantic parts remain in the one Box-owned Element tree.
+    using Mount = std::function<void(NativeCanvasWidget &, Element &)>;
+    using Sync = std::function<void(NativeCanvasWidget &, Element &)>;
+    using PartPaint = std::function<bool(std::string_view)>;
 
     Paint paint;
     Input input;
     Frame frame;
     Measure measure;
+    Mount mount;
+    Sync sync_semantics;
+    PartPaint owns_part_paint;
   };
 
   explicit NativeCanvasWidget(Callbacks callbacks) : callbacks_(std::move(callbacks)) {
@@ -45,6 +53,7 @@ public:
 
   bool handle_event(const Event &event, Element &elem) override {
     const bool consumed = callbacks_.input ? callbacks_.input(*this, event, elem) : false;
+    if (callbacks_.sync_semantics) callbacks_.sync_semantics(*this, elem);
     // Captured pointers must never remain captured after release or focus loss.
     if (event.type == EventType::MouseUp || event.type == EventType::FocusOut) {
       pointer_capture_ = false;
@@ -53,6 +62,14 @@ public:
   }
 
   bool wants_mouse_capture() const override { return pointer_capture_; }
+  bool paints_part_box(std::string_view part_name) const override {
+    return callbacks_.owns_part_paint && callbacks_.owns_part_paint(part_name);
+  }
+
+  /// Create one stable, Box-owned semantic part during the mount callback.
+  Element *declare_semantic_part(const char *tag, const char *name) {
+    return create_part(tag, name);
+  }
 
   /// Call during an input callback; EventDispatcher reconciles capture after
   /// the callback. The host, not the extension, owns event routing.
@@ -72,6 +89,21 @@ public:
                               float &out_height) const override {
     return callbacks_.measure && callbacks_.measure(
         elem, available_width, available_height, out_width, out_height);
+  }
+
+protected:
+  void build_semantic_tree() override {
+    if (callbacks_.mount && host_element()) callbacks_.mount(*this, *host_element());
+  }
+  void sync_host_semantics() override {
+    if (callbacks_.sync_semantics && host_element()) {
+      callbacks_.sync_semantics(*this, *host_element());
+    }
+  }
+
+public:
+  void sync_host_semantics_for_layout(Element &element) override {
+    if (callbacks_.sync_semantics) callbacks_.sync_semantics(*this, element);
   }
 
 private:

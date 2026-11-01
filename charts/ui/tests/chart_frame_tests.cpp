@@ -513,6 +513,8 @@ spec("GraphCanvas M0 application-owned graph editing") {
     check_true(static_cast<bool>(a.initialize(std::move(original))));
     check_true(static_cast<bool>(b.initialize(std::move(shuffled))));
     check_equal(a.snapshot().revision, std::uint64_t{1});
+    check_equal(a.snapshot().document_revision, std::uint64_t{1});
+    check_equal(a.snapshot().geometry_revision, std::uint64_t{1});
     check_equal(a.snapshot().nodes.front().id, "alpha");
     check_equal(a.snapshot().routes.size(), 1U);
     check_equal(b.snapshot().routes.size(), 1U);
@@ -561,6 +563,8 @@ spec("GraphCanvas M0 application-owned graph editing") {
     check_true(static_cast<bool>(model.redo()));
     check_equal(node_by_id(model, "alpha")->x, 87.0);
     check_equal(model.snapshot().revision, first_rev + 3);
+    check_equal(model.snapshot().document_revision, first_rev + 3);
+    check_equal(model.snapshot().geometry_revision, first_rev + 3);
     check_equal(model.undo_count(), 1U);
   }
 
@@ -683,6 +687,35 @@ spec("GraphCanvas M0 uses real FlexUI Box-owned XML and EventDispatcher") {
     check_not_null(native);
     if (!native) return;
 
+    // The same Box owns real semantic Elements, not an invisible private
+    // graph scene. These can be found with ordinary CSS/selectors.
+    auto semantic_nodes = box.query_selector_all("#graph > graph-node");
+    auto semantic_ports = box.query_selector_all("#graph > graph-port");
+    check_equal(semantic_nodes.size(), 2U);
+    check_equal(semantic_ports.size(), 2U);
+    check_equal(graph->child_count(), 4U);
+    check_equal(*graph->attribute("role"), "region");
+    flexUI::Element *node_alpha = nullptr;
+    flexUI::Element *port_source = nullptr;
+    for (auto *child : graph->children()) {
+      auto *part = static_cast<flexUI::Element *>(child);
+      const auto *name = part->attribute("part");
+      if (name && *name == "node:alpha") node_alpha = part;
+      if (name && *name == "port:source") port_source = part;
+    }
+    check_not_null(node_alpha);
+    check_not_null(port_source);
+    if (!node_alpha || !port_source) return;
+    check_equal(*node_alpha->attribute("data-node-id"), "alpha");
+    check_equal(*node_alpha->attribute("aria-hidden"), "false");
+    check_equal(*node_alpha->attribute("aria-current"), "false");
+    check_equal(*port_source->attribute("data-direction"), "output");
+    check_equal(*port_source->attribute("aria-hidden"), "false");
+    check_true(native->paints_part_box("node:alpha"));
+    check_true(native->paints_part_box("port:source"));
+    check_false(native->paints_part_box("other"));
+    const auto *stable_semantic_node = node_alpha;
+
     // An ordinary click and sub-threshold drift never create a preview,
     // route recomputation, or Undo transaction.
     const auto click_revision = model->snapshot().revision;
@@ -694,6 +727,7 @@ spec("GraphCanvas M0 uses real FlexUI Box-owned XML and EventDispatcher") {
     box.dispatch_event(micro_move);
     check_true(micro_move.handled);
     check_false(model->has_preview());
+    check_equal(*node_alpha->attribute("aria-current"), "true");
     auto click_up = flexUI::Event::mouse_up(87, 57);
     box.dispatch_event(click_up);
     check_true(click_up.handled);
@@ -711,6 +745,8 @@ spec("GraphCanvas M0 uses real FlexUI Box-owned XML and EventDispatcher") {
     check_true(move.handled);
     check_true(model->has_preview());
     check_equal(node_by_id(*model, "alpha")->x, 55.0);
+    check_equal(node_alpha->x(), 87.0F); // semantic part follows PREVIEW only
+    check_equal(port_source->x(), 205.0F); // moved port center = 212
     auto up = flexUI::Event::mouse_up(117, 70);
     box.dispatch_event(up);
     check_true(up.handled);
@@ -754,6 +790,23 @@ spec("GraphCanvas M0 uses real FlexUI Box-owned XML and EventDispatcher") {
     check_null(box.capturing_element());
     check_equal(model->snapshot().edges.size(), 1U);
     check_equal(model->snapshot().routes.size(), 1U);
+    check(node_alpha == stable_semantic_node);
+    // Keyboard editing uses the same document transaction / router path.
+    auto key_right = flexUI::Event::key_down(flexUI::KeyCode::Right);
+    box.dispatch_event(key_right);
+    check_true(key_right.handled);
+    check_equal(node_by_id(*model, "alpha")->x, 95.0);
+    check_equal(node_alpha->x(), 95.0F);
+    auto undo_key = flexUI::Event::key_down(
+        flexUI::KeyCode::Z, static_cast<int>(flexUI::KeyMod::Control));
+    box.dispatch_event(undo_key);
+    check_true(undo_key.handled);
+    check_equal(node_by_id(*model, "alpha")->x, 87.0);
+    auto redo_key = flexUI::Event::key_down(
+        flexUI::KeyCode::Y, static_cast<int>(flexUI::KeyMod::Control));
+    box.dispatch_event(redo_key);
+    check_true(redo_key.handled);
+    check_equal(node_by_id(*model, "alpha")->x, 95.0);
 
     flexUI::RenderCommandList render(flex::RendererCapabilities{});
     native->emit_render_commands(*graph, render);
@@ -824,5 +877,41 @@ spec("GraphCanvas M0 uses real FlexUI Box-owned XML and EventDispatcher") {
     check_equal(node_by_id(*second, "alpha")->x, 75.0);
     check_equal(first->undo_count(), 0U);
     check_equal(second->undo_count(), 1U);
+  }
+
+  it("retires an in-progress edit when the Box owning its Widget is destroyed") {
+    auto document = std::make_shared<GraphEditDocument>();
+    check_true(static_cast<bool>(document->initialize(example(false))));
+    const auto committed = document->snapshot();
+    {
+      auto registry = flexUI::WidgetRegistry::builtins();
+      check_false(static_cast<bool>(
+          charts::ui::register_graph_canvas_widget(registry, document)));
+      auto compiled = flexUI::compile_ui_xml(
+          "<ui name=\"GraphRetirement\"><main id=\"root\">"
+          "<native-graph id=\"graph\" /></main></ui>");
+      check_true(static_cast<bool>(compiled));
+      if (!compiled) return;
+      flexUI::Box box(nullptr);
+      const auto result = flexUI::UiDocumentInstantiator::instantiate(
+          box, *compiled.program, registry);
+      check_true(static_cast<bool>(result));
+      if (!result) return;
+      box.get_by_id("root")->set_layout_bounds(0, 0, 832, 160);
+      box.get_by_id("graph")->set_layout_bounds(0, 0, 832, 160);
+      auto down = flexUI::Event::mouse_down(85, 56);
+      auto drag = flexUI::Event::mouse_move(117, 70);
+      box.dispatch_event(down);
+      box.dispatch_event(drag);
+      check_true(document->has_preview());
+      check(box.capturing_element() == box.get_by_id("graph"));
+    }
+    check_false(document->has_preview());
+    check_equal(document->snapshot().revision, committed.revision);
+    check_equal(node_by_id(*document, "alpha")->x, 55.0);
+    check_equal(document->undo_count(), 0U);
+    // A fresh mount may edit the SAME authoritative document after retirement.
+    check_true(static_cast<bool>(document->begin_move("alpha")));
+    document->cancel_move();
   }
 }

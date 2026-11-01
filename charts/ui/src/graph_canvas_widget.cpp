@@ -9,6 +9,8 @@
 #include <cmath>
 #include <cstdint>
 #include <memory>
+#include <stdexcept>
+#include <vector>
 #include <string>
 #include <utility>
 
@@ -19,10 +21,19 @@ constexpr double kMinZoom = 0.5;
 constexpr double kMaxZoom = 3.0;
 constexpr double kPortHitRadiusPx = 11.0;
 constexpr double kDragStartThresholdPx = 4.0;
+// The Box borrower inspector currently caps each Widget at 1024 owned parts.
+// M0 is an intentionally bounded, fully materialized semantic graph.
+constexpr std::size_t kMaxSemanticParts = 1024;
 
 enum class GestureMode { Idle, ArmedNode, MoveNode, Connect, Pan };
 
+struct SemanticPart {
+  std::string id;
+  flexUI::Element *element = nullptr; // Borrowed; Box owns the only Element tree.
+};
+
 struct Interaction {
+  std::weak_ptr<GraphEditDocument> document;
   GraphCanvasViewport view;
   GestureMode mode = GestureMode::Idle;
   std::string selected_node;
@@ -35,6 +46,16 @@ struct Interaction {
   double cursor_x = 0.0;
   double cursor_y = 0.0;
   std::uint64_t edge_sequence = 1;
+  std::vector<SemanticPart> semantic_nodes;
+  std::vector<SemanticPart> semantic_ports;
+
+  ~Interaction() {
+    // The widget may be destroyed by document/root retirement without
+    // receiving a final FocusOut. No Box/Element pointers are touched here.
+    if (mode == GestureMode::MoveNode) {
+      if (auto owner = document.lock()) owner->cancel_move();
+    }
+  }
 };
 
 bool inside(const flexUI::Element &elem, double x, double y) {
@@ -73,11 +94,15 @@ const GraphEditNode *hit_node(const GraphEditDocument &model,
   return nullptr;
 }
 
-bool port_anchor(const GraphEditSnapshot &snapshot, const GraphEditPort &port,
+bool port_anchor(const GraphEditDocument &document,
+                 const GraphEditSnapshot &snapshot, const GraphEditPort &port,
                  const Interaction &interaction, double &x, double &y) {
   const auto *node = find_node(snapshot, port.node_id);
-  return node && interaction.view.to_local(
-      node->x + port.local_x, node->y + port.local_y, x, y);
+  if (!node) return false;
+  double px = node->x, py = node->y;
+  document.preview_position(node->id, px, py);
+  return interaction.view.to_local(
+      px + port.local_x, py + port.local_y, x, y);
 }
 
 const GraphEditPort *hit_port(const GraphEditDocument &model,
@@ -88,12 +113,104 @@ const GraphEditPort *hit_port(const GraphEditDocument &model,
   for (const auto &port : snapshot.ports) {
     if (port.output != output) continue;
     double x, y;
-    if (!port_anchor(snapshot, port, interaction, x, y)) continue;
+    if (!port_anchor(model, snapshot, port, interaction, x, y)) continue;
     const double dx = local_x - x, dy = local_y - y;
     if (dx * dx + dy * dy <= kPortHitRadiusPx * kPortHitRadiusPx)
       return &port;
   }
   return nullptr;
+}
+
+void build_semantic_parts(flexUI::NativeCanvasWidget &widget,
+                          flexUI::Element &host, const GraphEditDocument &model,
+                          Interaction &state) {
+  const auto &snapshot = model.snapshot();
+  if (snapshot.nodes.size() + snapshot.ports.size() > kMaxSemanticParts) {
+    throw std::invalid_argument(
+        "GraphCanvas exceeds Box's bounded Widget-owned semantic-part capacity");
+  }
+
+  host.set_attribute("role", "region");
+  host.set_attribute("aria-label", "Interactive graph editor");
+  host.set_attribute("aria-keyshortcuts", "Control+Z Control+Y ArrowUp ArrowDown ArrowLeft ArrowRight");
+  host.set_attribute("data-slot", "graph-canvas");
+
+  for (const auto &node : snapshot.nodes) {
+    const auto name = "node:" + node.id;
+    auto *part = widget.declare_semantic_part("graph-node", name.c_str());
+    if (!part) throw std::runtime_error("could not create GraphCanvas semantic node");
+    part->set_attribute("role", "group");
+    part->set_attribute("aria-hidden", "false");
+    part->set_attribute("aria-label", "Graph node " + node.id);
+    part->set_attribute("data-slot", "graph-node");
+    part->set_attribute("data-node-id", node.id);
+    part->set_attribute("aria-current", "false");
+    part->set_attribute("data-state", "idle");
+    state.semantic_nodes.push_back({node.id, part});
+  }
+
+  for (const auto &port : snapshot.ports) {
+    const auto name = "port:" + port.id;
+    auto *part = widget.declare_semantic_part("graph-port", name.c_str());
+    if (!part) throw std::runtime_error("could not create GraphCanvas semantic port");
+    part->set_attribute("role", "group");
+    part->set_attribute("aria-hidden", "false");
+    part->set_attribute("aria-label",
+        (port.output ? "Output " : "Input ") + port.id +
+        " on graph node " + port.node_id);
+    part->set_attribute("data-slot", "graph-port");
+    part->set_attribute("data-port-id", port.id);
+    part->set_attribute("data-node-id", port.node_id);
+    part->set_attribute("data-direction", port.output ? "output" : "input");
+    state.semantic_ports.push_back({port.id, part});
+  }
+}
+
+void sync_semantic_parts(const GraphEditDocument &model,
+                         const Interaction &state, flexUI::Element &host) {
+  const auto &snapshot = model.snapshot();
+  const auto update_bounds = [](flexUI::Element &part, double x, double y,
+                                double w, double h) {
+    if (!std::isfinite(x) || !std::isfinite(y) ||
+        !std::isfinite(w) || !std::isfinite(h)) return;
+    const auto px = static_cast<float>(x), py = static_cast<float>(y);
+    const auto pw = static_cast<float>(w), ph = static_cast<float>(h);
+    if (part.x() != px || part.y() != py ||
+        part.width() != pw || part.height() != ph) {
+      part.set_layout_bounds(px, py, pw, ph);
+    }
+  };
+
+  for (const auto &slot : state.semantic_nodes) {
+    const auto *node = find_node(snapshot, slot.id);
+    if (!node) continue; // Node insertion/removal is outside the M0 contract.
+    double x, y, w, h;
+    if (!node_rect(*node, state, model, x, y, w, h)) continue;
+    update_bounds(*slot.element, x, y, w, h);
+    const bool selected = state.selected_node == slot.id;
+    const std::string current = selected ? "true" : "false";
+    const std::string status =
+        node->locked ? "locked" : selected ? "selected" : "idle";
+    if (!slot.element->attribute("aria-current") ||
+        *slot.element->attribute("aria-current") != current) {
+      slot.element->set_attribute("aria-current", current);
+    }
+    if (!slot.element->attribute("data-state") ||
+        *slot.element->attribute("data-state") != status) {
+      slot.element->set_attribute("data-state", status);
+    }
+  }
+  for (const auto &slot : state.semantic_ports) {
+    for (const auto &port : snapshot.ports) {
+      if (port.id != slot.id) continue;
+      double x, y;
+      if (port_anchor(model, snapshot, port, state, x, y)) {
+        update_bounds(*slot.element, x - 7.0, y - 7.0, 14.0, 14.0);
+      }
+      break;
+    }
+  }
+  (void)host; // Host attributes were fixed during mount, not per render.
 }
 
 void paint_canvas(const GraphEditDocument &model, const Interaction &interaction,
@@ -161,7 +278,7 @@ void paint_canvas(const GraphEditDocument &model, const Interaction &interaction
 
   for (const auto &port : snapshot.ports) {
     double x, y;
-    if (!port_anchor(snapshot, port, interaction, x, y)) continue;
+    if (!port_anchor(model, snapshot, port, interaction, x, y)) continue;
     commands.draw_circle(static_cast<float>(x), static_cast<float>(y), 5.5F,
                          Paint::solid(port.output
                              ? Color{0.55F, 0.87F, 0.63F, 1.0F}
@@ -173,7 +290,7 @@ void paint_canvas(const GraphEditDocument &model, const Interaction &interaction
     for (const auto &port : snapshot.ports) {
       if (port.id != interaction.source_port) continue;
       double x, y;
-      if (port_anchor(snapshot, port, interaction, x, y)) {
+      if (port_anchor(model, snapshot, port, interaction, x, y)) {
         commands.draw_line(static_cast<float>(x), static_cast<float>(y),
                            static_cast<float>(interaction.cursor_x),
                            static_cast<float>(interaction.cursor_y),
@@ -224,6 +341,26 @@ bool handle_input(Interaction &state, GraphEditDocument &model,
       if (event.key == KeyCode::Z) result = model.undo();
       else if (event.key == KeyCode::Y) result = model.redo();
       else return false;
+      state.status_message = result ? "" : result.message;
+      element.mark_paint_dirty();
+      return true;
+    }
+    if (state.mode == GestureMode::Idle && !state.selected_node.empty()) {
+      const double step = (event.mods & static_cast<int>(flexUI::KeyMod::Shift))
+          ? 32.0 : 8.0;
+      double dx = 0.0, dy = 0.0;
+      if (event.key == KeyCode::Left) dx = -step;
+      else if (event.key == KeyCode::Right) dx = step;
+      else if (event.key == KeyCode::Up) dy = -step;
+      else if (event.key == KeyCode::Down) dy = step;
+      else return false;
+
+      auto result = model.begin_move(state.selected_node);
+      if (result) {
+        result = model.preview_move(dx, dy);
+        if (result) result = model.commit_move();
+        else model.cancel_move();
+      }
       state.status_message = result ? "" : result.message;
       element.mark_paint_dirty();
       return true;
@@ -402,6 +539,7 @@ flexUI::WidgetRegistryError register_graph_canvas_widget(
       [document = std::move(document)](const flexUI::UiNodeDefinition &)
           -> std::unique_ptr<flexUI::Widget> {
         auto state = std::make_shared<Interaction>();
+        state->document = document;
         flexUI::NativeCanvasWidget::Callbacks callbacks;
         callbacks.paint = [document, state](
             const flexUI::Element &element, flexUI::RenderCommandList &commands) {
@@ -411,6 +549,20 @@ flexUI::WidgetRegistryError register_graph_canvas_widget(
             flexUI::NativeCanvasWidget &widget, const flexUI::Event &event,
             flexUI::Element &element) {
           return handle_input(*state, *document, widget, event, element);
+        };
+        callbacks.mount = [document, state](flexUI::NativeCanvasWidget &widget,
+                                            flexUI::Element &host) {
+          build_semantic_parts(widget, host, *document, *state);
+        };
+        callbacks.sync_semantics = [document, state](flexUI::NativeCanvasWidget &,
+                                                     flexUI::Element &host) {
+          sync_semantic_parts(*document, *state, host);
+        };
+        callbacks.owns_part_paint = [](std::string_view name) {
+          // The draw commands paint nodes/ports; their Box Elements provide
+          // CSS query, metadata and geometry without duplicate box painting.
+          return name.substr(0, 5) == "node:" ||
+                 name.substr(0, 5) == "port:";
         };
         return std::make_unique<flexUI::NativeCanvasWidget>(std::move(callbacks));
       },
