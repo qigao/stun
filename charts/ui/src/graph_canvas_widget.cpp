@@ -10,6 +10,7 @@
 #include <cmath>
 #include <cstdint>
 #include <memory>
+#include <limits>
 #include <optional>
 #include <stdexcept>
 #include <vector>
@@ -325,14 +326,16 @@ void paint_canvas(const GraphEditDocument &model, const Interaction &interaction
   }
   // Expanded groups are document geometry, not a second UI/Element tree.
   for (const auto &group : model.snapshot().groups) {
-    if (group.collapsed) continue;
+    if (group.collapsed || !model.group_is_visible(group.id)) continue;
+    GraphEditNode world;
+    if (!model.group_world_rect(group.id, world)) continue;
+    double wx = world.x, wy = world.y;
+    model.preview_position(world.id, wx, wy);
     double gx, gy;
-    double wx = group.x, wy = group.y;
-    model.preview_position("group@" + group.id, wx, wy);
     if (!interaction.view.to_local(wx, wy, gx, gy)) continue;
     commands.draw_rect(static_cast<float>(gx), static_cast<float>(gy),
-        static_cast<float>(group.width * interaction.view.zoom),
-        static_cast<float>(group.height * interaction.view.zoom),
+        static_cast<float>(world.width * interaction.view.zoom),
+        static_cast<float>(world.height * interaction.view.zoom),
         5.0F, Paint::none(),
         Paint::solid(Color{0.37F, 0.52F, 0.66F, 1.0F}), 1.0F);
     commands.draw_text("GROUP " + group.id + " [-]",
@@ -524,23 +527,35 @@ bool handle_input(Interaction &state, GraphEditDocument &model,
     if (event.button != MouseButton::Left) return false;
     // Expanded group header is a reversible collapse affordance. Its content
     // geometry and all logical port identities remain untouched on failure.
+    // The most deeply nested matching expanded header wins (smallest
+    // rectangle); no invisible descendant can steal a collapsed parent's
+    // pointer capture. The one Box still owns all EventDispatcher routing.
+    std::string header_group;
+    double smallest_area = std::numeric_limits<double>::infinity();
     for (const auto &group : model.snapshot().groups) {
-      if (group.collapsed) continue;
+      if (group.collapsed || !model.group_is_visible(group.id)) continue;
+      GraphEditNode world;
+      if (!model.group_world_rect(group.id, world)) continue;
       double gx, gy;
-      if (!state.view.to_local(group.x, group.y, gx, gy)) continue;
-      const double gw = group.width * state.view.zoom;
+      if (!state.view.to_local(world.x, world.y, gx, gy)) continue;
+      const double gw = world.width * state.view.zoom;
+      const double area = world.width * world.height;
       if (x >= gx + 4.0 && x <= gx + gw - 4.0 &&
-          y >= gy && y <= gy + 20.0) {
-        // A click toggles collapse on MouseUp. A real drag moves the whole
-        // compound document only after the same 4px gesture threshold.
-        state.selected_node.clear();
-        state.selected_group = group.id;
-        state.mode = GestureMode::ArmedGroup;
-        state.status_message.clear();
-        widget.request_pointer_capture();
-        element.mark_paint_dirty();
-        return true;
+          y >= gy && y <= gy + 20.0 && area < smallest_area) {
+        smallest_area = area;
+        header_group = group.id;
       }
+    }
+    if (!header_group.empty()) {
+      // A click toggles collapse on MouseUp. A >4px drag translates the
+      // entire local subtree using the existing one-document transaction.
+      state.selected_node.clear();
+      state.selected_group = std::move(header_group);
+      state.mode = GestureMode::ArmedGroup;
+      state.status_message.clear();
+      widget.request_pointer_capture();
+      element.mark_paint_dirty();
+      return true;
     }
     if (const auto source = hit_port(model, state, x, y, true)) {
       state.source_port = source->id;
