@@ -1443,6 +1443,7 @@ BoxWidgetPartError Box::reconcile_widget_parts(
         if (!safe_name(name, 64) || value.size() > 512 ||
             !(name == "role" || name.rfind("data-", 0) == 0 ||
               name.rfind("aria-", 0) == 0) ||
+            name.rfind("data-flexui-on-", 0) == 0 ||
             !attribute_names.insert(name).second)
           return BoxWidgetPartError::InvalidSpec;
       }
@@ -1452,7 +1453,9 @@ BoxWidgetPartError Box::reconcile_widget_parts(
           found != widget.parts_.end()) {
         part = found->second;
         // Stable name cannot silently change widget semantic role/tag.
-        if (!part || part->tag() != spec.tag)
+        if (!part || part->tag() != spec.tag ||
+            !part->attribute("part") ||
+            *part->attribute("part") != spec.name)
           return BoxWidgetPartError::InvalidSpec;
         retained.insert(part);
       } else {
