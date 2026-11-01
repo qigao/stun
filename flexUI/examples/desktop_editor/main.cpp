@@ -738,6 +738,114 @@ int run_semantic_smoke(
   return EXIT_SUCCESS;
 }
 
+// M2f: real installed-style desktop host, no mock GraphCanvas or second
+// document model. Exercise *in-place* topology transactions rather than
+// replacing the whole JSON document and clearing Undo history.
+int run_topology_smoke(
+    flexUI::GCanvasPluginWindowHost &host,
+    const std::shared_ptr<charts::ui::GraphEditDocument> &model) {
+  auto pumped = host.pump_once(0.0);
+  if (!pumped) return fail("topology initial frame", pumped.error.message);
+  auto &box = host.application().box();
+  auto *graph = box.get_by_id("graph");
+  if (!graph || !graph->widget || graph->child_count() != 4)
+    return fail("topology host", "original linked GraphCanvas not mounted");
+
+  const auto find_part = [&](std::string_view name) -> flexUI::Element * {
+    for (auto *raw : graph->children()) {
+      auto *part = static_cast<flexUI::Element *>(raw);
+      const auto *key = part->attribute("part");
+      if (key && *key == name) return part;
+    }
+    return nullptr;
+  };
+  auto *alpha = find_part("node:alpha");
+  if (!alpha) return fail("topology original node", "alpha identity missing");
+  const auto baseline_parts = graph->child_count();
+  const auto baseline_owned = box.owned_element_count();
+  const auto baseline_revision = model->snapshot().revision;
+  if (!model->add_node(
+          {"gamma", 740.0, 36.0, 80.0, 72.0, false},
+          {{"gamma-in", "gamma", stun::graphlayout::Side::West,
+            0.0, 36.0, false}}))
+    return fail("topology insert", "one atomic original Node+Port rejected");
+  box.update();
+  box.invalidate();
+  pumped = host.pump_once(0.0);
+  if (!pumped || model->snapshot().revision != baseline_revision + 1 ||
+      model->undo_count() != 1 ||
+      graph->child_count() != baseline_parts + 2 ||
+      box.owned_element_count() != baseline_owned + 2 ||
+      !find_part("node:gamma") || !find_part("port:gamma-in") ||
+      find_part("node:alpha") != alpha)
+    return fail("topology box insertion", "new original semantic leaves not published");
+
+  if (!model->add_port(
+        {"beta-out", "beta", stun::graphlayout::Side::East,
+         120.0, 36.0, true}) ||
+      !model->connect("beta-out", "gamma-in", "bridge"))
+    return fail("topology connect", "native measured endpoint route rejected");
+  box.update();
+  if (graph->child_count() != baseline_parts + 3 ||
+      model->snapshot().routes.size() != 1 ||
+      model->undo_count() != 3)
+    return fail("topology connection", "one native GraphLayout route not published");
+
+  const auto route = model->snapshot().routes.front();
+  if (!model->remove_node("gamma"))
+    return fail("topology delete", "cannot atomically prune original node");
+  box.update();
+  if (graph->child_count() != baseline_parts + 1 ||
+      box.owned_element_count() != baseline_owned + 1 ||
+      model->snapshot().nodes.size() != 2 ||
+      model->snapshot().edges.size() != 0 ||
+      model->snapshot().routes.size() != 0 ||
+      model->undo_count() != 4 ||
+      find_part("node:alpha") != alpha)
+    return fail("topology cascade", "incident edge or Box parts leaked");
+
+  if (!model->undo())
+    return fail("topology Undo", "cannot restore one original node transaction");
+  box.update();
+  if (graph->child_count() != baseline_parts + 3 ||
+      box.owned_element_count() != baseline_owned + 3 ||
+      model->snapshot().edges.size() != 1 ||
+      model->snapshot().routes.size() != 1 ||
+      model->snapshot().routes[0].edge_id != route.edge_id ||
+      find_part("node:alpha") != alpha)
+    return fail("topology undo owner", "route or semantic identity not restored");
+  if (!model->redo()) return fail("topology Redo", "cannot replay deletion");
+  box.update();
+  if (box.owned_element_count() != baseline_owned + 1 ||
+      model->snapshot().nodes.size() != 2)
+    return fail("topology redo owner", "removed node leaked on replay");
+
+  if (!model->remove_port("beta-out"))
+    return fail("topology remove port", "cannot retire original port schema");
+  box.update();
+  if (graph->child_count() != baseline_parts ||
+      box.owned_element_count() != baseline_owned ||
+      model->snapshot().ports.size() != 2 ||
+      box.last_widget_part_error() != flexUI::BoxWidgetPartError::None)
+    return fail("topology final owner", "live edit failed to restore bounded Box");
+
+  box.invalidate();
+  pumped = host.pump_once(0.0);
+  if (!pumped) return fail("topology paint", pumped.error.message);
+  auto *save = box.get_by_id("save");
+  if (!save) return fail("topology Save lookup", "document Save not mounted");
+  const auto clicked = dispatch_save_click(host.application(), *save);
+  if (!clicked) return fail("topology Save click", clicked.error.message);
+  std::string error;
+  if (!pump_until_saved(host, *save, error))
+    return fail("topology Save", error);
+  const auto stopped = host.shutdown(kShutdownTimeout);
+  if (!stopped) return fail("topology shutdown", stopped.error.message);
+  std::cout << "FlexUI desktop editor topology smoke passed: "
+            << save->text() << '\n';
+  return EXIT_SUCCESS;
+}
+
 } // namespace
 
 int main(int argc, char **argv) {
@@ -746,6 +854,7 @@ int main(int argc, char **argv) {
   bool group_smoke = false;
   bool hierarchy_smoke = false;
   bool semantic_smoke = false;
+  bool topology_smoke = false;
   if (argc == 2 && std::string_view(argv[1]) == "--smoke") {
     smoke = true;
   } else if (argc == 2 && std::string_view(argv[1]) == "--smoke-async") {
@@ -760,9 +869,12 @@ int main(int argc, char **argv) {
   } else if (argc == 2 && std::string_view(argv[1]) == "--smoke-semantic") {
     smoke = true;
     semantic_smoke = true;
+  } else if (argc == 2 && std::string_view(argv[1]) == "--smoke-topology") {
+    smoke = true;
+    topology_smoke = true;
   } else if (argc != 1) {
     return fail("arguments",
-                "usage: flexui_desktop_editor [--smoke|--smoke-async|--smoke-group|--smoke-hierarchy|--smoke-semantic]");
+                "usage: flexui_desktop_editor [--smoke|--smoke-async|--smoke-group|--smoke-hierarchy|--smoke-semantic|--smoke-topology]");
   }
 
   std::error_code path_error;
@@ -856,6 +968,7 @@ int main(int argc, char **argv) {
     return fail("runtime composition", built.error.message);
   }
 
+  if (topology_smoke) return run_topology_smoke(*built.host, graph_model);
   if (semantic_smoke) return run_semantic_smoke(*built.host, graph_model);
   if (hierarchy_smoke) return run_hierarchy_smoke(*built.host, graph_model);
   if (smoke) {
