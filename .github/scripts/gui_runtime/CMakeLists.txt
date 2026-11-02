@@ -30,8 +30,11 @@ set(GCANVAS_BUILD_ANDROID_EGL OFF)
 set(GCANVAS_BUILD_VULKAN OFF)
 set(GCANVAS_BUILD_SVG ON)
 set(GCANVAS_BUILD_WINDOW ON)
-set(GCANVAS_BUILD_GPU_TESTS OFF)
-set(GCANVAS_BUILD_TESTS OFF)
+# Original gCanvas GPU test: real X11 sibling grabs, FocusOut, native
+# close and pixel readback. This reuses an EXISTING upstream production
+# test target; do not add a separate probe CI/CMake/consumer project.
+set(GCANVAS_BUILD_GPU_TESTS ON)
+set(GCANVAS_BUILD_TESTS ON)
 set(GCANVAS_BUILD_EXAMPLES OFF)
 set(FLEX_BUILD_RENDER_ENGINE_GCANVAS ON)
 set(FLEX_BUILD_BACKEND_TUI OFF)
