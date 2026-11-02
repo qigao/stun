@@ -1379,6 +1379,304 @@ GraphEditSnapshot sibling_group_fixture() {
 // ONE logical GraphEditDocument and never infers a hidden route proxy.
 // M2j: all group boundary locations and original PortIds are explicitly
 // measured and selected. No nearest-node/edge inference is permitted.
+// M2k: rubber-band selection changes only the linked Widget's stable
+// original-NodeId selection; there is no second Element tree, route worker
+// publication or implicit document Undo step while dragging a rectangle.
+spec("GraphCanvas M2k owner-captured marquee selection") {
+  it("selects both original nodes on real Box drag then creates one measured Group") {
+    auto doc = std::make_shared<GraphEditDocument>();
+    check_true(static_cast<bool>(doc->initialize(example())));
+    auto registry = flexUI::WidgetRegistry::builtins();
+    check_false(static_cast<bool>(
+        charts::ui::register_graph_canvas_widget(registry, doc)));
+    const auto compiled = flexUI::compile_ui_xml(
+        "<ui name=\"GraphMarquee\"><main id=\"root\">"
+        "<native-graph id=\"graph\" /></main></ui>");
+    check_true(static_cast<bool>(compiled));
+    if (!compiled) return;
+    flexUI::Box box(nullptr);
+    check_true(static_cast<bool>(flexUI::UiDocumentInstantiator::instantiate(
+        box, *compiled.program, registry)));
+    auto *root = box.get_by_id("root");
+    auto *graph = box.get_by_id("graph");
+    if (!root || !graph) return;
+    root->set_layout_bounds(0, 0, 832, 160);
+    graph->set_layout_bounds(0, 0, 832, 160);
+    box.update();
+    // The standalone TinyTest has no editor.css; restoring the real host
+    // extent AFTER layout makes the empty canvas area a real Box hit target.
+    // Node semantic children alone are not evidence of host hit-testing.
+    root->set_layout_bounds(0, 0, 832, 160);
+    graph->set_layout_bounds(0, 0, 832, 160);
+    const auto rev = doc->snapshot().revision;
+    const auto original_count = box.owned_element_count();
+    flexUI::Element *alpha = nullptr, *beta = nullptr;
+    for (auto *raw : graph->children()) {
+      auto *part = static_cast<flexUI::Element *>(raw);
+      const auto *name = part->attribute("part");
+      if (name && *name == "node:alpha") alpha = part;
+      if (name && *name == "node:beta") beta = part;
+    }
+    check_not_null(alpha); check_not_null(beta);
+    if (!alpha || !beta) return;
+
+    // Both mouse endpoints are on empty canvas. Reverse y/x ordering tests
+    // the normalized selection bounds, and the native Box holds capture.
+    auto down = flexUI::Event::mouse_down(20, 125);
+    box.dispatch_event(down);
+    check_true(down.handled);
+    check(box.capturing_element() == graph);
+    auto move = flexUI::Event::mouse_move(600, 20);
+    box.dispatch_event(move);
+    check_true(move.handled);
+    check_equal(doc->snapshot().revision, rev);
+    check_equal(doc->undo_count(), 0U);
+    flexUI::RenderCommandList drawing(flex::RendererCapabilities{});
+    auto *canvas = static_cast<flexUI::NativeCanvasWidget *>(graph->widget);
+    check_not_null(canvas);
+    if (!canvas) return;
+    canvas->emit_render_commands(*graph, drawing);
+    check_true(drawing.commands().size() > 6U); // actual rubber-band frame
+    auto up = flexUI::Event::mouse_up(600, 20);
+    box.dispatch_event(up);
+    check_true(up.handled);
+    check_null(box.capturing_element());
+    box.update();
+    // The standalone TinyTest has no editor.css; restoring the real host
+    // extent AFTER layout makes the empty canvas area a real Box hit target.
+    // Node semantic children alone are not evidence of host hit-testing.
+    root->set_layout_bounds(0, 0, 832, 160);
+    graph->set_layout_bounds(0, 0, 832, 160);
+    check_equal(*alpha->attribute("data-selected"), "true");
+    check_equal(*beta->attribute("data-selected"), "true");
+    check_equal(doc->snapshot().revision, rev);
+    check_equal(doc->undo_count(), 0U);
+    check_equal(box.owned_element_count(), original_count);
+
+    auto create = flexUI::Event::key_down(
+        flexUI::KeyCode::G, static_cast<int>(flexUI::KeyMod::Control));
+    box.dispatch_event(create);
+    check_true(create.handled);
+    box.update();
+    // The standalone TinyTest has no editor.css; restoring the real host
+    // extent AFTER layout makes the empty canvas area a real Box hit target.
+    // Node semantic children alone are not evidence of host hit-testing.
+    root->set_layout_bounds(0, 0, 832, 160);
+    graph->set_layout_bounds(0, 0, 832, 160);
+    check_equal(doc->snapshot().groups.size(), 1U);
+    check_equal(doc->undo_count(), 1U);
+    check_equal(doc->snapshot().edges.size(), 1U);
+    check_equal(doc->snapshot().routes.size(), 1U);
+    check_equal(graph->child_count(), 5U);
+    check_equal(box.owned_element_count(), original_count + 1U);
+    check(alpha->parent_elem() == graph);
+    check(beta->parent_elem() == graph);
+    const auto &group = doc->snapshot().groups[0];
+    check_equal(group.x, 39.0);
+    check_equal(group.y, 20.0);
+    check_equal(group.width, 537.0);
+    check_equal(group.height, 104.0);
+    check_equal(group.member_node_ids.size(), 2U);
+    check_equal(group.proxy_ports.size(), 0U);
+
+    auto ungroup = flexUI::Event::key_down(
+        flexUI::KeyCode::G, static_cast<int>(flexUI::KeyMod::Control) |
+                            static_cast<int>(flexUI::KeyMod::Shift));
+    box.dispatch_event(ungroup);
+    check_true(ungroup.handled);
+    box.update();
+    // The standalone TinyTest has no editor.css; restoring the real host
+    // extent AFTER layout makes the empty canvas area a real Box hit target.
+    // Node semantic children alone are not evidence of host hit-testing.
+    root->set_layout_bounds(0, 0, 832, 160);
+    graph->set_layout_bounds(0, 0, 832, 160);
+    check_equal(doc->snapshot().groups.size(), 0U);
+    check_equal(graph->child_count(), 4U);
+    check_equal(box.owned_element_count(), original_count);
+    check(alpha->parent_elem() == graph);
+    check(beta->parent_elem() == graph);
+  }
+
+  it("adds Shift+drag candidates and distinguishes a blank click from Escape") {
+    auto doc = std::make_shared<GraphEditDocument>();
+    check_true(static_cast<bool>(doc->initialize(example(false))));
+    auto registry = flexUI::WidgetRegistry::builtins();
+    check_false(static_cast<bool>(
+        charts::ui::register_graph_canvas_widget(registry, doc)));
+    auto compiled = flexUI::compile_ui_xml(
+        "<ui name=\"GraphMarqueeAdditive\"><main id=\"root\">"
+        "<native-graph id=\"graph\" /></main></ui>");
+    check_true(static_cast<bool>(compiled));
+    if (!compiled) return;
+    flexUI::Box box(nullptr);
+    check_true(static_cast<bool>(flexUI::UiDocumentInstantiator::instantiate(
+        box, *compiled.program, registry)));
+    auto *root = box.get_by_id("root");
+    auto *graph = box.get_by_id("graph");
+    if (!root || !graph) return;
+    root->set_layout_bounds(0, 0, 832, 160);
+    graph->set_layout_bounds(0, 0, 832, 160);
+    box.update();
+    // The standalone TinyTest has no editor.css; restoring the real host
+    // extent AFTER layout makes the empty canvas area a real Box hit target.
+    // Node semantic children alone are not evidence of host hit-testing.
+    root->set_layout_bounds(0, 0, 832, 160);
+    graph->set_layout_bounds(0, 0, 832, 160);
+    flexUI::Element *alpha = nullptr, *beta = nullptr;
+    for (auto *raw : graph->children()) {
+      auto *part = static_cast<flexUI::Element *>(raw);
+      const auto *name = part->attribute("part");
+      if (name && *name == "node:alpha") alpha = part;
+      if (name && *name == "node:beta") beta = part;
+    }
+    if (!alpha || !beta) return;
+
+    auto down = flexUI::Event::mouse_down(85, 56);
+    auto up = flexUI::Event::mouse_up(85, 56);
+    box.dispatch_event(down);
+    box.dispatch_event(up);
+    box.update();
+    // The standalone TinyTest has no editor.css; restoring the real host
+    // extent AFTER layout makes the empty canvas area a real Box hit target.
+    // Node semantic children alone are not evidence of host hit-testing.
+    root->set_layout_bounds(0, 0, 832, 160);
+    graph->set_layout_bounds(0, 0, 832, 160);
+    check_equal(*alpha->attribute("data-selected"), "true");
+    check_equal(*beta->attribute("data-selected"), "false");
+
+    down = flexUI::Event::mouse_down(425, 125);
+    down.mods = static_cast<int>(flexUI::KeyMod::Shift);
+    auto move = flexUI::Event::mouse_move(580, 20);
+    move.mods = down.mods;
+    up = flexUI::Event::mouse_up(580, 20);
+    up.mods = down.mods;
+    box.dispatch_event(down);
+    box.dispatch_event(move);
+    box.dispatch_event(up);
+    box.update();
+    // The standalone TinyTest has no editor.css; restoring the real host
+    // extent AFTER layout makes the empty canvas area a real Box hit target.
+    // Node semantic children alone are not evidence of host hit-testing.
+    root->set_layout_bounds(0, 0, 832, 160);
+    graph->set_layout_bounds(0, 0, 832, 160);
+    check_true(up.handled);
+    check_null(box.capturing_element());
+    check_equal(*alpha->attribute("data-selected"), "true");
+    check_equal(*beta->attribute("data-selected"), "true");
+    check_equal(doc->undo_count(), 0U);
+
+    // Shift+blank subthreshold click must retain both, whereas ordinary
+    // blank click clears only the Widget selection after the MouseUp.
+    down = flexUI::Event::mouse_down(700, 130);
+    down.mods = static_cast<int>(flexUI::KeyMod::Shift);
+    up = flexUI::Event::mouse_up(700, 130);
+    up.mods = down.mods;
+    box.dispatch_event(down); box.dispatch_event(up); box.update();
+    check_equal(*alpha->attribute("data-selected"), "true");
+    check_equal(*beta->attribute("data-selected"), "true");
+
+    down = flexUI::Event::mouse_down(700, 130);
+    move = flexUI::Event::mouse_move(20, 16);
+    box.dispatch_event(down); box.dispatch_event(move);
+    check(box.capturing_element() == graph);
+    auto cancel = flexUI::Event::key_down(flexUI::KeyCode::Escape);
+    box.dispatch_event(cancel);
+    check_true(cancel.handled);
+    check_null(box.capturing_element());
+    box.update();
+    // The standalone TinyTest has no editor.css; restoring the real host
+    // extent AFTER layout makes the empty canvas area a real Box hit target.
+    // Node semantic children alone are not evidence of host hit-testing.
+    root->set_layout_bounds(0, 0, 832, 160);
+    graph->set_layout_bounds(0, 0, 832, 160);
+    check_equal(*alpha->attribute("data-selected"), "true");
+    check_equal(*beta->attribute("data-selected"), "true");
+    check_equal(doc->undo_count(), 0U);
+
+    down = flexUI::Event::mouse_down(700, 130);
+    up = flexUI::Event::mouse_up(700, 130);
+    box.dispatch_event(down); box.dispatch_event(up); box.update();
+    check_equal(*alpha->attribute("data-selected"), "false");
+    check_equal(*beta->attribute("data-selected"), "false");
+    check_equal(doc->undo_count(), 0U);
+    check_equal(doc->snapshot().revision, std::uint64_t{1});
+  }
+
+  it("ignores collapsed group proxies as original-node marquee members") {
+    auto fixture = example();
+    charts::ui::GraphEditGroup collapsed;
+    collapsed.id = "all";
+    collapsed.x = 39; collapsed.y = 20;
+    collapsed.width = 537; collapsed.height = 104;
+    collapsed.member_node_ids = {"alpha", "beta"};
+    collapsed.collapsed = true; // Original edge is completely internal.
+    fixture.groups.push_back(std::move(collapsed));
+    auto doc = std::make_shared<GraphEditDocument>();
+    check_true(static_cast<bool>(doc->initialize(std::move(fixture))));
+    auto registry = flexUI::WidgetRegistry::builtins();
+    check_false(static_cast<bool>(
+        charts::ui::register_graph_canvas_widget(registry, doc)));
+    auto compiled = flexUI::compile_ui_xml(
+        "<ui name=\"CollapsedMarquee\"><main id=\"root\">"
+        "<native-graph id=\"graph\" /></main></ui>");
+    check_true(static_cast<bool>(compiled));
+    if (!compiled) return;
+    flexUI::Box box(nullptr);
+    check_true(static_cast<bool>(flexUI::UiDocumentInstantiator::instantiate(
+        box, *compiled.program, registry)));
+    auto *root = box.get_by_id("root");
+    auto *graph = box.get_by_id("graph");
+    if (!root || !graph) return;
+    root->set_layout_bounds(0, 0, 832, 160);
+    graph->set_layout_bounds(0, 0, 832, 160);
+    box.update();
+    // The standalone TinyTest has no editor.css; restoring the real host
+    // extent AFTER layout makes the empty canvas area a real Box hit target.
+    // Node semantic children alone are not evidence of host hit-testing.
+    root->set_layout_bounds(0, 0, 832, 160);
+    graph->set_layout_bounds(0, 0, 832, 160);
+    GraphEditSnapshot visible;
+    check_true(static_cast<bool>(doc->visible_snapshot(visible)));
+    check_equal(visible.nodes.size(), 1U);
+    check_equal(visible.nodes[0].id, "group@all");
+    const auto before = doc->snapshot().revision;
+    const auto prior_count = box.owned_element_count();
+
+    auto down = flexUI::Event::mouse_down(20, 150);
+    auto move = flexUI::Event::mouse_move(600, 10);
+    auto up = flexUI::Event::mouse_up(600, 10);
+    box.dispatch_event(down);
+    check_true(down.handled);
+    check(box.capturing_element() == graph);
+    box.dispatch_event(move);
+    check_true(move.handled);
+    box.dispatch_event(up);
+    check_true(up.handled);
+    check_null(box.capturing_element());
+    box.update();
+    // The standalone TinyTest has no editor.css; restoring the real host
+    // extent AFTER layout makes the empty canvas area a real Box hit target.
+    // Node semantic children alone are not evidence of host hit-testing.
+    root->set_layout_bounds(0, 0, 832, 160);
+    graph->set_layout_bounds(0, 0, 832, 160);
+    check_null(box.capturing_element());
+    for (auto *raw : graph->children()) {
+      auto *part = static_cast<flexUI::Element *>(raw);
+      const auto *key = part->attribute("part");
+      if (key && (*key == "node:alpha" || *key == "node:beta"))
+        check_equal(*part->attribute("data-selected"), "false");
+    }
+    auto create = flexUI::Event::key_down(
+        flexUI::KeyCode::G, static_cast<int>(flexUI::KeyMod::Control));
+    box.dispatch_event(create);
+    check_false(create.handled);
+    check_equal(doc->snapshot().revision, before);
+    check_equal(doc->snapshot().groups.size(), 1U);
+    check_equal(doc->undo_count(), 0U);
+    check_equal(box.owned_element_count(), prior_count);
+  }
+}
+
 spec("GraphCanvas M2j explicit measured group boundary port editing") {
   it("authors a nested external port before collapsing a selected child group") {
     GraphEditDocument doc;

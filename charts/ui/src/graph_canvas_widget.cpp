@@ -30,7 +30,10 @@ constexpr double kDragStartThresholdPx = 4.0;
 constexpr std::size_t kMaxSemanticParts = 1024;
 std::atomic<std::uint64_t> next_graph_mount_generation{1};
 
-enum class GestureMode { Idle, ArmedNode, MoveNode, ArmedGroup, MoveGroup, Connect, BindBoundary, Pan };
+enum class GestureMode {
+  Idle, ArmedNode, MoveNode, ArmedGroup, MoveGroup,
+  ArmedMarquee, Marquee, Connect, BindBoundary, Pan
+};
 
 struct Interaction {
   std::weak_ptr<GraphEditDocument> document;
@@ -43,6 +46,7 @@ struct Interaction {
   GestureMode mode = GestureMode::Idle;
   std::string selected_node; // Active original NodeId for single-node gestures.
   std::vector<std::string> selected_nodes; // Stable multi-selection, never Element*.
+  bool marquee_additive = false; // Shift+marquee, captured by one Box host.
   std::string selected_group;
   std::string source_port;
   std::string boundary_source_port; // User-picked original PortId.
@@ -192,6 +196,51 @@ bool measure_group_border(const GraphEditNode &world, double wx, double wy,
   return true;
 }
 
+struct MarqueeBounds {
+  double left = 0.0;
+  double top = 0.0;
+  double right = 0.0;
+  double bottom = 0.0;
+};
+
+// Gesture coordinates are in bounded host-local CSS pixels. The pointer can
+// move outside the canvas while its host holds capture; clamp the preview to
+// the host rather than creating unbounded or foreign-Element geometry.
+MarqueeBounds marquee_bounds(const Interaction &state,
+                             const flexUI::Element &host) noexcept {
+  const double width = std::max(0.0, static_cast<double>(host.width()));
+  const double height = std::max(0.0, static_cast<double>(host.height()));
+  const double x0 = std::clamp(state.press_x, 0.0, width);
+  const double y0 = std::clamp(state.press_y, 0.0, height);
+  const double x1 = std::clamp(state.cursor_x, 0.0, width);
+  const double y1 = std::clamp(state.cursor_y, 0.0, height);
+  return {std::min(x0, x1), std::min(y0, y1),
+          std::max(x0, x1), std::max(y0, y1)};
+}
+
+std::vector<std::string> marquee_original_nodes(
+    const GraphEditDocument &model, const Interaction &state,
+    const flexUI::Element &host) {
+  GraphEditSnapshot visible;
+  if (!model.visible_snapshot(visible)) return {};
+  const auto bounds = marquee_bounds(state, host);
+  std::vector<std::string> selected;
+  selected.reserve(visible.nodes.size());
+  for (const auto &node : visible.nodes) {
+    // A collapsed group proxy is NOT an original NodeId. Its rendered AABB
+    // must never leak into a root-level Ctrl+G membership mutation.
+    if (!find_node(model.snapshot(), node.id)) continue;
+    double x = 0.0, y = 0.0, w = 0.0, h = 0.0;
+    if (!node_rect(node, state, model, x, y, w, h)) continue;
+    if (x >= bounds.left && y >= bounds.top &&
+        x + w <= bounds.right && y + h <= bounds.bottom)
+      selected.push_back(node.id);
+  }
+  // The native view is based on stable, normalized original IDs. Selection
+  // is never an additional document revision or a new visual scene tree.
+  return selected;
+}
+
 void build_semantic_parts(flexUI::NativeCanvasWidget &widget,
                           flexUI::Element &host, const GraphEditDocument &model,
                           Interaction &state) {
@@ -207,7 +256,7 @@ void build_semantic_parts(flexUI::NativeCanvasWidget &widget,
 
   host.set_attribute("role", "region");
   host.set_attribute("aria-label", "Interactive graph editor");
-  host.set_attribute("aria-keyshortcuts", "Control+Z Control+Y Control+G Control+Shift+G Shift+Click Control+Alt+Drag ArrowUp ArrowDown ArrowLeft ArrowRight Delete Backspace");
+  host.set_attribute("aria-keyshortcuts", "Control+Z Control+Y Control+G Control+Shift+G Shift+Click Shift+Drag Control+Alt+Drag ArrowUp ArrowDown ArrowLeft ArrowRight Delete Backspace");
   host.set_attribute("data-boundary-authoring", "explicit-measured");
   host.set_attribute("data-selection", "single-or-multiple");
   host.set_attribute("data-slot", "graph-canvas");
@@ -467,7 +516,9 @@ void paint_canvas(const GraphEditDocument &model, const Interaction &interaction
   }
 
   for (const auto &node : snapshot.nodes) {
-    const bool selected = interaction.selected_node == node.id;
+    const bool selected = std::find(interaction.selected_nodes.begin(),
+                                    interaction.selected_nodes.end(),
+                                    node.id) != interaction.selected_nodes.end();
     const bool preview = model.has_preview() && selected;
     double x, y, w, h;
     if (!node_rect(node, interaction, model, x, y, w, h)) continue;
@@ -498,6 +549,18 @@ void paint_canvas(const GraphEditDocument &model, const Interaction &interaction
                              ? Color{0.55F, 0.87F, 0.63F, 1.0F}
                              : Color{0.85F, 0.67F, 0.47F, 1.0F}),
                          Paint::solid(Color{0.15F, 0.22F, 0.29F, 1.0F}), 1.0F);
+  }
+
+  if (interaction.mode == GestureMode::Marquee) {
+    const auto box = marquee_bounds(interaction, element);
+    commands.draw_rect(static_cast<float>(box.left),
+                       static_cast<float>(box.top),
+                       static_cast<float>(box.right - box.left),
+                       static_cast<float>(box.bottom - box.top),
+                       0.0F,
+                       Paint::solid(Color{0.31F, 0.60F, 0.71F, 0.10F}),
+                       Paint::solid(Color{0.63F, 0.84F, 0.82F, 0.92F}),
+                       1.0F);
   }
 
   if (interaction.mode == GestureMode::Connect ||
@@ -547,6 +610,7 @@ void cancel(Interaction &state, GraphEditDocument &document,
   if (state.mode == GestureMode::MoveNode ||
       state.mode == GestureMode::MoveGroup) document.cancel_move();
   state.mode = GestureMode::Idle;
+  state.marquee_additive = false;
   state.source_port.clear();
   state.boundary_source_port.clear();
   widget.release_pointer_capture();
@@ -836,15 +900,30 @@ bool handle_input(Interaction &state, GraphEditDocument &model,
       element.mark_paint_dirty();
       return true;
     }
-    state.selected_node.clear();
-    state.selected_nodes.clear();
-    state.selected_group.clear();
+    // Blank primary down arms a Box-owned rubber-band gesture. Unlike an
+    // eager blank deselect, this does NOT change stable selection until
+    // MouseUp. Escape/FocusOut can cancel with no partial UI/document edit.
+    state.marquee_additive =
+        (event.mods & static_cast<int>(flexUI::KeyMod::Shift)) != 0;
+    state.mode = GestureMode::ArmedMarquee;
+    state.status_message.clear();
+    widget.request_pointer_capture();
     element.mark_paint_dirty();
     return true;
   }
 
   if (event.type == EventType::MouseMove) {
     if (state.mode == GestureMode::Idle) return false;
+    if (state.mode == GestureMode::ArmedMarquee ||
+        state.mode == GestureMode::Marquee) {
+      const double dx = x - state.press_x, dy = y - state.press_y;
+      if (state.mode == GestureMode::ArmedMarquee &&
+          dx * dx + dy * dy >
+              kDragStartThresholdPx * kDragStartThresholdPx)
+        state.mode = GestureMode::Marquee;
+      element.mark_paint_dirty();
+      return true;
+    }
     if (state.mode == GestureMode::Pan) {
       state.view.pan_x += x - state.previous_x;
       state.view.pan_y += y - state.previous_y;
@@ -885,7 +964,31 @@ bool handle_input(Interaction &state, GraphEditDocument &model,
     const bool matching = (state.mode == GestureMode::Pan)
         ? event.button == MouseButton::Middle
         : event.button == MouseButton::Left;
-    if (matching && state.mode == GestureMode::MoveNode) {
+    if (matching && (state.mode == GestureMode::ArmedMarquee ||
+                     state.mode == GestureMode::Marquee)) {
+      if (state.mode == GestureMode::Marquee) {
+        auto selected = marquee_original_nodes(model, state, element);
+        if (state.marquee_additive) {
+          for (auto &id : selected)
+            if (std::find(state.selected_nodes.begin(),
+                          state.selected_nodes.end(), id) ==
+                state.selected_nodes.end())
+              state.selected_nodes.push_back(std::move(id));
+        } else {
+          state.selected_nodes = std::move(selected);
+        }
+        state.selected_node = state.selected_nodes.empty() ? "" :
+                              state.selected_nodes.back();
+        state.selected_group.clear();
+      } else if (!state.marquee_additive) {
+        // A true blank click still clears the selection, but does so only
+        // when the matching release ends the temporary host capture.
+        state.selected_node.clear();
+        state.selected_nodes.clear();
+        state.selected_group.clear();
+      }
+      state.status_message.clear();
+    } else if (matching && state.mode == GestureMode::MoveNode) {
       if (state.routing_mode == GraphCanvasRoutingMode::AsyncCommit) {
         double px = 0.0, py = 0.0;
         const bool has_position =
