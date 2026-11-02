@@ -1547,6 +1547,96 @@ int run_marquee_smoke(
   return EXIT_SUCCESS;
 }
 
+// An EXTERNAL X11/XTest client drives this actual mapped GLFW window.
+// Unlike the in-process Box smoke, no synthetic app.dispatch_event() calls
+// occur here. The real X server owns MouseDown, outside-window motion and
+// MouseUp delivery; only the native X11 grab can route the release home.
+int run_x11_external_input_smoke(
+    flexUI::GCanvasPluginWindowHost &host,
+    const std::shared_ptr<charts::ui::GraphEditDocument> &model) {
+  auto pumped = host.pump_once(0.0);
+  if (!pumped)
+    return fail("X11 external initial frame", pumped.error.window_error.message);
+  auto &box = host.application().box();
+  auto *graph = box.get_by_id("graph");
+  if (!graph || !graph->widget || graph->child_count() != 4 ||
+      model->snapshot().nodes.size() != 2 ||
+      model->snapshot().edges.size() != 1)
+    return fail("X11 external source", "original mounted graph was not found");
+  const auto find_part = [&](std::string_view key) -> flexUI::Element * {
+    for (auto *raw : graph->children()) {
+      auto *part = static_cast<flexUI::Element *>(raw);
+      const auto *name = part->attribute("part");
+      if (name && *name == key) return part;
+    }
+    return nullptr;
+  };
+  auto *alpha = find_part("node:alpha");
+  auto *beta = find_part("node:beta");
+  if (!alpha || !beta)
+    return fail("X11 external original IDs", "original semantic leaves are missing");
+  if (host.window_host().has_native_pointer_capture() ||
+      box.capturing_element() != nullptr)
+    return fail("X11 external initial lease", "native input was already captured");
+
+  const auto revision = model->snapshot().revision;
+  const auto count = box.owned_element_count();
+  // Flush a bounded handshake to the external, independent XTest process.
+  // Coordinates are the actual CSS/Box local extent, not guessed from CSS.
+  std::cout << "STUN_X11_INPUT_READY "
+            << graph->absolute_x() << ' ' << graph->absolute_y() << ' '
+            << graph->width() << ' ' << graph->height() << std::endl;
+  bool captured = false;
+  const auto deadline = std::chrono::steady_clock::now() +
+                        std::chrono::seconds(12);
+  while (std::chrono::steady_clock::now() < deadline) {
+    pumped = host.pump_once(0.016);
+    if (!pumped)
+      return fail("X11 external native pump", pumped.error.window_error.message);
+    const bool os_grab = host.window_host().has_native_pointer_capture();
+    if (os_grab) {
+      if (box.capturing_element() != graph ||
+          model->snapshot().revision != revision ||
+          model->undo_count() != 0)
+        return fail("X11 external captured state",
+                    "native grab and original Box owner disagree");
+      if (!captured) {
+        captured = true;
+        std::cout << "STUN_X11_INPUT_GRABBED" << std::endl;
+      }
+    } else if (captured) {
+      // The release happened while the XTest pointer was OUTSIDE our
+      // window. If GLFW did not receive that real native ButtonRelease,
+      // Box would retain the capture and this branch must not pass.
+      if (box.capturing_element() != nullptr)
+        return fail("X11 external lost capture",
+                    "OS grab ended but Box did not receive MouseUp");
+      box.update();
+      const auto *a = alpha->attribute("data-selected");
+      const auto *b = beta->attribute("data-selected");
+      if (!a || !b || *a != "true" || *b != "true" ||
+          model->snapshot().revision != revision ||
+          model->undo_count() != 0 ||
+          box.owned_element_count() != count ||
+          alpha->parent_elem() != graph || beta->parent_elem() != graph)
+        return fail("X11 external outside-window delivery",
+                    "real outside-window release did not commit the original marquee");
+      std::cout << "STUN_X11_INPUT_RELEASED" << std::endl;
+      const auto stopped = host.shutdown(kShutdownTimeout);
+      if (!stopped)
+        return fail("X11 external shutdown", stopped.error.message);
+      std::cout << "STUN_X11_INPUT_PASS: real XTest outside-window "
+                   "MouseUp committed marquee after native X11 grab"
+                << std::endl;
+      return EXIT_SUCCESS;
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(3));
+  }
+  return fail("X11 external timeout",
+              captured ? "OS-level ButtonRelease was never delivered to the captured window" :
+                         "real XTest MouseDown never acquired a native X11 grab");
+}
+
 } // namespace
 
 int main(int argc, char **argv) {
@@ -1561,6 +1651,7 @@ int main(int argc, char **argv) {
   bool selection_smoke = false;
   bool boundary_smoke = false;
   bool marquee_smoke = false;
+  bool x11_external_smoke = false;
   if (argc == 2 && std::string_view(argv[1]) == "--smoke") {
     smoke = true;
   } else if (argc == 2 && std::string_view(argv[1]) == "--smoke-async") {
@@ -1593,9 +1684,12 @@ int main(int argc, char **argv) {
   } else if (argc == 2 && std::string_view(argv[1]) == "--smoke-marquee") {
     smoke = true;
     marquee_smoke = true;
+  } else if (argc == 2 && std::string_view(argv[1]) == "--smoke-x11-input") {
+    smoke = true;
+    x11_external_smoke = true;
   } else if (argc != 1) {
     return fail("arguments",
-                "usage: flexui_desktop_editor [--smoke|--smoke-async|--smoke-group|--smoke-hierarchy|--smoke-semantic|--smoke-topology|--smoke-delete|--smoke-ungroup|--smoke-selection|--smoke-boundary|--smoke-marquee]");
+                "usage: flexui_desktop_editor [--smoke|--smoke-async|--smoke-group|--smoke-hierarchy|--smoke-semantic|--smoke-topology|--smoke-delete|--smoke-ungroup|--smoke-selection|--smoke-boundary|--smoke-marquee|--smoke-x11-input]");
   }
 
   std::error_code path_error;
@@ -1625,7 +1719,8 @@ int main(int argc, char **argv) {
   initial_graph.ports = {
       {"sink", "beta", stun::graphlayout::Side::West, 0.0, 36.0, false},
       {"source", "alpha", stun::graphlayout::Side::East, 125.0, 36.0, true}};
-  if (delete_smoke || selection_smoke || boundary_smoke || marquee_smoke)
+  if (delete_smoke || selection_smoke || boundary_smoke ||
+      marquee_smoke || x11_external_smoke)
     initial_graph.edges.push_back({"edge-1", "source", "sink"});
   if (group_smoke || boundary_smoke) {
     charts::ui::GraphEditGroup group;
@@ -1683,12 +1778,9 @@ int main(int argc, char **argv) {
     return fail("graph source", status.message);
   }
   auto config = window_config(smoke, async_routing);
-  if (marquee_smoke) {
-    // The existing synthetic GUI smoke tests deliberately keep their GLFW
-    // window hidden. A REAL XGrabPointer cannot be acquired against a
-    // non-viewable X11 window (GrabNotViewable), so native capture acceptance
-    // MUST map an actual window under Xvfb. This is not a cursor lock or
-    // a mocked "success", and changes no other smoke/default configuration.
+  if (marquee_smoke || x11_external_smoke) {
+    // The X server will reject grabs from hidden GLFW windows. Both real
+    // capture smokes use a MAPPED native GLFW/X11 window under Xvfb.
     config.window.visible = true;
   }
   auto built = flexUI::GCanvasPluginWindowHost::create(
@@ -1701,6 +1793,8 @@ int main(int argc, char **argv) {
     return fail("runtime composition", built.error.message);
   }
 
+  if (x11_external_smoke)
+    return run_x11_external_input_smoke(*built.host, graph_model);
   if (marquee_smoke)
     return run_marquee_smoke(*built.host, graph_model);
   if (boundary_smoke)
