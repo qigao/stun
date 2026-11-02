@@ -1682,8 +1682,17 @@ int main(int argc, char **argv) {
   if (const auto status = graph_model->initialize(std::move(initial_graph)); !status) {
     return fail("graph source", status.message);
   }
+  auto config = window_config(smoke, async_routing);
+  if (marquee_smoke) {
+    // The existing synthetic GUI smoke tests deliberately keep their GLFW
+    // window hidden. A REAL XGrabPointer cannot be acquired against a
+    // non-viewable X11 window (GrabNotViewable), so native capture acceptance
+    // MUST map an actual window under Xvfb. This is not a cursor lock or
+    // a mocked "success", and changes no other smoke/default configuration.
+    config.window.visible = true;
+  }
   auto built = flexUI::GCanvasPluginWindowHost::create(
-      window_config(smoke, async_routing),
+      std::move(config),
       application_builder(std::move(sources), timeline_model, graph_model,
                           async_routing),
       std::move(plugins),
