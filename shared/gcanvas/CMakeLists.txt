@@ -366,6 +366,13 @@ if(GCANVAS_BUILD_TESTS)
       target_include_directories(
         gcanvas_gpu_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
       target_link_libraries(gcanvas_gpu_test PRIVATE gCanvas::Window)
+      if(UNIX AND NOT APPLE AND X11_FOUND)
+        # Existing production GPU smoke also qualifies the REAL native
+        # GLFW/X11 window focus/grab/close contract. No new test target.
+        target_compile_definitions(gcanvas_gpu_test
+          PRIVATE GCANVAS_HAS_X11_CAPTURE=1)
+        target_link_libraries(gcanvas_gpu_test PRIVATE X11::X11)
+      endif()
       if(GCANVAS_BUILD_OPENGL)
         add_test(NAME gcanvas_gpu_opengl
           COMMAND gcanvas_gpu_test opengl)
