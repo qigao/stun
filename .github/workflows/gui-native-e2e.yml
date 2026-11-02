@@ -266,7 +266,8 @@ jobs:
         run: |
           set -euo pipefail
           cmake --build build/stun-gui --target \
-            flexui_desktop_editor chart_ui_test stun_ui_core_test stun_markdown_adapter_test \
+            flexui_desktop_editor gcanvas_gpu_test chart_ui_test \
+            stun_ui_core_test stun_markdown_adapter_test \
             stun_markdown_tango_candidate_test test_markdown_widget --parallel 2
 
       - name: Qualify one Markdown grammar and real C11 Tango Widget consumers
@@ -278,6 +279,11 @@ jobs:
           ctest --test-dir build/stun-gui --no-tests=error \
             --output-on-failure --timeout 120 \
             -R '^(ChartUiTest|stun_ui_core_test|stun_markdown_adapter_test|stun_markdown_tango_candidate_test|test_markdown_widget)$'
+          # Original gCanvas GPU test: real sibling GLFW window, native X
+          # server FocusOut, close/ungrab and OpenGL pixel readback under Xvfb.
+          xvfb-run -a -s '-screen 0 1280x900x24 -nolisten tcp' \
+            ctest --test-dir build/stun-gui --no-tests=error \
+              --output-on-failure --timeout 120 -R '^gcanvas_gpu_opengl$'
 
       - name: Qualify native timeline and GraphCanvas drag/connect/undo plus visible Save states
         shell: bash
