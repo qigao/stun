@@ -23,6 +23,9 @@
 #ifdef _WIN32
 #define GLFW_EXPOSE_NATIVE_WIN32
 #include <GLFW/glfw3native.h>
+#elif defined(GCANVAS_HAS_X11_CAPTURE)
+#define GLFW_EXPOSE_NATIVE_X11
+#include <GLFW/glfw3native.h>
 #endif
 
 namespace gcanvas
@@ -30,6 +33,23 @@ namespace gcanvas
     namespace
     {
         std::uint32_t window_count = 0;
+
+#ifdef GCANVAS_HAS_X11_CAPTURE
+        // GLFW/Xlib are owner-thread APIs. One X server connection serves
+        // these gCanvas windows: NEVER let a sibling overwrite or release
+        // another window's active pointer grab. Window-loss callback and
+        // destructor both clear the owner before the X11 native handle dies.
+        WindowImpl* x11_pointer_capture_owner = nullptr;
+
+        bool has_x11_capture_backend(const WindowImpl* impl) noexcept
+        {
+            return impl != nullptr && impl->_glfw_window != nullptr &&
+                   impl->_native_owner_thread == std::this_thread::get_id() &&
+                   glfwGetPlatform() == GLFW_PLATFORM_X11 &&
+                   glfwGetX11Display() != nullptr &&
+                   glfwGetX11Window(impl->_glfw_window) != 0;
+        }
+#endif
 
 #ifdef GCANVAS_HAS_OPENGL
         opengl::ProcAddress glfw_get_proc_address(void*, const char* name)
@@ -96,6 +116,21 @@ namespace gcanvas
         HWND native_window = glfwGetWin32Window(impl->_glfw_window);
         if (GetCapture() == native_window)
             ReleaseCapture();
+#elif defined(GCANVAS_HAS_X11_CAPTURE)
+        if (x11_pointer_capture_owner != impl)
+            return;
+        // This local lease belongs to EXACTLY this GLFW/X11 window. Release
+        // before invoking app callbacks, even if the X server already revoked
+        // a grab because the window became hidden or non-viewable.
+        x11_pointer_capture_owner = nullptr;
+        if (glfwGetPlatform() == GLFW_PLATFORM_X11)
+        {
+            if (Display* display = glfwGetX11Display())
+            {
+                XUngrabPointer(display, CurrentTime);
+                XFlush(display);
+            }
+        }
 #else
         (void)impl;
 #endif
@@ -316,6 +351,8 @@ namespace gcanvas
     {
 #ifdef _WIN32
         return true;
+#elif defined(GCANVAS_HAS_X11_CAPTURE)
+        return has_x11_capture_backend(getImpl(this));
 #else
         return false;
 #endif
@@ -326,6 +363,10 @@ namespace gcanvas
 #ifdef _WIN32
         const WindowImpl* impl = getImpl(this);
         return GetCapture() == glfwGetWin32Window(impl->_glfw_window);
+#elif defined(GCANVAS_HAS_X11_CAPTURE)
+        const WindowImpl* impl = getImpl(this);
+        return has_x11_capture_backend(impl) &&
+               x11_pointer_capture_owner == impl;
 #else
         return false;
 #endif
@@ -351,6 +392,36 @@ namespace gcanvas
             if (GetCapture() == native_window)
                 throw std::runtime_error("failed to release Win32 pointer capture");
         }
+#elif defined(GCANVAS_HAS_X11_CAPTURE)
+        WindowImpl* impl = getImpl(this);
+        if (impl->_native_owner_thread != std::this_thread::get_id())
+            throw std::logic_error("X11 pointer capture requires its original GLFW owner thread");
+        if (!has_x11_capture_backend(impl))
+            throw std::logic_error("native pointer capture requires the GLFW X11 platform");
+        if (!captured)
+        {
+            release_pointer_capture_on_window_loss(impl);
+            return;
+        }
+        if (x11_pointer_capture_owner == impl)
+            return; // Same exact window already owns a native grab.
+        if (x11_pointer_capture_owner != nullptr)
+            throw std::runtime_error("another gCanvas window already owns the X11 pointer grab");
+
+        Display* display = glfwGetX11Display();
+        const ::Window native_window = glfwGetX11Window(impl->_glfw_window);
+        // No cursor confinement or warping: the X server redirects motion
+        // and release events to our window even when the pointer goes out
+        // of its content area. Do not freeze either keyboard or pointer.
+        const int status = XGrabPointer(
+            display, native_window, True,
+            ButtonPressMask | ButtonReleaseMask | PointerMotionMask,
+            GrabModeAsync, GrabModeAsync, None, None, CurrentTime);
+        if (status != GrabSuccess)
+            throw std::runtime_error(
+                "failed to acquire native X11 pointer grab, status=" + std::to_string(status));
+        x11_pointer_capture_owner = impl;
+        XFlush(display);
 #else
         (void)captured;
         throw std::logic_error("native pointer capture is not supported on this platform");
@@ -481,6 +552,7 @@ namespace gcanvas
     void Window::close()
     {
         WindowImpl* impl = getImpl(this);
+        release_pointer_capture_on_window_loss(impl);
         glfwSetWindowShouldClose(impl->_glfw_window, GLFW_TRUE);
     }
 
@@ -1050,6 +1122,7 @@ namespace gcanvas
     void close_callback_impl(GLFWwindow* window)
     {
         WindowImpl* winImpl = (WindowImpl*)glfwGetWindowUserPointer(window);
+        release_pointer_capture_on_window_loss(winImpl);
         winImpl->_listeners->publish(close_event{});
     }
 

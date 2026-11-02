@@ -131,14 +131,19 @@ namespace gcanvas
         void set_offset(float x, float y);
         void set_fullscreen(bool fullscreen);
 
-        /// Reports whether this platform provides native GUI pointer capture.
+        /// Reports actual OS pointer-grab capability on the selected GLFW
+        /// backend. Windows uses SetCapture; Linux/X11 uses XGrabPointer when
+        /// Xlib support is linked. Wayland/macOS/other backends fail closed.
         bool supports_pointer_capture() const noexcept;
 
-        /// Reports whether this window currently owns native pointer capture.
+        /// Reports whether THIS window owns native capture (not another
+        /// gCanvas window and not merely Box's internal event routing).
         bool has_pointer_capture() const noexcept;
 
-        /// Acquires or releases native GUI pointer capture. Unsupported
-        /// platforms throw std::logic_error instead of changing cursor mode.
+        /// Acquires/releases actual native GUI pointer capture, keeping the
+        /// cursor unconstrained. Must run on the window's owner thread.
+        /// Failed/unsupported captures throw; no fake cursor lock fallback.
+        /// FocusOut/close/destruction retire the native grab before callbacks.
         void set_pointer_capture(bool captured);
 
         bool is_fullscreen();

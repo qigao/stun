@@ -5,6 +5,7 @@
 #include "native_callback_error_state.hpp"
 #include "window_coordinates.hpp"
 #include "window_listener_state.hpp"
+#include <thread>
 #include <unordered_map>
 
 struct GLFWwindow;
@@ -19,6 +20,9 @@ namespace gcanvas
         ~WindowImpl();
 
         GLFWwindow* _glfw_window = nullptr;
+        // The original GLFW window is main/owner-thread affine. X11 native
+        // pointer grabs must never be entered from a background worker.
+        std::thread::id _native_owner_thread = std::this_thread::get_id();
         float _x_scale = 1;
         float _y_scale = 1;
         float _x_offset = 0;

@@ -259,6 +259,15 @@ if(GCANVAS_BUILD_WINDOW)
     PRIVATE glfw)
   if(WIN32)
     target_link_libraries(gcanvas_window PRIVATE user32)
+  elseif(UNIX AND NOT APPLE)
+    # Real native X11 pointer capture uses XGrabPointer/XUngrabPointer.
+    # A Wayland-only / headless build must still compile and fail closed,
+    # not silently downgrade to cursor confinement or a fake grab.
+    find_package(X11 QUIET)
+    if(X11_FOUND)
+      target_link_libraries(gcanvas_window PRIVATE X11::X11)
+      target_compile_definitions(gcanvas_window PRIVATE GCANVAS_HAS_X11_CAPTURE=1)
+    endif()
   endif()
   if(GCANVAS_BUILD_OPENGL)
     target_link_libraries(gcanvas_window PUBLIC gCanvas::OpenGL)
