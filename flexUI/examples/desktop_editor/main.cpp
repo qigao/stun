@@ -1375,6 +1375,151 @@ int run_boundary_smoke(
   return EXIT_SUCCESS;
 }
 
+// M2k: actual linked OpenGL/PluginHost/Box host validates a bounded
+// rubber-band selection from blank canvas. A marquee is Widget-only UI
+// state until Ctrl+G publishes one native GraphEditDocument transaction.
+int run_marquee_smoke(
+    flexUI::GCanvasPluginWindowHost &host,
+    const std::shared_ptr<charts::ui::GraphEditDocument> &model) {
+  auto pumped = host.pump_once(0.0);
+  if (!pumped) return fail("marquee initial frame", pumped.error.message);
+  auto &box = host.application().box();
+  auto *graph = box.get_by_id("graph");
+  if (!graph || !graph->widget ||
+      graph->child_count() != 4 ||
+      model->snapshot().nodes.size() != 2 ||
+      model->snapshot().edges.size() != 1 ||
+      !model->snapshot().groups.empty())
+    return fail("marquee initial source", "real linked original graph is absent");
+
+  const auto find_part = [&](std::string_view key) -> flexUI::Element * {
+    for (auto *raw : graph->children()) {
+      auto *part = static_cast<flexUI::Element *>(raw);
+      const auto *name = part->attribute("part");
+      if (name && *name == key) return part;
+    }
+    return nullptr;
+  };
+  auto *alpha = find_part("node:alpha");
+  auto *beta = find_part("node:beta");
+  if (!alpha || !beta)
+    return fail("marquee stable IDs", "both original semantic leaves are required");
+
+  const auto before_revision = model->snapshot().revision;
+  const auto before_owned = box.owned_element_count();
+  const float gx = graph->absolute_x(), gy = graph->absolute_y();
+
+  const auto down = [&] {
+    return flexUI::Event::mouse_down(gx + 20.0F, gy + 125.0F);
+  };
+  const auto move = [&] {
+    return flexUI::Event::mouse_move(gx + 600.0F, gy + 20.0F);
+  };
+  const auto up = [&] {
+    return flexUI::Event::mouse_up(gx + 600.0F, gy + 20.0F);
+  };
+
+  // The canvas captures input before any document edit. The owner can paint
+  // the selection preview while a native gesture is still in flight.
+  auto pressed = down();
+  if (!host.application().dispatch_event(pressed) || !pressed.handled ||
+      box.capturing_element() != graph)
+    return fail("marquee pointer capture", "blank drag lacks an owner lease");
+  auto dragging = move();
+  if (!host.application().dispatch_event(dragging) || !dragging.handled ||
+      box.capturing_element() != graph ||
+      model->snapshot().revision != before_revision ||
+      model->undo_count() != 0)
+    return fail("marquee uncommitted", "selection preview mutated the graph");
+  box.invalidate();
+  pumped = host.pump_once(0.0);
+  if (!pumped) return fail("marquee preview frame", pumped.error.message);
+
+  auto released = up();
+  if (!host.application().dispatch_event(released) || !released.handled ||
+      box.capturing_element() != nullptr)
+    return fail("marquee release", "owner failed to release pointer on MouseUp");
+  box.update();
+  if (!alpha->attribute("data-selected") ||
+      *alpha->attribute("data-selected") != "true" ||
+      !beta->attribute("data-selected") ||
+      *beta->attribute("data-selected") != "true" ||
+      model->snapshot().revision != before_revision ||
+      model->undo_count() != 0 ||
+      box.owned_element_count() != before_owned)
+    return fail("marquee two original nodes", "rubber-band selection not committed");
+
+  auto group = flexUI::Event::key_down(
+      flexUI::KeyCode::G, static_cast<int>(flexUI::KeyMod::Control));
+  if (!host.application().dispatch_event(group) || !group.handled ||
+      model->snapshot().groups.size() != 1 ||
+      model->snapshot().edges.size() != 1 ||
+      model->snapshot().routes.size() != 1 ||
+      model->snapshot().revision != before_revision + 1 ||
+      model->undo_count() != 1)
+    return fail("marquee Ctrl+G", "one measured source GroupId not published");
+  const auto authored = model->snapshot().groups[0];
+  if (authored.x != 39.0 || authored.y != 20.0 ||
+      authored.width != 537.0 || authored.height != 104.0 ||
+      authored.member_node_ids.size() != 2 ||
+      !authored.proxy_ports.empty())
+    return fail("marquee measured bounds", "group boundary was not measured");
+  box.update();
+  if (graph->child_count() != 5 ||
+      box.owned_element_count() != before_owned + 1 ||
+      find_part("node:alpha") != alpha ||
+      find_part("node:beta") != beta ||
+      !find_part("node:group@" + authored.id))
+    return fail("marquee Box owner", "one stable group leaf missing");
+
+  auto ungroup = flexUI::Event::key_down(
+      flexUI::KeyCode::G, static_cast<int>(flexUI::KeyMod::Control) |
+                          static_cast<int>(flexUI::KeyMod::Shift));
+  if (!host.application().dispatch_event(ungroup) || !ungroup.handled ||
+      !model->snapshot().groups.empty() ||
+      model->snapshot().edges.size() != 1 ||
+      model->undo_count() != 2)
+    return fail("marquee Ungroup", "original source graph could not be restored");
+  box.update();
+  if (graph->child_count() != 4 ||
+      box.owned_element_count() != before_owned ||
+      find_part("node:alpha") != alpha ||
+      find_part("node:beta") != beta)
+    return fail("marquee physical group retire", "Box retained orphan proxy");
+
+  // Each keystroke owns a new Event, never reuse an already-handled object.
+  auto undo = flexUI::Event::key_down(
+      flexUI::KeyCode::Z, static_cast<int>(flexUI::KeyMod::Control));
+  if (!host.application().dispatch_event(undo) || !undo.handled ||
+      model->snapshot().groups.size() != 1)
+    return fail("marquee Undo", "nested group history was not restored");
+  box.update();
+  auto redo = flexUI::Event::key_down(
+      flexUI::KeyCode::Y, static_cast<int>(flexUI::KeyMod::Control));
+  if (!host.application().dispatch_event(redo) || !redo.handled ||
+      !model->snapshot().groups.empty())
+    return fail("marquee Redo", "native history was not replayed");
+  box.update();
+  if (graph->child_count() != 4 || box.owned_element_count() != before_owned)
+    return fail("marquee Redo Box", "group semantic leaf leaked");
+
+  box.invalidate();
+  pumped = host.pump_once(0.0);
+  if (!pumped) return fail("marquee final frame", pumped.error.message);
+  auto *save = box.get_by_id("save");
+  if (!save) return fail("marquee Save lookup", "native Save service not mounted");
+  const auto clicked = dispatch_save_click(host.application(), *save);
+  if (!clicked) return fail("marquee Save click", clicked.error.message);
+  std::string error;
+  if (!pump_until_saved(host, *save, error))
+    return fail("marquee Save service", error);
+  const auto stopped = host.shutdown(kShutdownTimeout);
+  if (!stopped) return fail("marquee host shutdown", stopped.error.message);
+  std::cout << "FlexUI desktop editor marquee smoke passed: "
+            << save->text() << '\n';
+  return EXIT_SUCCESS;
+}
+
 } // namespace
 
 int main(int argc, char **argv) {
@@ -1388,6 +1533,7 @@ int main(int argc, char **argv) {
   bool ungroup_smoke = false;
   bool selection_smoke = false;
   bool boundary_smoke = false;
+  bool marquee_smoke = false;
   if (argc == 2 && std::string_view(argv[1]) == "--smoke") {
     smoke = true;
   } else if (argc == 2 && std::string_view(argv[1]) == "--smoke-async") {
@@ -1417,9 +1563,12 @@ int main(int argc, char **argv) {
   } else if (argc == 2 && std::string_view(argv[1]) == "--smoke-boundary") {
     smoke = true;
     boundary_smoke = true;
+  } else if (argc == 2 && std::string_view(argv[1]) == "--smoke-marquee") {
+    smoke = true;
+    marquee_smoke = true;
   } else if (argc != 1) {
     return fail("arguments",
-                "usage: flexui_desktop_editor [--smoke|--smoke-async|--smoke-group|--smoke-hierarchy|--smoke-semantic|--smoke-topology|--smoke-delete|--smoke-ungroup|--smoke-selection|--smoke-boundary]");
+                "usage: flexui_desktop_editor [--smoke|--smoke-async|--smoke-group|--smoke-hierarchy|--smoke-semantic|--smoke-topology|--smoke-delete|--smoke-ungroup|--smoke-selection|--smoke-boundary|--smoke-marquee]");
   }
 
   std::error_code path_error;
@@ -1449,7 +1598,7 @@ int main(int argc, char **argv) {
   initial_graph.ports = {
       {"sink", "beta", stun::graphlayout::Side::West, 0.0, 36.0, false},
       {"source", "alpha", stun::graphlayout::Side::East, 125.0, 36.0, true}};
-  if (delete_smoke || selection_smoke || boundary_smoke)
+  if (delete_smoke || selection_smoke || boundary_smoke || marquee_smoke)
     initial_graph.edges.push_back({"edge-1", "source", "sink"});
   if (group_smoke || boundary_smoke) {
     charts::ui::GraphEditGroup group;
@@ -1516,6 +1665,8 @@ int main(int argc, char **argv) {
     return fail("runtime composition", built.error.message);
   }
 
+  if (marquee_smoke)
+    return run_marquee_smoke(*built.host, graph_model);
   if (boundary_smoke)
     return run_boundary_smoke(*built.host, graph_model);
   if (selection_smoke)
