@@ -338,6 +338,13 @@ jobs:
           # Ctrl+G measured group, Ungroup, physical leaf retirement and Save.
           xvfb-run -a -s '-screen 0 1280x900x24 -nolisten tcp' \
             build/stun-gui/bin/flexui_desktop_editor --smoke-marquee
+          # M2l: independent XTest client delivers real X11 ButtonPress,
+          # OUTSIDE-window motion and ButtonRelease to the actual GLFW host.
+          # Verify competing X server grab is denied until native release;
+          # no fake Box-only events or new test runner/target.
+          xvfb-run -a -s '-screen 0 1280x900x24 -nolisten tcp' \
+            /usr/bin/python3 .github/scripts/gcanvas_x11_capture_e2e.py \
+              --exe build/stun-gui/bin/flexui_desktop_editor
           xvfb-run -a -s '-screen 0 1280x900x24 -nolisten tcp' \
             /usr/bin/python3 .github/scripts/gui_native_suite.py \
               --exe build/stun-gui/bin/flexui_desktop_editor \
