@@ -1129,6 +1129,10 @@ int run_group_selection_smoke(
       !host.application().dispatch_event(second_up))
     return fail("selection Shift+Click", "second original NodeId not admitted");
   box.update();
+  box.invalidate();
+  pumped = host.pump_once(0.0);
+  if (!pumped) return fail("marquee committed frame",
+                           pumped.error.window_error.message);
   if (!alpha->attribute("data-selected") ||
       *alpha->attribute("data-selected") != "true" ||
       !beta->attribute("data-selected") ||
@@ -1431,10 +1435,12 @@ int run_marquee_smoke(
       model->snapshot().revision != before_revision ||
       model->undo_count() != 0)
     return fail("marquee uncommitted", "selection preview mutated the graph");
-  box.invalidate();
-  pumped = host.pump_once(0.0);
-  if (!pumped) return fail("marquee preview frame", pumped.error.message);
-
+  // gCanvas has intentionally Windows-only native pointer capture.
+  // Linux/X11 rejects Window::set_pointer_capture(true) by contract. Do
+  // not fake this platform capability by pumping the native window while
+  // synthetic Box capture is held. The real TinyTest invokes the render
+  // command list during the active preview; this OpenGL host verifies the
+  // completed gesture after the original Box releases its capture.
   auto released = up();
   if (!host.application().dispatch_event(released) || !released.handled ||
       box.capturing_element() != nullptr)
