@@ -1,6 +1,9 @@
 #include "gcanvas/window.hpp"
 #include "native_window_callbacks.hpp"
 #include "window_impl.hpp"
+#ifdef __linux__
+#include <GLFW/glfw3.h>
+#endif
 
 #include <algorithm>
 #include <array>
@@ -553,6 +556,68 @@ int main(int argc, char** argv)
         {
             std::cerr << "Win32 window did not release native pointer capture\n";
             return 20;
+        }
+#elif defined(__linux__)
+        // Exercise the real GLFW-selected native platform. Wayland and
+        // Linux builds without an X11 link must still reject capture rather
+        // than silently turning it into cursor confinement or fake success.
+        if (window->supports_pointer_capture())
+        {
+            auto* impl = static_cast<gcanvas::WindowImpl*>(window.get());
+            // The GPU pixel harness starts hidden; a real X server cannot
+            // grab a non-viewable X11 window. Show it before acquisition.
+            glfwShowWindow(impl->_glfw_window);
+            glfwPollEvents();
+            window->set_pointer_capture(true);
+            window->set_pointer_capture(true);
+            if (!window->has_pointer_capture())
+            {
+                std::cerr << "X11 native pointer grab was not acquired\n";
+                return 19;
+            }
+            bool focus_lost = false;
+            bool released_before_callback = false;
+            auto focus_subscription = window->subscribe_focus_listener(
+                [&](gcanvas::focus_event event) {
+                    focus_lost = !event.focused;
+                    released_before_callback = !window->has_pointer_capture();
+                });
+            gcanvas::focus_callback(impl->_glfw_window, 0);
+            if (!focus_lost || !released_before_callback ||
+                window->has_pointer_capture())
+            {
+                std::cerr << "X11 focus loss retained native pointer grab\n";
+                return 27;
+            }
+            window->set_pointer_capture(false);
+            window->set_pointer_capture(false);
+            if (window->has_pointer_capture())
+            {
+                std::cerr << "X11 idempotent release left stale owner\n";
+                return 20;
+            }
+            // No capture from an invisible GLFW/X11 window. The real API
+            // must report failure rather than invent a native grab.
+            glfwHideWindow(impl->_glfw_window);
+            bool rejected = false;
+            try { window->set_pointer_capture(true); }
+            catch (const std::runtime_error&) { rejected = true; }
+            if (!rejected || window->has_pointer_capture())
+            {
+                std::cerr << "hidden X11 window falsely acquired native grab\n";
+                return 28;
+            }
+        }
+        else
+        {
+            bool capture_rejected = false;
+            try { window->set_pointer_capture(true); }
+            catch (const std::logic_error&) { capture_rejected = true; }
+            if (!capture_rejected)
+            {
+                std::cerr << "unsupported Linux backend accepted native capture\n";
+                return 18;
+            }
         }
 #else
         if (window->supports_pointer_capture())
