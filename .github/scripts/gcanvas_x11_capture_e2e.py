@@ -72,11 +72,15 @@ def real_x11_grab_status(disp, window):
         cursor=X.NONE,
         time=X.CurrentTime)
     disp.sync()
-    if grab.status == X.GrabSuccess:
+    # python-xlib Window.grab_pointer() returns the numeric status directly
+    # on the CI-pinned version, while other bindings can expose a reply.
+    # The X server outcome is the same; do not infer capture from an app flag.
+    status = grab if isinstance(grab, int) else grab.status
+    if status == X.GrabSuccess:
         # This probe is itself a real server-side grab; never leave it live.
         disp.ungrab_pointer(X.CurrentTime)
         disp.sync()
-    return grab.status
+    return status
 
 
 def wait_for_real_window(disp, deadline):
