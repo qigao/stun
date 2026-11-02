@@ -1403,6 +1403,11 @@ spec("GraphCanvas M2k owner-captured marquee selection") {
     root->set_layout_bounds(0, 0, 832, 160);
     graph->set_layout_bounds(0, 0, 832, 160);
     box.update();
+    // The standalone TinyTest has no editor.css; restoring the real host
+    // extent AFTER layout makes the empty canvas area a real Box hit target.
+    // Node semantic children alone are not evidence of host hit-testing.
+    root->set_layout_bounds(0, 0, 832, 160);
+    graph->set_layout_bounds(0, 0, 832, 160);
     const auto rev = doc->snapshot().revision;
     const auto original_count = box.owned_element_count();
     flexUI::Element *alpha = nullptr, *beta = nullptr;
@@ -1437,6 +1442,11 @@ spec("GraphCanvas M2k owner-captured marquee selection") {
     check_true(up.handled);
     check_null(box.capturing_element());
     box.update();
+    // The standalone TinyTest has no editor.css; restoring the real host
+    // extent AFTER layout makes the empty canvas area a real Box hit target.
+    // Node semantic children alone are not evidence of host hit-testing.
+    root->set_layout_bounds(0, 0, 832, 160);
+    graph->set_layout_bounds(0, 0, 832, 160);
     check_equal(*alpha->attribute("data-selected"), "true");
     check_equal(*beta->attribute("data-selected"), "true");
     check_equal(doc->snapshot().revision, rev);
@@ -1448,6 +1458,11 @@ spec("GraphCanvas M2k owner-captured marquee selection") {
     box.dispatch_event(create);
     check_true(create.handled);
     box.update();
+    // The standalone TinyTest has no editor.css; restoring the real host
+    // extent AFTER layout makes the empty canvas area a real Box hit target.
+    // Node semantic children alone are not evidence of host hit-testing.
+    root->set_layout_bounds(0, 0, 832, 160);
+    graph->set_layout_bounds(0, 0, 832, 160);
     check_equal(doc->snapshot().groups.size(), 1U);
     check_equal(doc->undo_count(), 1U);
     check_equal(doc->snapshot().edges.size(), 1U);
@@ -1470,6 +1485,11 @@ spec("GraphCanvas M2k owner-captured marquee selection") {
     box.dispatch_event(ungroup);
     check_true(ungroup.handled);
     box.update();
+    // The standalone TinyTest has no editor.css; restoring the real host
+    // extent AFTER layout makes the empty canvas area a real Box hit target.
+    // Node semantic children alone are not evidence of host hit-testing.
+    root->set_layout_bounds(0, 0, 832, 160);
+    graph->set_layout_bounds(0, 0, 832, 160);
     check_equal(doc->snapshot().groups.size(), 0U);
     check_equal(graph->child_count(), 4U);
     check_equal(box.owned_element_count(), original_count);
@@ -1497,6 +1517,11 @@ spec("GraphCanvas M2k owner-captured marquee selection") {
     root->set_layout_bounds(0, 0, 832, 160);
     graph->set_layout_bounds(0, 0, 832, 160);
     box.update();
+    // The standalone TinyTest has no editor.css; restoring the real host
+    // extent AFTER layout makes the empty canvas area a real Box hit target.
+    // Node semantic children alone are not evidence of host hit-testing.
+    root->set_layout_bounds(0, 0, 832, 160);
+    graph->set_layout_bounds(0, 0, 832, 160);
     flexUI::Element *alpha = nullptr, *beta = nullptr;
     for (auto *raw : graph->children()) {
       auto *part = static_cast<flexUI::Element *>(raw);
@@ -1511,6 +1536,11 @@ spec("GraphCanvas M2k owner-captured marquee selection") {
     box.dispatch_event(down);
     box.dispatch_event(up);
     box.update();
+    // The standalone TinyTest has no editor.css; restoring the real host
+    // extent AFTER layout makes the empty canvas area a real Box hit target.
+    // Node semantic children alone are not evidence of host hit-testing.
+    root->set_layout_bounds(0, 0, 832, 160);
+    graph->set_layout_bounds(0, 0, 832, 160);
     check_equal(*alpha->attribute("data-selected"), "true");
     check_equal(*beta->attribute("data-selected"), "false");
 
@@ -1524,6 +1554,11 @@ spec("GraphCanvas M2k owner-captured marquee selection") {
     box.dispatch_event(move);
     box.dispatch_event(up);
     box.update();
+    // The standalone TinyTest has no editor.css; restoring the real host
+    // extent AFTER layout makes the empty canvas area a real Box hit target.
+    // Node semantic children alone are not evidence of host hit-testing.
+    root->set_layout_bounds(0, 0, 832, 160);
+    graph->set_layout_bounds(0, 0, 832, 160);
     check_true(up.handled);
     check_null(box.capturing_element());
     check_equal(*alpha->attribute("data-selected"), "true");
@@ -1549,6 +1584,11 @@ spec("GraphCanvas M2k owner-captured marquee selection") {
     check_true(cancel.handled);
     check_null(box.capturing_element());
     box.update();
+    // The standalone TinyTest has no editor.css; restoring the real host
+    // extent AFTER layout makes the empty canvas area a real Box hit target.
+    // Node semantic children alone are not evidence of host hit-testing.
+    root->set_layout_bounds(0, 0, 832, 160);
+    graph->set_layout_bounds(0, 0, 832, 160);
     check_equal(*alpha->attribute("data-selected"), "true");
     check_equal(*beta->attribute("data-selected"), "true");
     check_equal(doc->undo_count(), 0U);
@@ -1590,6 +1630,11 @@ spec("GraphCanvas M2k owner-captured marquee selection") {
     root->set_layout_bounds(0, 0, 832, 160);
     graph->set_layout_bounds(0, 0, 832, 160);
     box.update();
+    // The standalone TinyTest has no editor.css; restoring the real host
+    // extent AFTER layout makes the empty canvas area a real Box hit target.
+    // Node semantic children alone are not evidence of host hit-testing.
+    root->set_layout_bounds(0, 0, 832, 160);
+    graph->set_layout_bounds(0, 0, 832, 160);
     GraphEditSnapshot visible;
     check_true(static_cast<bool>(doc->visible_snapshot(visible)));
     check_equal(visible.nodes.size(), 1U);
@@ -1600,8 +1645,20 @@ spec("GraphCanvas M2k owner-captured marquee selection") {
     auto down = flexUI::Event::mouse_down(20, 150);
     auto move = flexUI::Event::mouse_move(600, 10);
     auto up = flexUI::Event::mouse_up(600, 10);
-    box.dispatch_event(down); box.dispatch_event(move); box.dispatch_event(up);
+    box.dispatch_event(down);
+    check_true(down.handled);
+    check(box.capturing_element() == graph);
+    box.dispatch_event(move);
+    check_true(move.handled);
+    box.dispatch_event(up);
+    check_true(up.handled);
+    check_null(box.capturing_element());
     box.update();
+    // The standalone TinyTest has no editor.css; restoring the real host
+    // extent AFTER layout makes the empty canvas area a real Box hit target.
+    // Node semantic children alone are not evidence of host hit-testing.
+    root->set_layout_bounds(0, 0, 832, 160);
+    graph->set_layout_bounds(0, 0, 832, 160);
     check_null(box.capturing_element());
     for (auto *raw : graph->children()) {
       auto *part = static_cast<flexUI::Element *>(raw);
