@@ -26,16 +26,31 @@ subsequent event delivery may continue if the owner deliberately keeps the windo
 
 Window focus and native close-request callbacks are notifications. They cannot veto closing, and
 calling `Window::close()` directly only sets the close flag; it does not synthesize another close
-notification. On Windows, `Window` exposes native GUI pointer capture through
-`supports_pointer_capture()`, `has_pointer_capture()`, and `set_pointer_capture()`. Acquisition and
-release are idempotent for the owning window and fail explicitly if the requested native state was
-not reached. Other platforms report no capability and reject capture changes instead of replacing
-capture with cursor confinement.
+notification. `Window` exposes native GUI pointer capture through
+`supports_pointer_capture()`, `has_pointer_capture()`, and `set_pointer_capture()`.
+Windows uses the existing Win32 `SetCapture/ReleaseCapture`. When GLFW actually
+selects the X11 platform and the production gCanvas window target is linked
+against Xlib, Linux uses the real `XGrabPointer/XUngrabPointer` server grab.
+Both support idempotent capture by the **same exact window** and require
+the window's owner thread. One X11 gCanvas window may not silently steal or
+release another gCanvas window's grab. A failed server grant remains an error.
 
-Before publishing a Windows focus-loss notification, `Window` releases any native pointer capture
-owned by that window. A host handles the notification by clearing its own UI focus and logical
-capture state. Focus gain does not restore either state automatically. Native capture is also
-released during window destruction; this cleanup does not change listener ownership.
+Native X11 capture does **not** confine or warp the cursor: button/motion
+events can be delivered to the grabbed window after the pointer leaves its
+bounds. Wayland, macOS, headless GLFW and builds without Xlib support remain
+explicitly unsupported; they throw instead of substituting cursor lock or
+Box-only logical capture. The selected runtime GLFW backend, not merely the
+operating system, determines the capability.
+
+Before publishing a focus-loss or native close-request notification,
+`Window` releases its own native pointer grab. Programmatic close and
+window destruction release it before the platform window is destroyed.
+A host independently clears UI focus and logical Box capture; focus gain
+does not auto-resurrect an old gesture or a native grab. A successful
+Box/TinyTest drag proves only input ownership, whereas a native OpenGL/X11
+frame **while the grab is active** proves the OS capability.
+[Issue #403](https://github.com/qigao/stun/issues/403) tracks further
+outside-window pointer delivery / backend-specific qualification.
 
 ## Window coordinate contract
 
