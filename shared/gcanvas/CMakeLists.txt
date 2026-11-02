@@ -365,7 +365,10 @@ if(GCANVAS_BUILD_TESTS)
       add_executable(gcanvas_gpu_test tests/gpu_smoke_test.cpp)
       target_include_directories(
         gcanvas_gpu_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
-      target_link_libraries(gcanvas_gpu_test PRIVATE gCanvas::Window)
+      # The original GPU smoke calls GLFW native/public APIs directly.
+      # gCanvas::Window links GLFW privately by design, so the test must
+      # declare its own actual GLFW dependency (headers and symbols).
+      target_link_libraries(gcanvas_gpu_test PRIVATE gCanvas::Window glfw)
       if(UNIX AND NOT APPLE AND X11_FOUND)
         # Existing production GPU smoke also qualifies the REAL native
         # GLFW/X11 window focus/grab/close contract. No new test target.
