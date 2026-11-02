@@ -9,13 +9,12 @@ separate `Stun required acceptance` status from GitHub Actions, with no bypass
 actors. **That status publisher is retired by this change:** it did not compile
 or execute any native tests; it only republished other workflow conclusions.
 
-**Server-side prerequisite:** before merging this cleanup, edit the ruleset
-in GitHub Settings → Rules → Rulesets to remove the obsolete
-`Stun required acceptance` required-status context (integration ID 15368).
-Repository commits do **not** modify server-side rulesets. Deleting the
-publisher without removing this rule will leave PRs permanently blocked on
-a status that cannot be generated. Preserve the pull-request requirement and
-force-push/deletion protections while updating the status policy.
+The `Stun required acceptance` required-status context (integration ID 15368)
+was removed from the server-side ruleset on 2026-11-02. This change
+enabled [PR #399](https://github.com/qigao/stun/pull/399) to merge at
+`3cdf44d7d7d011975beae4696258fe8d78266338`. The master pull-request,
+non-fast-forward and branch-deletion protections remain in place. Git commits
+do **not** modify server-side rulesets.
 
 Qualification must use the **actual native build, CTest, runtime, sanitizer,
 graphics and platform jobs on the precise source HEAD**, not a synthetic
@@ -57,7 +56,7 @@ The rapid-iteration path is:
 | GraphLayout algorithms | GraphLayout native matrix and runtime |
 | gCanvas renderer or Android platform | Relevant GLES/Android/package/cache checks and runtime |
 | C11 Markdown | UI C11 released-SDK matrix and runtime |
-| Controller/provider or public dependency boundary | Public provider contracts and runtime |
+| Controller/provider or public dependency boundary | Actual native runtime / installed-SDK tests |
 | Documentation only | Fast architecture check; unrelated native/SDK runs are skipped |
 
 Matrix and sanitizer coverage has **not** been weakened, and the integration
@@ -89,7 +88,7 @@ parser-only paths from the expensive runtime gate. When `ci/full` is set,
 `ci-affected.sh` compares the **entire PR base-to-head diff** using the same
 conservative, path-scoped M1 documentation classifier. If and only if the
 diff is unambiguously documentation-only, it skips unrelated native suites;
-the repository-wide parser contract still executes and remains required.
+the existing Runtime change-scope job still exercises CI routing policy tests.
 For any changed source, missing history, invalid path, or unavailable policy,
 `ci/full` still forces all applicable real native suites (fail open).
 No fixture in a source-owned tree is discarded because of a `.md` suffix. Mixed commits that also
@@ -204,12 +203,15 @@ remains fail-open toward real testing. `ci_required_matrix.py` also assists
 the optional read-only exact-head audit above; it no longer feeds a status
 publisher.
 
-The `Public dependency compile contract` workflow retains its existing
-Python policy tests, including source-scoping and screenshot-oracle unit
-fixtures, but no longer runs duplicate copies of its nested test suites.
-It is **not evidence of compiling or running the production C++ GUI**.
-Those proofs are supplied by `Stun native GUI screenshot E2E`,
-`Stun runtime conformance` and the affected real platform workflows.
+The old `Public dependency compile contract` workflow did not compile a
+library or execute a production parser; it only launched Python CI-routing
+policy tests. It has been deleted. The exact same `test_ci_affected.py`
+and its existing policy/screenshot-oracle unit fixtures now execute **once**
+inside the already-running `Runtime change scope` job in
+`Stun runtime conformance`. No extra job or runner is created.
+This scope test is never counted as native runtime acceptance: real
+CMake/CTest/SDK coverage is supplied by the existing focused native jobs,
+`Stun native GUI screenshot E2E`, and relevant platform workflows.
 
 ## Retired status-only workflow
 
@@ -219,13 +221,12 @@ Python publisher fixture. This removes the privileged
 `pull_request_target` / `workflow_run` fan-out and the
 `statuses: write` token that previously posted `Stun required acceptance`.
 
-Retirement of those tracked files **cannot by itself** delete the GitHub
-ruleset. The administrator must remove that obsolete required-status entry
-from [ruleset #26090409](https://github.com/qigao/stun/rules/26090409)
-before merging the cleanup. [Issue #315](https://github.com/qigao/stun/issues/315)
-is historical evidence of the old enforcement, not a reason to retain the
-publisher. All CI acceptance claims must cite exact native workflow/job
-results directly rather than an aggregated synthetic status.
+The old required-status entry was independently removed from
+[ruleset #26090409](https://github.com/qigao/stun/rules/26090409)
+before merging #399. [Issue #315](https://github.com/qigao/stun/issues/315)
+records the earlier system and its retirement. CI acceptance claims must
+cite executed native workflow/job results directly, never an aggregated
+synthetic status.
 
 ## Maintenance
 

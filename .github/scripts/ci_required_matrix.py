@@ -30,9 +30,8 @@ WORKFLOWS = {
         "Native C / windows-latest",
     ),
 }
-PUBLIC = ".github/workflows/public-dependency-contract.yml"
 RUNTIME = ".github/workflows/runtime-conformance.yml"
-PARSER = "Repository sole C11 parser contract"
+SCOPE = "Runtime change scope"
 NATIVE = "Linux / focused installed-SDK ASan/UBSan"
 
 # These existing subsystems have the generic native Runtime Conformance gate
@@ -43,8 +42,8 @@ RUNTIME_ROOTS = (
     "tools/lemon/", "tools/md/", "tools/gcanvas-shaderc/",
 )
 RUNTIME_FILES = {"CMakeLists.txt", "shared/CMakeLists.txt", "vcpkg.json", "vcpkg-configuration.json"}
-# CI governance scripts are independently exercised by the unfiltered
-# public-dependency parser job. Source-level changes also require Runtime.
+# CI-routing policy is exercised inside the existing Runtime scope job;
+# it never needs its own standalone Python-only "compile contract" workflow.
 CI_INFRA_ROOTS = (".github/workflows/", ".github/actions/", ".github/scripts/")
 # Only *unambiguously* non-executable documentation qualifies for the
 # documentation-only gate. A source-owned *.md fixture may drive renderer,
@@ -125,7 +124,10 @@ def workflow_requirements(changed_paths, workflow_sources):
     """Select only jobs from trusted, real triggered workflows."""
     if not isinstance(changed_paths, list) or not changed_paths:
         raise ValueError("PR has no changed file evidence")
-    result = {PUBLIC: [PARSER]}
+    # A real, already-existing Runtime scope job always executes policy
+    # checks on the exact head. Documentation/CI-only edits do not require
+    # unrelated heavyweight compiler and sanitizer jobs.
+    result = {RUNTIME: [SCOPE]}
     changed = set()
     for value in changed_paths:
         if (not isinstance(value, str) or not value
@@ -138,8 +140,13 @@ def workflow_requirements(changed_paths, workflow_sources):
     unknown = sorted(name for name in non_docs if not known_source(name))
     if unknown:
         raise ValueError("unmapped source paths: " + ", ".join(unknown[:10]))
-    if non_docs:
-        result[RUNTIME] = [NATIVE]
+    native_change = any(
+        not name.startswith(CI_INFRA_ROOTS) or
+        name in (RUNTIME, ".github/scripts/ci-affected.sh")
+        for name in non_docs
+    )
+    if native_change:
+        result[RUNTIME].append(NATIVE)
 
     for filename, names in WORKFLOWS.items():
         source = workflow_sources.get(filename)
