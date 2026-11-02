@@ -599,7 +599,7 @@ int main(int argc, char** argv)
             }
             XSetInputFocus(x11_display, glfwGetX11Window(impl->_glfw_window),
                            RevertToParent, CurrentTime);
-            XFlush(x11_display);
+            XSync(x11_display, False); // Require the actual mapped X server peer.
             glfwPollEvents();
 #endif
             window->set_pointer_capture(true);
@@ -640,7 +640,7 @@ int main(int argc, char** argv)
             XSetInputFocus(x11_display,
                            glfwGetX11Window(sibling_impl->_glfw_window),
                            RevertToParent, CurrentTime);
-            XFlush(x11_display);
+            XSync(x11_display, False); // Real X11 FocusOut, not a callback injection.
             for (int i = 0; i < 100 && !focus_lost; ++i)
             {
                 glfwPollEvents();
