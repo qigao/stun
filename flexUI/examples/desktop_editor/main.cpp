@@ -1133,6 +1133,9 @@ int run_group_selection_smoke(
   pumped = host.pump_once(0.0);
   if (!pumped) return fail("marquee committed frame",
                            pumped.error.window_error.message);
+  if (host.window_host().has_native_pointer_capture())
+    return fail("marquee native release",
+                "X11 pointer grab survived the completed MouseUp");
   if (!alpha->attribute("data-selected") ||
       *alpha->attribute("data-selected") != "true" ||
       !beta->attribute("data-selected") ||
@@ -1435,12 +1438,30 @@ int run_marquee_smoke(
       model->snapshot().revision != before_revision ||
       model->undo_count() != 0)
     return fail("marquee uncommitted", "selection preview mutated the graph");
-  // gCanvas has intentionally Windows-only native pointer capture.
-  // Linux/X11 rejects Window::set_pointer_capture(true) by contract. Do
-  // not fake this platform capability by pumping the native window while
-  // synthetic Box capture is held. The real TinyTest invokes the render
-  // command list during the active preview; this OpenGL host verifies the
-  // completed gesture after the original Box releases its capture.
+  // This is the real X11 OS/window capture acceptance, not merely the
+  // Box's borrowed Element pointer. Drive a production GPU frame WHILE the
+  // user gesture is still active. GLFW/X11 must own its native pointer grab
+  // across that frame; neither cursor confinement nor synthetic "success"
+  // is an acceptable substitute.
+  box.invalidate();
+  pumped = host.pump_once(0.0);
+  if (!pumped)
+    return fail("marquee native capture frame",
+                pumped.error.window_error.message);
+  if (!host.window_host().has_native_pointer_capture() ||
+      box.capturing_element() != graph ||
+      model->snapshot().revision != before_revision)
+    return fail("marquee native capture lease",
+                "GLFW/X11 did not retain the actual pointer grab during the frame");
+  // A SECOND frame validates actual X11 capture across frame boundaries,
+  // including the same native window's idempotent re-acquisition.
+  box.invalidate();
+  pumped = host.pump_once(0.0);
+  if (!pumped || !host.window_host().has_native_pointer_capture())
+    return fail("marquee second native frame",
+                pumped ? "native X11 grab was not retained" :
+                         pumped.error.window_error.message);
+
   auto released = up();
   if (!host.application().dispatch_event(released) || !released.handled ||
       box.capturing_element() != nullptr)
