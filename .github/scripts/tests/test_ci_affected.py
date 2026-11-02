@@ -113,7 +113,6 @@ def verify_labeled_workflow_isolation():
         "graphlayout-native.yml",
         "gui-native-e2e.yml",
         "flexui-tango-headless.yml",
-        "public-dependency-contract.yml",
         "runtime-conformance.yml",
     }, guarded
     assert master_push_and_dispatch.issubset(set(guarded)), guarded

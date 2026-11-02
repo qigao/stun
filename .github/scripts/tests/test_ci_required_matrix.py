@@ -37,7 +37,7 @@ class RequirementTests(unittest.TestCase):
 
     def test_documentation_only_avoids_native_matrix(self):
         result = matrix("docs/CI_SCOPE.md", "README.md")
-        self.assertEqual(result, {policy.PUBLIC: [policy.PARSER]})
+        self.assertEqual(result, {policy.RUNTIME: [policy.SCOPE]})
 
     def test_docs_are_explicitly_scoped_not_any_markdown_suffix(self):
         for path in ("README.md", ".github/CI_SCOPE.md", ".github/CCACHE.md",
@@ -102,8 +102,7 @@ class RequirementTests(unittest.TestCase):
     def test_ci_governance_source_is_native_runtime_scoped(self):
         result = matrix(".github/scripts/verify_exact_head_ci.py",
                         ".github/scripts/ci_required_matrix.py")
-        self.assertIn(policy.PUBLIC, result)
-        self.assertIn(policy.RUNTIME, result)
+        self.assertEqual(result[policy.RUNTIME], [policy.SCOPE])
 
     def test_shared_ccache_action_selects_real_native_workflows(self):
         result = matrix(".github/actions/setup-ccache/action.yml")
@@ -134,8 +133,8 @@ class RequirementTests(unittest.TestCase):
                      "shared/CMakeLists.txt"):
             with self.subTest(path=path):
                 required = matrix(path)
-                self.assertIn(policy.PUBLIC, required)
                 self.assertIn(policy.RUNTIME, required)
+                self.assertIn(policy.NATIVE, required[policy.RUNTIME])
         self.assertFalse(policy.known_source("shared/new-provider/CMakeLists.txt"))
         self.assertNotIn("gcanvas-package-contract.yml", policy.WORKFLOWS)
         self.assertNotIn("gcanvas-shader-tools-cache.yml", policy.WORKFLOWS)
@@ -195,7 +194,8 @@ class RequirementTests(unittest.TestCase):
         result = matrix("charts/mermaid/flowchart/src/flowchart_parser.y")
         self.assertIn(".github/workflows/graphlayout-native.yml", result)
         self.assertIn(policy.RUNTIME, result)
-        self.assertIn(policy.PUBLIC, result)
+        self.assertIn(policy.SCOPE, result[policy.RUNTIME])
+        self.assertIn(policy.NATIVE, result[policy.RUNTIME])
 
 
 if __name__ == "__main__":

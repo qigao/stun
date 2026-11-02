@@ -54,6 +54,11 @@ jobs:
         env:
           EXPECTED_STUN_SHA: ${{ steps.run_head.outputs.sha }}
         run: test "$(git rev-parse HEAD)" = "$EXPECTED_STUN_SHA"
+      # Reuse the existing owner-thread scope job, not another runner or
+      # misleading "compile contract" workflow for Python-only CI policy.
+      - name: Validate CI routing policy once (no standalone workflow)
+        run: python3 .github/scripts/tests/test_ci_affected.py
+
       - name: Detect Flowchart JSON golden changes
         id: gold_scope
         shell: bash
