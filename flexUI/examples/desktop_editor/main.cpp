@@ -1331,25 +1331,29 @@ int run_boundary_smoke(
       visible.edges[0].source_port != stable_proxy)
     return fail("boundary visible mapping", "logical source port was overwritten");
 
-  auto undo = flexUI::Event::key_down(
-      flexUI::KeyCode::Z, static_cast<int>(flexUI::KeyMod::Control));
-  auto redo = flexUI::Event::key_down(
-      flexUI::KeyCode::Y, static_cast<int>(flexUI::KeyMod::Control));
-  if (!host.application().dispatch_event(undo) || !undo.handled ||
-      group().collapsed ||
-      !host.application().dispatch_event(undo) || !undo.handled ||
+  // Every key press is a distinct Event instance. The real dispatcher
+  // marks an accepted event handled and non-propagating; re-dispatching the
+  // same mutable Event would silently skip the GraphCanvas keyboard owner.
+  const auto press_history = [&](flexUI::KeyCode key) {
+    auto event = flexUI::Event::key_down(
+        key, static_cast<int>(flexUI::KeyMod::Control));
+    return host.application().dispatch_event(event) && event.handled;
+  };
+  if (!press_history(flexUI::KeyCode::Z) || group().collapsed)
+    return fail("boundary Undo collapse", "native first Undo did not expand");
+  if (!press_history(flexUI::KeyCode::Z) ||
       !group().proxy_ports.empty())
-    return fail("boundary Undo", "cannot restore unbound expanded group");
+    return fail("boundary Undo binding", "native second Undo did not retire port");
   box.update();
   if (graph->child_count() != 5 ||
       box.owned_element_count() != baseline_owned)
     return fail("boundary port retirement", "removed proxy semantic leaf leaked");
-  if (!host.application().dispatch_event(redo) || !redo.handled ||
+  if (!press_history(flexUI::KeyCode::Y) ||
       group().proxy_ports.size() != 1 ||
-      group().proxy_ports[0].id != stable_proxy ||
-      !host.application().dispatch_event(redo) || !redo.handled ||
-      !group().collapsed)
-    return fail("boundary Redo", "stable boundary PortId not restored");
+      group().proxy_ports[0].id != stable_proxy)
+    return fail("boundary Redo binding", "native first Redo did not restore PortId");
+  if (!press_history(flexUI::KeyCode::Y) || !group().collapsed)
+    return fail("boundary Redo collapse", "native second Redo did not collapse");
   box.update();
   if (graph->child_count() != 6 ||
       box.owned_element_count() != baseline_owned + 1 ||
