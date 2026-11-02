@@ -1,26 +1,28 @@
 # Stun CI: incremental scope and complete requalification
 
-## Enforced master rules (2026-10-29)
 
-The active [master exact-HEAD acceptance ruleset](https://github.com/qigao/stun/rules/26090409)
-targets only `refs/heads/master`. Every change must go through a pull request
-and pass the single `Stun required acceptance` commit-status context from
-GitHub Actions (integration ID 15368). There are no bypass actors, including
-repository administrators. Direct pushes, force pushes and branch deletion
-are blocked by the applicable rules.
+## Master protection and obsolete acceptance status (2026-11-02)
 
-Pull requests require zero approvals; the exact-head acceptance gate remains
-mandatory. Existing merge, squash and rebase methods remain available.
-The ruleset does not require an up-to-date test-merge SHA and does not enable
-a merge queue: the trusted publisher qualifies the actual PR source HEAD,
-with `ci/full` and executed jobs selected from the cumulative source delta.
-Documentation-only PRs still require the unfiltered parser contract, without
-unrelated native platform matrices.
+The [master ruleset #26090409](https://github.com/qigao/stun/rules/26090409)
+was active when this cleanup was prepared. It required pull requests and a
+separate `Stun required acceptance` status from GitHub Actions, with no bypass
+actors. **That status publisher is retired by this change:** it did not compile
+or execute any native tests; it only republished other workflow conclusions.
 
-The M0/M1 sections below describe the earlier implementation stages. The
-repository rules API, not those historical stage limitations, is the source
-of truth for current enforcement. See [issue #315](https://github.com/qigao/stun/issues/315)
-for the activation and live negative/positive verification requirements.
+**Server-side prerequisite:** before merging this cleanup, edit the ruleset
+in GitHub Settings → Rules → Rulesets to remove the obsolete
+`Stun required acceptance` required-status context (integration ID 15368).
+Repository commits do **not** modify server-side rulesets. Deleting the
+publisher without removing this rule will leave PRs permanently blocked on
+a status that cannot be generated. Preserve the pull-request requirement and
+force-push/deletion protections while updating the status policy.
+
+Qualification must use the **actual native build, CTest, runtime, sanitizer,
+graphics and platform jobs on the precise source HEAD**, not a synthetic
+publisher. A skipped/cancelled or obsolete-head result is not executed
+acceptance, even if the workflow summary appears green. Review each
+applicable real job before merging; do not replace the publisher with another
+no-op acceptance/check-mark workflow.
 
 ## Why the old CI was expensive
 
@@ -95,38 +97,26 @@ touch integration files still run the full check; invalid event metadata,
 missing history and missing include patterns fail open. All exclusions are
 ignored when `ci/full` is present.
 
+
 ## Before merging a PR
 
-Add the `ci/full` PR label (create the repository label if necessary) and keep
-it on the PR. The `labeled` event triggers a complete requalification of all
-workflows applicable to the cumulative PR diff; subsequent `synchronize`
-events with the label run those checks for each new HEAD. Removing an unrelated
-label never requests full requalification.
+Use the `ci/full` label to request all applicable **real** qualification
+jobs for the final source HEAD. Prefer setting it before the final source push
+so the existing native workflows rerun once on that exact commit; a label is
+not itself test evidence. Do not add fake status jobs, redundant workflow
+launches or no-op commits to coerce an old green result into acceptance.
 
-**Order matters:** apply `ci/full` **before pushing the final candidate HEAD**,
-rather than adding it while existing native work is already starting. The
-trusted status compares every required job's `started_at` with the timestamp
-of the most recent real `ci/full` admission event. A job started even seconds
-before that label is **ineligible**, despite a successful native result; merely
-adding a label does not retroactively qualify already-running jobs. Keep the
-label on subsequent meaningful source/documentation fixes so `synchronize`
-requalifies one new exact HEAD after admission. Do not toggle/re-add the label
-to mask an early job, reinterpret a skipped/cancelled run as a pass, introduce
-dummy workflow jobs or create no-op commits solely to change status. This
-prevents needless double native matrices while retaining fail-closed evidence.
+Read the actual GitHub Actions **per-job** results: for a source change,
+require successful executed native CTests and affected real platform/SDK
+suites on the exact HEAD. `skipped`, `neutral`, `cancelled`, pending,
+missing, failed or old-SHA jobs cannot be reported as native acceptance.
+Documentation-only updates may correctly bypass unrelated heavy native
+suites while retaining existing repository policy tests.
 
-Do not merge unless **the exact HEAD** has a completed, successful *executed*
-Stun runtime conformance job with chart JSON CTests, plus the relevant platform,
-installed-SDK and lifecycle jobs. An old-head success or a skipped job is not
-equivalent. The usual full runtime workflow can also be started with
-`workflow_dispatch` on a selected branch, but use the `ci/full` label for an
-entire PR qualification matrix.
-
-**Required-status distinction:** a job skipped by `if:` can appear green.
-A green workflow name alone does not prove its runtime tests executed. The
-active master ruleset therefore requires only the dedicated
-`Stun required acceptance` commit status. Its trusted verifier rejects
-missing, skipped, neutral, cancelled, stale-head or failing required jobs.
+The obsolete aggregated commit status is no longer used. Until the
+master ruleset has been edited to remove it, GitHub may still block merges;
+that is a server-side configuration issue, not a reason to restore a
+status-only publisher.
 
 ## Isolate unrelated PR labels from real CI execution
 
@@ -159,42 +149,25 @@ groups; ordinary master pushes, PR updates, and explicit `ci/full`
 events retain normal superseding semantics. Test commands, module scope
 filters, and required source coverage are unchanged.
 
-## Exact-head evidence verifier (stage M0; not a branch rule)
 
-`.github/scripts/verify_exact_head_ci.py` can read GitHub's live PR,
-workflow-run and per-job REST records and fail closed unless all explicitly
-required jobs ran successfully on the **current exact PR head**. It rejects
-`skipped`, `neutral`, `cancelled`, pending, missing and stale-head jobs.
-It verifies that `ci/full` is present and rereads the PR head after fetching
-evidence. Requirement files list trusted workflow paths and exact job names;
-they **must be produced from reviewed module ownership**, never accepted
-from untrusted PR input.
+## Optional exact-HEAD evidence reader (not CI)
 
-Example requirement JSON for a runtime-affecting change:
+`.github/scripts/verify_exact_head_ci.py` is a **read-only** manual tool for
+querying live GitHub PRs, workflow runs and executed jobs. It rejects
+skipped, missing, cancelled or stale-head evidence. Its trusted module-path
+matrix comes from `.github/scripts/ci_required_matrix.py`. These scripts do
+not run native builds, publish GitHub statuses or enforce master merges.
 
-```json
-{"required_workflows": [
-  {"path": ".github/workflows/public-dependency-contract.yml",
-   "jobs": ["Repository sole C11 parser contract"]},
-  {"path": ".github/workflows/runtime-conformance.yml",
-   "jobs": ["Linux / focused installed-SDK ASan/UBSan"]}
-]}
-```
-
-Run after the relevant `ci/full` suites finish:
+For manual diagnosis only:
 
 ```sh
 GH_TOKEN=... python3 .github/scripts/verify_exact_head_ci.py \
-  --repo qigao/stun --pr PR_NUMBER --requirements reviewed-matrix.json
+  --repo qigao/stun --pr PR_NUMBER
 ```
 
-The deterministic positive/negative cases run inside the existing public
-dependency parser-check job through `test_ci_affected.py`. This is **not**
-yet a non-skippable required PR check, does not protect `master`, and
-does not itself infer the module matrix. See [Issue #315](https://github.com/qigao/stun/issues/315)
-for the required always-created GitHub status and administrator-enabled
-ruleset. Do not merge based solely on this validator or a green workflow
-summary.
+The offline policy/verification tests remain part of the existing Python
+CI-scope test run; they are not independent native acceptance workflows or
+substitutes for production CMake/CTest evidence.
 
 ## Fail-fast CI/CMake policy (2026-10-30)
 
@@ -219,95 +192,40 @@ The existing sole public CI policy job continues to execute real Python
 source-routing tests. It no longer duplicates static CMake/provider scans or
 compile-only pseudo-consumers that cannot establish runtime correctness.
 
-## Trusted source-delta CI requirement matrix (stage M1)
 
-The default-branch `.github/scripts/ci_required_matrix.py` now derives a
-non-empty set of required native jobs from the actual PR changed-file list
-(including both sides of renames) and the **trusted default branch's**
-`pull_request.paths` routing. Exact native job names are pinned in source
-and updated alongside their owning workflows. This module must never be loaded
-from the PR head during a privileged publication workflow.
+## CI source routing and read-only helper policy
 
-The unfiltered Public Dependency parser contract is always required.
-Non-documentation changes require real Linux installed-SDK Runtime
-Conformance; affected focused workflows add Windows/macOS C11, GraphLayout,
-GLES/NDK, native Android emulator, TSan, Tango and other exact host gates as
-applicable. Documentation-only changes do not require irrelevant native
-matrices. Documentation classification is **path-scoped**, not extension-only:
-root documentation, the dedicated `docs/` and `documentation/` trees and the
-explicit `.github/CCACHE.md` / `.github/CI_SCOPE.md` policy documents are
-recognized. A `*.md` test fixture inside `shared/markdown/`, `charts/`,
-`flexUI/`, or any other source module still requires actual native acceptance.
-Missing/renamed workflow evidence, malformed paths, unknown source
-roots, empty PR deltas and truncated API pages fail closed rather than
-succeed with a reduced gate.
+The existing `.github/scripts/ci-affected.sh` compares the exact source
+delta and schedules real workflows only for affected subsystems. For
+`ci/full` on a clearly documentation-only PR, its existing
+`.github/scripts/ci_required_matrix.py --doc-only-z` path prevents
+unrelated heavyweight native jobs. Unavailable or ambiguous evidence
+remains fail-open toward real testing. `ci_required_matrix.py` also assists
+the optional read-only exact-head audit above; it no longer feeds a status
+publisher.
 
-`verify_exact_head_ci.py` now uses this trusted policy automatically
-(without `--requirements`); the explicit manifest option remains a manual
-diagnostic mode only. `test_ci_affected.py` executes both validator fixture
-suites in its existing lightweight parser-ownership job. This still is NOT a
-required GitHub commit status: the stable event-driven status publisher and
-administrator-enabled master ruleset remain tracked in
-[Issue #315](https://github.com/qigao/stun/issues/315).
+The `Public dependency compile contract` workflow retains its existing
+Python policy tests, including source-scoping and screenshot-oracle unit
+fixtures, but no longer runs duplicate copies of its nested test suites.
+It is **not evidence of compiling or running the production C++ GUI**.
+Those proofs are supplied by `Stun native GUI screenshot E2E`,
+`Stun runtime conformance` and the affected real platform workflows.
 
-## Stable event-driven acceptance status (stage M2)
+## Retired status-only workflow
 
-`.github/workflows/required-acceptance.yml` uses only trusted default-branch
-Python code to publish one stable GitHub commit-status context,
-`Stun required acceptance`, against the real PR source HEAD. It responds to
-`pull_request_target` (open/update/ci-full label removal or addition) and
-upstream `workflow_run` requested/completed events. The latter can have an
-empty `pull_requests` list; the publisher therefore resolves *currently open*
-master-targeting PRs by exact source SHA from the API.
+Deleted: `.github/workflows/required-acceptance.yml`,
+`.github/scripts/publish_required_acceptance.py`, and its dedicated
+Python publisher fixture. This removes the privileged
+`pull_request_target` / `workflow_run` fan-out and the
+`statuses: write` token that previously posted `Stun required acceptance`.
 
-Each required native job must have actually started **no earlier than the
-most recent `ci/full` label admission event** from the GitHub issue-events
-API. This prevents a newly added/re-added `ci/full` label from immediately
-reusing older same-SHA green jobs. Re-runs are qualified using their real
-latest-attempt job start times rather than the original workflow run
-creation timestamp. Missing or malformed admission timestamps fail closed.
-
-The publisher reads PR changed files and default-branch workflow policies
-to infer required host jobs; it reads live per-job execution results and
-requires exact-head completed SUCCESS for every applicable job. Missing,
-stale, cancelled, skipped, neutral, pending, duplicated or failed evidence,
-missing `ci/full`, and unknown source roots publish **failure** rather
-than a misleading success. Concurrent PR heads and source changes are
-rechecked before writing. Multiple open PRs with one SHA cannot bypass
-the policy via another PR's successful label. The existing M0 verifier is
-still the underlying evidence checker.
-
-This workflow neither checks out the PR head nor executes PR content,
-uses a status-writing token only for trusted default-branch code, and
-does not run native tests, poll, or add cross-platform build runners. The
-single `workflow_run` publisher is intentionally a lightweight follow-up
-to existing tests. It is **not** the same as requiring a native workflow
-summary; the separate commit-status context is what an administrator
-must select as the required status in the master Ruleset.
-
-The active master ruleset requires `Stun required acceptance` from GitHub
-Actions. Activation must be verified against live negative and positive PR
-merge states, rather than inferred from a green status alone.
-The workflow must first exist on `master` before its `workflow_run`
-trigger operates; the Draft PR adding it cannot itself validate the
-post-merge event. GitHub API/token errors leave the status missing or
-failing, which must block once the ruleset is enabled. Fork PR status
-publication is subject to the base-repository token's commit-status
-access; any unsupported source SHA must fail closed, not be bypassed.
-
-See [Issue #315](https://github.com/qigao/stun/issues/315).
-
-## Final label admission is revalidated before status publication
-
-The publisher may spend time retrieving a complete exact-HEAD native job
-matrix while another actor removes `ci/full`. The initial PR snapshot alone
-is insufficient: just before writing `Stun required acceptance`, the
-publisher re-reads the live PR and rejects success if its final labels are
-missing, malformed or no longer contain `ci/full`. A source SHA, PR state
-or base branch change remains a separate fail-closed check. Existing
-`unlabeled` event publication continues to recompute status, without
-executing native tests. This reduces stale-success windows. The existing protected master
-Ruleset continues to require this status; no separate App issuer is deployed.
+Retirement of those tracked files **cannot by itself** delete the GitHub
+ruleset. The administrator must remove that obsolete required-status entry
+from [ruleset #26090409](https://github.com/qigao/stun/rules/26090409)
+before merging the cleanup. [Issue #315](https://github.com/qigao/stun/issues/315)
+is historical evidence of the old enforcement, not a reason to retain the
+publisher. All CI acceptance claims must cite exact native workflow/job
+results directly rather than an aggregated synthetic status.
 
 ## Maintenance
 

@@ -266,8 +266,8 @@ def main():
         fixture_full["label"] = {"name": "ci/full"}
         assert check(directory, fixture_full, ["tango/*"])
 
-    # Reuse the same existing lightweight public-dependency job; no new runner
-    # or cross-platform matrix is created for acceptance verifier fixtures.
+    # Run source-scope and optional read-only audit policy fixtures once in
+    # this existing Python job. No status publisher, extra runner or matrix.
     subprocess.run([
         sys.executable,
         str(Path(__file__).with_name("test_verify_exact_head_ci.py"))
@@ -275,10 +275,6 @@ def main():
     subprocess.run([
         sys.executable,
         str(Path(__file__).with_name("test_ci_required_matrix.py"))
-    ], check=True)
-    subprocess.run([
-        sys.executable,
-        str(Path(__file__).with_name("test_publish_required_acceptance.py"))
     ], check=True)
     # Pure pixel-oracle unit tests only: NOT proof of native Stun GUI output.
     # Do not add an Xvfb runner or mock UI under the parser contract.

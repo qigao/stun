@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """Fail-closed exact-PR-HEAD native CI evidence verifier.
 
-This is a read-only verifier, NOT a branch-protection ruleset or a required
-GitHub check. By default, the required workflow/job matrix is selected from the reviewed
-PR file delta and TRUSTED default-branch workflow paths. This M1 tool is
-still read-only; publishing a non-skippable required status is separate.
+This is an OPTIONAL read-only verifier, not a GitHub Actions workflow,
+branch-protection ruleset, status publisher or substitute for native tests.
+The workflow/job matrix is selected from reviewed PR-file deltas and trusted
+default-branch workflow paths. No synthetic required status is published.
 
 Run: GH_TOKEN=... python3 verify_exact_head_ci.py --repo qigao/stun --pr 123
 """
