@@ -3,17 +3,23 @@
 #include "window_impl.hpp"
 #ifdef __linux__
 #include <GLFW/glfw3.h>
+#ifdef GCANVAS_HAS_X11_CAPTURE
+#define GLFW_EXPOSE_NATIVE_X11
+#include <GLFW/glfw3native.h>
+#endif
 #endif
 
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <chrono>
 #include <cstdint>
 #include <exception>
 #include <iostream>
 #include <optional>
 #include <stdexcept>
 #include <string>
+#include <thread>
 #include <vector>
 
 namespace
@@ -564,10 +570,38 @@ int main(int argc, char** argv)
         if (window->supports_pointer_capture())
         {
             auto* impl = static_cast<gcanvas::WindowImpl*>(window.get());
-            // The GPU pixel harness starts hidden; a real X server cannot
+            // The original GPU test starts hidden; a real X server cannot
             // grab a non-viewable X11 window. Show it before acquisition.
             glfwShowWindow(impl->_glfw_window);
             glfwPollEvents();
+#ifdef GCANVAS_HAS_X11_CAPTURE
+            // A SECOND real gCanvas Window, not an Xlib-only grab probe.
+            // It must not steal or release this exact original window's
+            // owner-thread capture. Both have genuine GLFW/X11 handles.
+            gcanvas::WindowConfig sibling_config = config;
+            sibling_config.title = "gCanvas independent native sibling";
+            sibling_config.width = 96;
+            sibling_config.height = 96;
+            sibling_config.visible = true;
+            auto sibling = gcanvas::Window::create(sibling_config);
+            auto* sibling_impl = static_cast<gcanvas::WindowImpl*>(sibling.get());
+            // Creating another GL window changes the current context. The
+            // original GPU readback test must still use its original context.
+            if (backend == "opengl")
+                glfwMakeContextCurrent(impl->_glfw_window);
+            Display* x11_display = glfwGetX11Display();
+            if (x11_display == nullptr ||
+                glfwGetX11Window(impl->_glfw_window) == 0 ||
+                glfwGetX11Window(sibling_impl->_glfw_window) == 0)
+            {
+                std::cerr << "real X11 sibling native handles are missing\n";
+                return 29;
+            }
+            XSetInputFocus(x11_display, glfwGetX11Window(impl->_glfw_window),
+                           RevertToParent, CurrentTime);
+            XFlush(x11_display);
+            glfwPollEvents();
+#endif
             window->set_pointer_capture(true);
             window->set_pointer_capture(true);
             if (!window->has_pointer_capture())
@@ -575,6 +609,23 @@ int main(int argc, char** argv)
                 std::cerr << "X11 native pointer grab was not acquired\n";
                 return 19;
             }
+#ifdef GCANVAS_HAS_X11_CAPTURE
+            bool refused_sibling = false;
+            try { sibling->set_pointer_capture(true); }
+            catch (const std::runtime_error&) { refused_sibling = true; }
+            if (!refused_sibling || sibling->has_pointer_capture() ||
+                !window->has_pointer_capture())
+            {
+                std::cerr << "sibling gCanvas window stole the original X11 grab\n";
+                return 30;
+            }
+            sibling->set_pointer_capture(false);
+            if (!window->has_pointer_capture())
+            {
+                std::cerr << "sibling release retired the original X11 grab\n";
+                return 31;
+            }
+#endif
             bool focus_lost = false;
             bool released_before_callback = false;
             auto focus_subscription = window->subscribe_focus_listener(
@@ -582,7 +633,22 @@ int main(int argc, char** argv)
                     focus_lost = !event.focused;
                     released_before_callback = !window->has_pointer_capture();
                 });
+#ifdef GCANVAS_HAS_X11_CAPTURE
+            // A genuine X server FocusOut, not a direct C++ callback call.
+            // GLFW must dispatch the native event and release capture
+            // BEFORE the registered app receives the lost-focus signal.
+            XSetInputFocus(x11_display,
+                           glfwGetX11Window(sibling_impl->_glfw_window),
+                           RevertToParent, CurrentTime);
+            XFlush(x11_display);
+            for (int i = 0; i < 100 && !focus_lost; ++i)
+            {
+                glfwPollEvents();
+                std::this_thread::sleep_for(std::chrono::milliseconds(2));
+            }
+#else
             gcanvas::focus_callback(impl->_glfw_window, 0);
+#endif
             if (!focus_lost || !released_before_callback ||
                 window->has_pointer_capture())
             {
@@ -596,6 +662,28 @@ int main(int argc, char** argv)
                 std::cerr << "X11 idempotent release left stale owner\n";
                 return 20;
             }
+#ifdef GCANVAS_HAS_X11_CAPTURE
+            // After exact original release, the sibling can acquire its OWN
+            // real native grab and idempotently hold it through a frame.
+            sibling->set_pointer_capture(true);
+            sibling->set_pointer_capture(true);
+            if (!sibling->has_pointer_capture() || window->has_pointer_capture())
+            {
+                std::cerr << "X11 sibling failed to acquire its own grab\n";
+                return 32;
+            }
+            // Programmatic close must retire the sibling's grab; the parent
+            // window/context and its native listener ownership survive.
+            sibling->close();
+            if (sibling->has_pointer_capture())
+            {
+                std::cerr << "closed sibling retained its native pointer grab\n";
+                return 33;
+            }
+            sibling.reset();
+            if (backend == "opengl")
+                glfwMakeContextCurrent(impl->_glfw_window);
+#endif
             // No capture from an invisible GLFW/X11 window. The real API
             // must report failure rather than invent a native grab.
             glfwHideWindow(impl->_glfw_window);
