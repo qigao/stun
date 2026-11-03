@@ -54,6 +54,10 @@ public:
   WidgetRegistryError register_element(
       std::string tag, UiContentModel content = UiContentModel::TextAndChildren);
 
+  /// Explicit typed Props metadata, shared by the XML frontend and factory
+  /// preflight. The descriptor is copied; the caller retains no borrow.
+  WidgetRegistryError register_element(std::string tag, UiNodeDescriptor schema);
+
   /// Registers one Widget factory for a canonical XML tag.
   /// @param tag Non-empty canonical XML tag.
   /// @param factory Callable used during owner-thread instantiation.
@@ -65,6 +69,10 @@ public:
       std::string tag, Factory factory,
       UiContentModel content = UiContentModel::TextAndChildren);
 
+  /// Opt-in typed native Props without changing existing custom registries.
+  WidgetRegistryError register_widget(
+      std::string tag, Factory factory, UiNodeDescriptor schema);
+
   /// Returns whether a structural or widget tag is registered.
   bool contains(std::string_view tag) const;
 
@@ -73,7 +81,8 @@ public:
 
   /// Whole-tree preflight, without factories or Box mutation. O(nodes) time,
   /// O(depth) auxiliary storage, bounded by the supplied document limits.
-  /// This validates registered tags and content, not all property schemas (#16).
+  /// This validates registered tags, content and explicitly declared typed Props;
+  /// component import/slots/events remain independent #16 work.
   UiDocumentError validate(const UiDocumentDefinition &definition,
                            const UiDocumentLimits &limits = {}) const;
   UiDocumentError validate(const CompiledUiProgram &program,

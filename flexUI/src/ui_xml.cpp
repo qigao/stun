@@ -1,13 +1,21 @@
 #include <flexUI/ui_xml.h>
+#include <flexUI/widget_registry.h>
 
 #include <pugixml.hpp>
 #include "ui_xml_admission.h"
 
 #include <algorithm>
+#include <array>
 #include <charconv>
 #include <cmath>
 #include <cstddef>
+#include <cstdint>
+#include <initializer_list>
+#include <limits>
+#include <memory>
 #include <string>
+#include <string_view>
+#include <unordered_map>
 #include <unordered_set>
 #include <utility>
 #include <vector>
@@ -19,6 +27,7 @@ namespace {
 struct XmlSource {
   UiDocumentDefinition definition;
   std::vector<UiResourceDefinition> resources;
+  std::vector<UiScopedComponent> scoped_components;
   UiDocumentError error;
 
   explicit operator bool() const noexcept { return !static_cast<bool>(error); }
@@ -96,9 +105,47 @@ UiDocumentValue parse_scalar(std::string_view property, std::string_view source)
   return std::string(source);
 }
 
+// Declared typed Props use the registry as the ONE source of truth. The
+// untyped legacy frontend keeps its original scalar inference behavior.
+bool parse_typed_property(UiPropertyKind kind, std::string_view value,
+                          UiDocumentValue &result) {
+  if (kind == UiPropertyKind::String) {
+    result = std::string(value);
+    return true;
+  }
+  if (kind == UiPropertyKind::Boolean) {
+    if (value == "true") { result = true; return true; }
+    if (value == "false") { result = false; return true; }
+    return false;
+  }
+  if (kind == UiPropertyKind::Number) {
+    float number = 0.0F;
+    const auto parsed = std::from_chars(value.data(), value.data() + value.size(),
+                                        number, std::chars_format::general);
+    if (parsed.ec != std::errc{} || parsed.ptr != value.data() + value.size() ||
+        !std::isfinite(number)) return false;
+    result = number;
+    return true;
+  }
+  if (kind == UiPropertyKind::Integer) {
+    std::int64_t integer = 0;
+    const auto parsed = std::from_chars(value.data(), value.data() + value.size(), integer);
+    if (parsed.ec != std::errc{} || parsed.ptr != value.data() + value.size() ||
+        integer < static_cast<std::int64_t>(std::numeric_limits<int>::min()) ||
+        integer > static_cast<std::int64_t>(std::numeric_limits<int>::max()))
+      return false;
+    const auto number = static_cast<float>(integer);
+    if (static_cast<std::int64_t>(number) != integer) return false;
+    result = number;
+    return true;
+  }
+  return false;
+}
+
 UiDocumentError parse_widget_node(std::string_view source, const pugi::xml_node &xml_node,
-                                  const UiDocumentLimits &limits, std::size_t depth,
-                                  std::size_t &node_count, std::unordered_set<std::string> &ids,
+                                  const UiDocumentLimits &limits, const WidgetRegistry *registry,
+                                  std::size_t depth, std::size_t &node_count,
+                                  std::unordered_set<std::string> &ids,
                                   UiNodeDefinition &definition) {
   const std::string_view tag(xml_node.name());
   if (tag == "ui" || tag == "resources" || tag == "resource") {
@@ -119,6 +166,12 @@ UiDocumentError parse_widget_node(std::string_view source, const pugi::xml_node 
                       tag.empty() ? UiDocumentErrorCode::InvalidNode
                                   : UiDocumentErrorCode::StringLimitExceeded,
                       "XML widget tag must be non-empty and within the string limit");
+  }
+
+  const UiNodeDescriptor *schema = registry ? registry->descriptor(tag) : nullptr;
+  if (registry && !schema) {
+    return node_error(source, xml_node, UiDocumentErrorCode::UnknownElementTag,
+                      "unknown registered UI tag: " + std::string(tag));
   }
 
   const auto id_attribute = xml_node.attribute("id");
@@ -176,7 +229,21 @@ UiDocumentError parse_widget_node(std::string_view source, const pugi::xml_node 
       return node_error(source, xml_node, UiDocumentErrorCode::StringLimitExceeded,
                         "XML UI attribute exceeds the string limit: " + property_name);
     }
-    definition.properties.emplace(property_name, parse_scalar(property_name, value));
+    UiDocumentValue parsed_value;
+    if (schema) {
+      if (const auto *spec = schema->property(property_name)) {
+        if (!parse_typed_property(spec->kind, value, parsed_value)) {
+          return node_error(source, xml_node, UiDocumentErrorCode::InvalidProperty,
+                            "UI tag '" + std::string(tag) + "' property '" +
+                            property_name + "' violates its declared type");
+        }
+      } else {
+        parsed_value = parse_scalar(property_name, value);
+      }
+    } else {
+      parsed_value = parse_scalar(property_name, value);
+    }
+    definition.properties.emplace(property_name, std::move(parsed_value));
     definition.property_spans.emplace(std::move(property_name),
                                       SourceSpan{location.line, location.column, xml_name.size()});
   }
@@ -191,7 +258,8 @@ UiDocumentError parse_widget_node(std::string_view source, const pugi::xml_node 
     if (child.type() == pugi::node_element) {
       has_element_children = true;
       definition.children.emplace_back();
-      auto error = parse_widget_node(source, child, limits, depth + 1, node_count, ids,
+      auto error = parse_widget_node(source, child, limits, registry, depth + 1,
+                                     node_count, ids,
                                      definition.children.back());
       if (error) {
         return error;
@@ -340,7 +408,627 @@ UiDocumentError parse_resources(std::string_view source, const pugi::xml_node &r
   return {};
 }
 
-XmlSource parse_xml_source(std::string_view source, const UiDocumentLimits &limits) {
+
+// Compiler-only XML component definitions; these descriptors are never
+// registered as runtime Widget factories or used as a second XML AST.
+struct XmlComponentDefinition {
+  UiDocumentDefinition templ;
+  UiNodeDescriptor props;
+  std::unordered_set<std::string> slots;
+};
+using XmlComponentCatalog = std::unordered_map<std::string, XmlComponentDefinition>;
+
+bool xml_component_identifier(std::string_view name, bool type_name = false) {
+  if (name.empty()) return false;
+  const auto alpha = [](char c) {
+    return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z');
+  };
+  if ((!alpha(name.front()) && name.front() != '_') ||
+      (type_name && !(name.front() >= 'A' && name.front() <= 'Z')))
+    return false;
+  for (std::size_t i = 1; i < name.size(); ++i) {
+    const char c = name[i];
+    if (!alpha(c) && (c < '0' || c > '9') && c != '_' && c != '-')
+      return false;
+  }
+  return true;
+}
+
+bool xml_attributes_only(const pugi::xml_node &node,
+                         std::initializer_list<std::string_view> allowed) {
+  std::unordered_set<std::string> used;
+  for (const auto &attribute : node.attributes()) {
+    const std::string_view name(attribute.name());
+    if (is_namespace_declaration(name)) continue;
+    if (std::find(allowed.begin(), allowed.end(), name) == allowed.end() ||
+        !used.emplace(name).second)
+      return false;
+  }
+  return true;
+}
+
+bool xml_structural_children_only(const pugi::xml_node &node) {
+  for (const auto &child : node.children()) {
+    if ((child.type() == pugi::node_pcdata || child.type() == pugi::node_cdata) &&
+        has_non_whitespace(child.value()))
+      return false;
+  }
+  return true;
+}
+
+UiDocumentError read_xml_components(std::string_view source,
+                                    const pugi::xml_node &section,
+                                    const UiDocumentLimits &limits,
+                                    const WidgetRegistry &registry,
+                                    XmlComponentCatalog &catalog) {
+  if (!xml_attributes_only(section, {}) ||
+      !xml_structural_children_only(section))
+    return node_error(source, section, UiDocumentErrorCode::InvalidNode,
+                      "components section accepts declarations only");
+  for (const auto &decl : section.children()) {
+    if (decl.type() != pugi::node_element) continue;
+    if (std::string_view(decl.name()) != "component" ||
+        !xml_attributes_only(decl, {"name"}) ||
+        !xml_structural_children_only(decl))
+      return node_error(source, decl, UiDocumentErrorCode::InvalidNode,
+                        "component requires name, interface and template");
+    const std::string name = decl.attribute("name").value();
+    if (!xml_component_identifier(name, true) ||
+        name.size() > limits.max_string_bytes ||
+        registry.contains(name) || catalog.count(name) != 0 ||
+        catalog.size() >= limits.max_nodes)
+      return node_error(source, decl, UiDocumentErrorCode::InvalidNode,
+                        "component name is invalid, duplicated or registered as a native tag");
+
+    pugi::xml_node interface;
+    pugi::xml_node templ;
+    for (const auto &part : decl.children()) {
+      if (part.type() != pugi::node_element) continue;
+      const std::string_view tag(part.name());
+      if (tag == "interface" && !interface) interface = part;
+      else if (tag == "template" && !templ) templ = part;
+      else
+        return node_error(source, part, UiDocumentErrorCode::InvalidNode,
+                          "component accepts exactly one interface and one template");
+    }
+    if (!interface || !templ ||
+        !xml_attributes_only(interface, {}) ||
+        !xml_attributes_only(templ, {}) ||
+        !xml_structural_children_only(interface) ||
+        !xml_structural_children_only(templ))
+      return node_error(source, decl, UiDocumentErrorCode::InvalidNode,
+                        "component interface and template must be structural");
+
+    XmlComponentDefinition definition;
+    definition.props.kind = UiNodeKind::Container;
+    definition.props.reject_unknown_properties = true;
+    for (const auto &item : interface.children()) {
+      if (item.type() != pugi::node_element) continue;
+      const std::string_view tag(item.name());
+      if (!xml_structural_children_only(item))
+        return node_error(source, item, UiDocumentErrorCode::InvalidNode,
+                          "component interface declarations cannot contain text");
+      for (const auto &nested : item.children()) {
+        if (nested.type() == pugi::node_element)
+          return node_error(source, nested, UiDocumentErrorCode::InvalidNode,
+                            "component interface declarations must be empty");
+      }
+      if (tag == "prop") {
+        if (!xml_attributes_only(item, {"name", "type", "required"}) ||
+            definition.props.properties.size() >= limits.max_properties_per_node)
+          return node_error(source, item, UiDocumentErrorCode::PropertyLimitExceeded,
+                            "invalid or excessive component property declaration");
+        const std::string_view prop_name(item.attribute("name").value());
+        const std::string_view type(item.attribute("type").value());
+        const std::string_view required(item.attribute("required").value());
+        if (!xml_component_identifier(prop_name) ||
+            prop_name.size() > limits.max_string_bytes ||
+            prop_name == "id" || prop_name == "slot" ||
+            (!required.empty() && required != "true" && required != "false"))
+          return node_error(source, item, UiDocumentErrorCode::InvalidProperty,
+                            "component property name or required flag is invalid");
+        UiPropertySpec spec;
+        spec.name.assign(prop_name);
+        if (type == "string") spec.kind = UiPropertyKind::String;
+        else if (type == "boolean") spec.kind = UiPropertyKind::Boolean;
+        else if (type == "number") spec.kind = UiPropertyKind::Number;
+        else if (type == "integer") spec.kind = UiPropertyKind::Integer;
+        else
+          return node_error(source, item, UiDocumentErrorCode::InvalidProperty,
+                            "component property requires a supported exact type");
+        spec.required = required == "true";
+        definition.props.properties.push_back(std::move(spec));
+      } else if (tag == "slot") {
+        if (!xml_attributes_only(item, {"name"}) ||
+            definition.slots.size() >= limits.max_properties_per_node)
+          return node_error(source, item, UiDocumentErrorCode::InvalidNode,
+                            "invalid or excessive named slot declaration");
+        const std::string_view slot_name(item.attribute("name").value());
+        if (!xml_component_identifier(slot_name) ||
+            slot_name.size() > limits.max_string_bytes ||
+            !definition.slots.emplace(slot_name).second)
+          return node_error(source, item, UiDocumentErrorCode::DuplicateSlot,
+                            "component interface slot requires a unique valid name");
+      } else {
+        return node_error(source, item, UiDocumentErrorCode::InvalidNode,
+                          "unsupported component interface declaration");
+      }
+    }
+    if (!definition.props.valid())
+      return node_error(source, interface, UiDocumentErrorCode::InvalidProperty,
+                        "invalid or duplicate typed component Props");
+    pugi::xml_node templ_root;
+    for (const auto &node : templ.children()) {
+      if (node.type() != pugi::node_element) continue;
+      if (templ_root)
+        return node_error(source, node, UiDocumentErrorCode::InvalidRootCount,
+                          "component template must have exactly one root");
+      templ_root = node;
+    }
+    if (!templ_root)
+      return node_error(source, templ, UiDocumentErrorCode::InvalidRootCount,
+                        "component template requires one native Element root");
+    definition.templ.name = name;
+    std::size_t parsed_nodes = 0;
+    std::unordered_set<std::string> local_ids;
+    if (auto error = parse_widget_node(source, templ_root, limits, nullptr,
+                                        1, parsed_nodes, local_ids,
+                                        definition.templ.root))
+      return error;
+    std::unordered_set<std::string> declared_outlets;
+    struct Pending {
+      const UiNodeDefinition *node;
+      bool root;
+    };
+    std::vector<Pending> pending{{&definition.templ.root, true}};
+    while (!pending.empty()) {
+      const auto current = pending.back();
+      pending.pop_back();
+      const auto &node = *current.node;
+      if (node.tag == "slot") {
+        const auto prop = node.properties.find("name");
+        const auto *slot = prop != node.properties.end()
+                               ? std::get_if<std::string>(&prop->second)
+                               : nullptr;
+        if (current.root || !node.id.empty() || !node.children.empty() ||
+            node.properties.size() != 1 || !slot ||
+            !xml_component_identifier(*slot) ||
+            definition.slots.count(*slot) == 0)
+          return make_error(UiDocumentErrorCode::InvalidNode,
+                            "template outlet must match one declared named slot",
+                            node.source.line, node.source.column);
+        if (!declared_outlets.insert(*slot).second)
+          return make_error(UiDocumentErrorCode::DuplicateSlot,
+                            "template contains duplicate slot outlet",
+                            node.source.line, node.source.column);
+      } else if (!registry.contains(node.tag)) {
+        return make_error(UiDocumentErrorCode::UnknownElementTag,
+                          "component template contains an unknown native tag: " + node.tag,
+                          node.source.line, node.source.column);
+      }
+      for (const auto &child : node.children) pending.push_back({&child, false});
+    }
+    if (declared_outlets != definition.slots)
+      return node_error(source, templ, UiDocumentErrorCode::MissingSlot,
+                        "component template must expose each interface slot exactly once");
+    catalog.emplace(name, std::move(definition));
+  }
+  return {};
+}
+
+
+// A component call is an ordinary structural host in the one application
+// program. Its template is a static scoped fragment; no ComponentWidget,
+// private Box, runtime template executor or synthetic parser is created.
+UiDocumentError lower_xml_component_calls(
+    std::string_view source, const pugi::xml_node &xml_node,
+    UiNodeDefinition &node, const UiDocumentLimits &limits,
+    const WidgetRegistry &registry, const XmlComponentCatalog &catalog,
+    std::vector<UiScopedComponent> &instances, bool allow_calls) {
+  // Namespace prefixes are fixed by the application's explicit root
+  // import. No descendant may shadow an imported binding: pugixml retains
+  // qualified tag names, not a second namespace-aware type registry.
+  for (const auto &attribute : xml_node.attributes()) {
+    const std::string_view name(attribute.name());
+    if (name.rfind("xmlns:", 0) != 0) continue;
+    const std::string prefix(name.substr(6));
+    for (const auto &entry : catalog) {
+      if (entry.first.rfind(prefix + ":", 0) == 0)
+        return node_error(source, xml_node, UiDocumentErrorCode::InvalidComponentScope,
+                          "imported component namespace cannot be rebound in a subtree");
+    }
+  }
+  const auto component = catalog.find(std::string(xml_node.name()));
+  if (component != catalog.end()) {
+    if (!allow_calls)
+      return node_error(source, xml_node, UiDocumentErrorCode::InvalidComponentScope,
+                        "nested component calls inside a caller slot are not admitted");
+    if (!xml_component_identifier(node.id) ||
+        node.id.size() > limits.max_string_bytes / 2 ||
+        instances.size() >= limits.max_nodes)
+      return node_error(source, xml_node, UiDocumentErrorCode::InvalidComponentScope,
+                        "component call requires a bounded unique ASCII id/scope");
+
+    UiNodeDefinition call;
+    call.tag = node.tag;
+    call.id = node.id;
+    call.source = node.source;
+    for (const auto &attribute : xml_node.attributes()) {
+      const std::string_view raw_name(attribute.name());
+      if (raw_name == "id" || is_namespace_declaration(raw_name)) continue;
+      std::string name;
+      if (!canonical_property_name(raw_name, name))
+        return node_error(source, xml_node, UiDocumentErrorCode::InvalidProperty,
+                          "invalid component call property");
+      const auto *spec = component->second.props.property(name);
+      if (!spec)
+        return node_error(source, xml_node, UiDocumentErrorCode::InvalidProperty,
+                          "component call contains undeclared property: " + name);
+      const std::string_view raw_value(attribute.value());
+      if (raw_value.size() > limits.max_string_bytes)
+        return node_error(source, xml_node, UiDocumentErrorCode::StringLimitExceeded,
+                          "component property exceeds the string budget");
+      UiDocumentValue value;
+      if (!parse_typed_property(spec->kind, raw_value, value))
+        return node_error(source, xml_node, UiDocumentErrorCode::InvalidProperty,
+                          "component call property violates declared type: " + name);
+      if (!call.properties.emplace(name, std::move(value)).second)
+        return node_error(source, xml_node, UiDocumentErrorCode::InvalidProperty,
+                          "component call contains duplicate property: " + name);
+      call.property_spans.emplace(name, node.source);
+    }
+    if (auto error = component->second.props.validate_properties(call)) return error;
+
+    UiDocumentDefinition templ = component->second.templ;
+    std::vector<UiNodeDefinition *> stack{&templ.root};
+    while (!stack.empty()) {
+      auto *element = stack.back();
+      stack.pop_back();
+      for (auto &[key, value] : element->properties) {
+        const auto *string = std::get_if<std::string>(&value);
+        if (!string || string->rfind("$props.", 0) != 0) continue;
+        const std::string prop = string->substr(7);
+        const auto supplied = call.properties.find(prop);
+        if (!component->second.props.property(prop) ||
+            supplied == call.properties.end() ||
+            key.rfind("on.", 0) == 0 || key.rfind("bind.", 0) == 0)
+          return make_error(UiDocumentErrorCode::InvalidProperty,
+                            "invalid or unbound static component Prop: " + prop,
+                            element->source.line, element->source.column);
+        // The replacement is a typed AST value, never rendered as XML text.
+        // It cannot introduce tags, handler names or executable expressions.
+        value = supplied->second;
+      }
+      for (auto &child : element->children) stack.push_back(&child);
+    }
+    auto template_program = compile_ui_definition(std::move(templ), {}, limits);
+    if (!template_program) return template_program.error;
+    UiScopedComponent instance;
+    instance.scope = node.id;
+    instance.host_id = node.id;
+    instance.program = std::move(template_program.program);
+
+    std::unordered_set<std::string> provided_slots;
+    std::size_t ordinal = 0;
+    for (const auto &child : xml_node.children()) {
+      if (child.type() == pugi::node_pcdata || child.type() == pugi::node_cdata) {
+        if (has_non_whitespace(child.value()))
+          return node_error(source, child, UiDocumentErrorCode::InvalidNode,
+                            "component call accepts only named fill elements");
+        continue;
+      }
+      if (child.type() != pugi::node_element) continue;
+      if (ordinal >= node.children.size() ||
+          std::string_view(child.name()) != "fill" ||
+          !xml_attributes_only(child, {"name"}) ||
+          !xml_structural_children_only(child))
+        return node_error(source, child, UiDocumentErrorCode::InvalidNode,
+                          "component caller children must be named fill elements");
+      const std::string slot(child.attribute("name").value());
+      if (component->second.slots.count(slot) == 0 ||
+          !provided_slots.emplace(slot).second)
+        return node_error(source, child, UiDocumentErrorCode::DuplicateSlot,
+                          "unknown or repeated caller slot fill: " + slot);
+
+      const auto &parsed_fill = node.children[ordinal++];
+      pugi::xml_node fill_root;
+      for (const auto &candidate : child.children()) {
+        if (candidate.type() != pugi::node_element) continue;
+        if (fill_root)
+          return node_error(source, candidate, UiDocumentErrorCode::InvalidRootCount,
+                            "one named slot fill requires exactly one root element");
+        fill_root = candidate;
+      }
+      if (!fill_root || parsed_fill.children.size() != 1 ||
+          parsed_fill.properties.size() != 1 ||
+          parsed_fill.properties.count("name") != 1 ||
+          parsed_fill.properties.count("text") != 0)
+        return node_error(source, child, UiDocumentErrorCode::InvalidNode,
+                          "named slot fill must contain exactly one native XML root");
+
+      UiDocumentDefinition filled;
+      filled.name = "SlotFill";
+      filled.root = parsed_fill.children.front();
+      if (auto error = lower_xml_component_calls(
+              source, fill_root, filled.root, limits, registry,
+              catalog, instances, false))
+        return error;
+      auto compiled_fill = compile_ui_definition(std::move(filled), {}, limits);
+      if (!compiled_fill) return compiled_fill.error;
+      instance.slot_fills.push_back({slot, std::move(compiled_fill.program)});
+    }
+    if (provided_slots.size() != component->second.slots.size())
+      return node_error(source, xml_node, UiDocumentErrorCode::MissingSlot,
+                        "component call must fill each required named slot");
+
+    // Erase compile-only invocation/fill/Props nodes from the real app tree.
+    // The existing scoped assembler later appends this instance's native
+    // template, substitutes its caller roots, and revalidates one program.
+    UiNodeDefinition host;
+    host.tag = "div";
+    host.id = node.id;
+    host.source = node.source;
+    node = std::move(host);
+    instances.push_back(std::move(instance));
+    return {};
+  }
+
+  const auto *schema = registry.descriptor(node.tag);
+  if (!schema)
+    return node_error(source, xml_node, UiDocumentErrorCode::UnknownElementTag,
+                      "unknown native or declared component tag: " + node.tag);
+  // The ordinary native XML body uses the SAME typed parsing rule as #357.
+  // This normalization is only needed for documents containing components,
+  // whose compile-only invocation/fill tags were first parsed structurally.
+  for (const auto &attribute : xml_node.attributes()) {
+    const std::string_view raw_name(attribute.name());
+    if (raw_name == "id" || is_namespace_declaration(raw_name)) continue;
+    std::string canonical;
+    if (!canonical_property_name(raw_name, canonical)) continue;
+    const auto *spec = schema->property(canonical);
+    if (!spec) continue;
+    UiDocumentValue value;
+    if (!parse_typed_property(spec->kind, attribute.value(), value))
+      return node_error(source, xml_node, UiDocumentErrorCode::InvalidProperty,
+                        "native XML property violates the declared type: " + canonical);
+    node.properties[canonical] = std::move(value);
+  }
+  std::size_t ordinal = 0;
+  for (const auto &child : xml_node.children()) {
+    if (child.type() != pugi::node_element) continue;
+    if (ordinal >= node.children.size())
+      return node_error(source, child, UiDocumentErrorCode::InvalidNode,
+                        "XML node/definition child identity mismatch");
+    if (auto error = lower_xml_component_calls(
+            source, child, node.children[ordinal++], limits, registry,
+            catalog, instances, allow_calls))
+      return error;
+  }
+  if (ordinal != node.children.size())
+    return node_error(source, xml_node, UiDocumentErrorCode::InvalidNode,
+                      "XML node/definition children cannot be reconciled");
+  return {};
+}
+
+
+// A module is a source-identity-bound, immutable input supplied by the real
+// compiler host. No source lookup, path normalization, file access, native
+// loader callback, network fetch or second template engine exists here.
+bool xml_module_uri(std::string_view uri) {
+  if (uri.size() < 5 || uri.rfind("urn:", 0) != 0) return false;
+  bool segment = false;
+  for (std::size_t i = 4; i < uri.size(); ++i) {
+    const char c = uri[i];
+    if (c == ':') {
+      if (!segment) return false;
+      segment = false;
+    } else if ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
+               (c >= '0' && c <= '9') || c == '-' || c == '_') {
+      segment = true;
+    } else {
+      return false;
+    }
+  }
+  return segment;
+}
+
+bool xml_module_source_key(std::string_view name) {
+  if (name.empty() || name.front() == '/' || name.front() == '.' ||
+      name.find('\\') != std::string_view::npos) return false;
+  std::size_t begin = 0;
+  while (begin < name.size()) {
+    const auto end = name.find('/', begin);
+    const auto length = (end == std::string_view::npos ? name.size() : end) - begin;
+    if (length == 0) return false;
+    const auto segment = name.substr(begin, length);
+    if (segment == "." || segment == ".." || segment.back() == '.') return false;
+    for (const char c : segment) {
+      if (!((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
+            (c >= '0' && c <= '9') || c == '.' || c == '-' || c == '_'))
+        return false;
+    }
+    if (end == std::string_view::npos) return true;
+    begin = end + 1;
+  }
+  return false;
+}
+
+bool xml_module_version(std::string_view text) {
+  if (text.empty() || text.front() == '0') return false;
+  unsigned version = 0;
+  const auto parsed = std::from_chars(text.data(), text.data() + text.size(), version);
+  return parsed.ec == std::errc{} &&
+         parsed.ptr == text.data() + text.size() && version != 0;
+}
+
+bool xml_module_sha256(
+    std::string_view source, std::string_view hexdigest,
+    const UiXmlSha256Provider &provider) {
+  constexpr char hex[] = "0123456789abcdef";
+  if (hexdigest.size() != 64 || provider.compute == nullptr) return false;
+  std::array<std::uint8_t, 32> digest{};
+  // One required externally-owned, synchronous canonical provider. No
+  // fallback or implicit dependency on stale Crypto exports from old SDKs.
+  if (!provider.compute(source.data(), source.size(), digest.data(),
+                        provider.userdata))
+    return false;
+  for (std::size_t i = 0; i < digest.size(); ++i) {
+    if (hexdigest[i * 2] != hex[digest[i] >> 4] ||
+        hexdigest[i * 2 + 1] != hex[digest[i] & 15u]) return false;
+  }
+  return true;
+}
+
+UiDocumentError read_xml_imports(
+    std::string_view application_source, const pugi::xml_node &ui,
+    const pugi::xml_node &imports, const UiDocumentLimits &limits,
+    const WidgetRegistry &registry, const std::vector<UiXmlModuleSource> &modules,
+    const UiXmlSha256Provider &provider, XmlComponentCatalog &catalog) {
+  if (!xml_attributes_only(imports, {}) ||
+      !xml_structural_children_only(imports))
+    return node_error(application_source, imports, UiDocumentErrorCode::InvalidNode,
+                      "imports may contain only declared module references");
+  if (modules.size() > limits.max_resources || modules.size() > limits.max_nodes)
+    return node_error(application_source, imports, UiDocumentErrorCode::ResourceLimitExceeded,
+                      "source catalog exceeds the declared module count budget");
+  std::unordered_set<std::string> catalog_names;
+  for (const auto &module : modules) {
+    if (module.source.size() > limits.max_string_bytes ||
+        !xml_module_source_key(module.source) ||
+        !catalog_names.emplace(module.source).second)
+      return node_error(application_source, imports, UiDocumentErrorCode::InvalidProperty,
+                        "module source catalog must contain unique safe relative keys");
+  }
+
+  std::unordered_set<std::string> used_sources, used_uris, used_prefixes;
+  std::size_t admitted_bytes = application_source.size();
+  std::size_t import_count = 0;
+  for (const auto &entry : imports.children()) {
+    if (entry.type() != pugi::node_element) continue;
+    if (++import_count > limits.max_resources ||
+        std::string_view(entry.name()) != "import" ||
+        !xml_attributes_only(entry, {"namespace", "prefix", "source", "version", "sha256"}) ||
+        !xml_structural_children_only(entry))
+      return node_error(application_source, entry, UiDocumentErrorCode::InvalidNode,
+                        "imports require bounded standalone import declarations");
+    for (const auto &nested : entry.children()) {
+      if (nested.type() == pugi::node_element)
+        return node_error(application_source, nested, UiDocumentErrorCode::InvalidNode,
+                          "import declarations must not have children");
+    }
+    const std::string uri = entry.attribute("namespace").value();
+    const std::string prefix = entry.attribute("prefix").value();
+    const std::string source_key = entry.attribute("source").value();
+    const std::string version = entry.attribute("version").value();
+    const std::string expected_hash = entry.attribute("sha256").value();
+    if (uri.size() > limits.max_string_bytes ||
+        prefix.size() > limits.max_string_bytes ||
+        source_key.size() > limits.max_string_bytes ||
+        !xml_module_uri(uri) || !xml_component_identifier(prefix) ||
+        prefix == "xml" || prefix == "xmlns" || prefix == "on" ||
+        prefix == "bind" || prefix == "attr" || prefix == "var" ||
+        !xml_module_source_key(source_key) || !xml_module_version(version) ||
+        !used_sources.emplace(source_key).second ||
+        !used_uris.emplace(uri).second || !used_prefixes.emplace(prefix).second)
+      return node_error(application_source, entry, UiDocumentErrorCode::InvalidComponentScope,
+                        "module import requires unique namespace, prefix, version and source");
+
+    const std::string namespace_attribute = "xmlns:" + prefix;
+    std::size_t binding_count = 0;
+    for (const auto &attr : ui.attributes()) {
+      if (namespace_attribute == attr.name()) {
+        if (std::string_view(attr.value()) != uri)
+          return node_error(application_source, entry, UiDocumentErrorCode::InvalidComponentScope,
+                            "import prefix must match its application XML namespace URI");
+        ++binding_count;
+      }
+    }
+    if (binding_count != 1)
+      return node_error(application_source, entry, UiDocumentErrorCode::InvalidComponentScope,
+                        "import needs exactly one matching application xmlns binding");
+
+    const UiXmlModuleSource *selected = nullptr;
+    for (const auto &candidate : modules) {
+      if (candidate.source == source_key) {
+        selected = &candidate;
+        break;
+      }
+    }
+    if (!selected)
+      return node_error(application_source, entry, UiDocumentErrorCode::InvalidComponentScope,
+                        "import source is absent from the trusted immutable source catalog");
+    if (admitted_bytes > limits.max_source_bytes ||
+        selected->xml.size() > limits.max_source_bytes - admitted_bytes)
+      return node_error(application_source, entry, UiDocumentErrorCode::SourceTooLarge,
+                        "application and imported module sources exceed the cumulative byte budget");
+    admitted_bytes += selected->xml.size();
+    if (!xml_module_sha256(selected->xml, expected_hash, provider))
+      return node_error(application_source, entry, UiDocumentErrorCode::InvalidComponentScope,
+                        "imported module content does not match the declared SHA-256");
+
+    const auto &text = selected->xml;
+    if (text.find('\0') != std::string::npos)
+      return node_error(application_source, entry, UiDocumentErrorCode::ParseError,
+                        "module source contains an embedded NUL");
+    if (auto error = detail::validate_ui_xml_utf8(text)) {
+      error.message = "module " + source_key + ": " + error.message;
+      return error;
+    }
+    pugi::xml_document document;
+    const auto parsed = document.load_buffer(
+        text.data(), text.size(), pugi::parse_default | pugi::parse_ws_pcdata,
+        pugi::encoding_utf8);
+    if (!parsed) {
+      const auto place = detail::xml_source_span(text, parsed.offset);
+      return make_error(UiDocumentErrorCode::ParseError,
+                        "module " + source_key + ": invalid XML: " + parsed.description(),
+                        place.line, place.column);
+    }
+    const auto root = document.document_element();
+    if (!root || std::string_view(root.name()) != "module" ||
+        !xml_attributes_only(root, {"namespace", "version"}) ||
+        !xml_structural_children_only(root) ||
+        root.attribute("namespace").value() != uri ||
+        root.attribute("version").value() != version)
+      return node_error(application_source, entry, UiDocumentErrorCode::InvalidComponentScope,
+                        "module identity must match its declared namespace and exact version");
+    pugi::xml_node definitions;
+    for (const auto &part : root.children()) {
+      if (part.type() != pugi::node_element) continue;
+      if (std::string_view(part.name()) != "components" || definitions)
+        return node_error(text, part, UiDocumentErrorCode::InvalidNode,
+                          "modules accept only one components section, no recursive imports");
+      definitions = part;
+    }
+    if (!definitions)
+      return node_error(application_source, entry, UiDocumentErrorCode::InvalidNode,
+                        "imported module needs one components declaration section");
+    XmlComponentCatalog namespace_definitions;
+    if (auto error = read_xml_components(
+            text, definitions, limits, registry, namespace_definitions)) {
+      error.message = "module " + source_key + ": " + error.message;
+      return error;
+    }
+    for (auto &definition : namespace_definitions) {
+      const std::string qualified = prefix + ":" + definition.first;
+      if (qualified.size() > limits.max_string_bytes ||
+          catalog.size() >= limits.max_nodes ||
+          !catalog.emplace(qualified, std::move(definition.second)).second)
+        return node_error(application_source, entry, UiDocumentErrorCode::InvalidNode,
+                          "import collides with an existing qualified component");
+    }
+  }
+  if (used_sources.size() != modules.size())
+    return node_error(application_source, imports, UiDocumentErrorCode::InvalidComponentScope,
+                      "source catalog contains an unreferenced or unadmitted module");
+  return {};
+}
+
+XmlSource parse_xml_source(
+    std::string_view source, const UiDocumentLimits &limits,
+    const WidgetRegistry *registry = nullptr,
+    const std::vector<UiXmlModuleSource> *modules = nullptr,
+    const UiXmlSha256Provider *provider = nullptr) {
   XmlSource result;
   if (source.size() > limits.max_source_bytes) {
     result.error =
@@ -396,6 +1084,8 @@ XmlSource parse_xml_source(std::string_view source, const UiDocumentLimits &limi
   }
 
   pugi::xml_node widget_root;
+  pugi::xml_node components_root;
+  pugi::xml_node imports_root;
   bool saw_resources = false;
   for (const auto &child : ui.children()) {
     if (child.type() == pugi::node_pcdata || child.type() == pugi::node_cdata) {
@@ -409,7 +1099,21 @@ XmlSource parse_xml_source(std::string_view source, const UiDocumentLimits &limi
     if (child.type() != pugi::node_element) {
       continue;
     }
-    if (std::string_view(child.name()) == "resources") {
+    if (std::string_view(child.name()) == "imports" && modules != nullptr) {
+      if (imports_root) {
+        result.error = node_error(source, child, UiDocumentErrorCode::InvalidRootCount,
+                                  "UI XML may declare one imports section");
+        return result;
+      }
+      imports_root = child;
+    } else if (std::string_view(child.name()) == "components" && registry != nullptr) {
+      if (components_root) {
+        result.error = node_error(source, child, UiDocumentErrorCode::InvalidRootCount,
+                                  "UI XML may declare one components section");
+        return result;
+      }
+      components_root = child;
+    } else if (std::string_view(child.name()) == "resources") {
       if (saw_resources) {
         result.error = node_error(source, child, UiDocumentErrorCode::InvalidRootCount,
                                   "UI XML may contain at most one resources section");
@@ -436,8 +1140,40 @@ XmlSource parse_xml_source(std::string_view source, const UiDocumentLimits &limi
 
   std::size_t node_count = 0;
   std::unordered_set<std::string> ids;
-  result.error =
-      parse_widget_node(source, widget_root, limits, 1, node_count, ids, result.definition.root);
+  // Components are compile-only declarations. Only the registry-aware
+  // frontend admits them; the legacy XML frontend remains unchanged.
+  XmlComponentCatalog components;
+  if (imports_root) {
+    if (provider == nullptr || provider->compute == nullptr) {
+      result.error = node_error(
+          source, imports_root, UiDocumentErrorCode::InvalidComponentScope,
+          "imported modules require an explicit trusted SHA-256 host provider");
+      return result;
+    }
+    if (auto error = read_xml_imports(
+            source, ui, imports_root, limits, *registry, *modules,
+            *provider, components)) {
+      result.error = std::move(error);
+      return result;
+    }
+  } else if (modules != nullptr && !modules->empty()) {
+    result.error = node_error(source, ui, UiDocumentErrorCode::InvalidComponentScope,
+                              "supplied immutable module catalog needs explicit XML imports");
+    return result;
+  }
+  if (components_root) {
+    result.error = read_xml_components(source, components_root, limits, *registry, components);
+    if (result.error) return result;
+  }
+  result.error = parse_widget_node(source, widget_root, limits,
+                                   (components_root || imports_root) ? nullptr : registry,
+                                   1, node_count, ids, result.definition.root);
+  if (result.error) return result;
+  if (components_root || imports_root) {
+    result.error = lower_xml_component_calls(
+        source, widget_root, result.definition.root, limits, *registry,
+        components, result.scoped_components, true);
+  }
   return result;
 }
 
@@ -462,6 +1198,48 @@ UiDocumentCompileResult compile_ui_xml(std::string_view source, const UiDocument
     return {{}, std::move(parsed.error)};
   }
   return compile_ui_definition(std::move(parsed.definition), std::move(parsed.resources), limits);
+}
+
+UiDocumentCompileResult compile_ui_xml(std::string_view source,
+                                       const WidgetRegistry &registry,
+                                       const UiDocumentLimits &limits) {
+  auto parsed = parse_xml_source(source, limits, &registry);
+  if (!parsed) return {{}, std::move(parsed.error)};
+  auto compiled = compile_ui_definition(std::move(parsed.definition),
+                                        std::move(parsed.resources), limits);
+  if (!compiled) return compiled;
+  if (!parsed.scoped_components.empty())
+    return compile_scoped_ui_components(*compiled.program,
+                                        parsed.scoped_components, registry, limits);
+  if (auto error = registry.validate(*compiled.program, limits))
+    return {{}, std::move(error)};
+  return compiled;
+}
+
+UiDocumentParseResult parse_ui_xml(std::string_view source,
+                                   const WidgetRegistry &registry,
+                                   const UiDocumentLimits &limits) {
+  auto compiled = compile_ui_xml(source, registry, limits);
+  if (!compiled) return {{}, std::move(compiled.error)};
+  return {std::make_shared<const UiDocumentDefinition>(compiled.program->definition()), {}};
+}
+
+UiDocumentCompileResult compile_ui_xml(
+    std::string_view source, const WidgetRegistry &registry,
+    const std::vector<UiXmlModuleSource> &modules,
+    const UiXmlSha256Provider &provider,
+    const UiDocumentLimits &limits) {
+  auto parsed = parse_xml_source(source, limits, &registry, &modules, &provider);
+  if (!parsed) return {{}, std::move(parsed.error)};
+  auto compiled = compile_ui_definition(
+      std::move(parsed.definition), std::move(parsed.resources), limits);
+  if (!compiled) return compiled;
+  if (!parsed.scoped_components.empty())
+    return compile_scoped_ui_components(
+        *compiled.program, parsed.scoped_components, registry, limits);
+  if (auto error = registry.validate(*compiled.program, limits))
+    return {{}, std::move(error)};
+  return compiled;
 }
 
 } // namespace flexUI
